@@ -1,0 +1,14 @@
+{
+  "name": "ai-sdlc",
+  "owner": {
+    "name": "rezar-84",
+    "url": "https://github.com/rezar-84/nuhut.ai"
+  },
+  "plugins": [
+    {
+      "name": "ai-sdlc",
+      "source": "./",
+      "description": "Agent SDLC kit: risk tiers, 16 role-review playbooks, the Measured evidence doctrine, 25 artifact templates, and the commands and skills that drive them. Install the documentation into a project with ./install.sh."
+    }
+  ]
+}

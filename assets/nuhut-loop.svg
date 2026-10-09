@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 262" width="960" height="262" role="img" aria-labelledby="t d">
+  <title id="t">The Nuhut change lifecycle</title>
+  <desc id="d">Every change moves through Frame, Plan, Design review, Build, Verify, Ship review, Log and Close. The two reviews and Verify are gates. Findings, incidents and lessons return to Frame as new work items.</desc>
+  <style>
+    text { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .node { fill: #F6F8FA; stroke: #D0D7DE; }
+    .gate { fill: #FFF8E6; stroke: #C98A1B; }
+    .label { fill: #1F2328; font-size: 13px; font-weight: 700; letter-spacing: .4px; }
+    .art { fill: #57606A; font-size: 12px; }
+    .gtag { fill: #9A6700; font-size: 11px; font-weight: 700; letter-spacing: .6px; }
+    .line { stroke: #8C959F; fill: none; }
+    .head { fill: #8C959F; }
+    .loop { stroke: #2F8F5B; fill: none; }
+    .loophead { fill: #2F8F5B; }
+    .note { fill: #2F6F4B; font-size: 13px; }
+    .title { fill: #1F2328; font-size: 15px; font-weight: 700; }
+    @media (prefers-color-scheme: dark) {
+      .node { fill: #161B22; stroke: #30363D; }
+      .gate { fill: #2A2111; stroke: #D29922; }
+      .label, .title { fill: #E6EDF3; }
+      .art { fill: #9DA7B3; }
+      .gtag { fill: #E3B341; }
+      .line { stroke: #6E7681; } .head { fill: #6E7681; }
+      .loop { stroke: #3FB950; } .loophead { fill: #3FB950; }
+      .note { fill: #56D364; }
+    }
+  </style>
+  <text class="title" x="12" y="24">Every change, the same path. The depth scales with risk; the evidence never does.</text>
+  <rect class="node" x="12" y="64" width="106" height="64" rx="10" stroke-width="1.5"/>
+  <text class="label" x="65.0" y="101" text-anchor="middle">FRAME</text>
+  <text class="art" x="65.0" y="148" text-anchor="middle">ID + risk tier</text>
+  <path class="line" stroke-width="1.5" d="M120 96.0 L124 96.0"/>
+  <path class="head" d="M128 96.0 L122 92.0 L122 100.0 Z"/>
+  <rect class="node" x="130" y="64" width="106" height="64" rx="10" stroke-width="1.5"/>
+  <text class="label" x="183.0" y="101" text-anchor="middle">PLAN</text>
+  <text class="art" x="183.0" y="148" text-anchor="middle">plan.md</text>
+  <path class="line" stroke-width="1.5" d="M238 96.0 L242 96.0"/>
+  <path class="head" d="M246 96.0 L240 92.0 L240 100.0 Z"/>
+  <rect class="gate" x="248" y="64" width="106" height="64" rx="10" stroke-width="1.5"/>
+  <text class="gtag" x="301.0" y="56" text-anchor="middle">GATE</text>
+  <text class="label" x="301.0" y="93" text-anchor="middle">DESIGN</text>
+  <text class="label" x="301.0" y="110" text-anchor="middle">REVIEW</text>
+  <text class="art" x="301.0" y="148" text-anchor="middle">role verdicts</text>
+  <path class="line" stroke-width="1.5" d="M356 96.0 L360 96.0"/>
+  <path class="head" d="M364 96.0 L358 92.0 L358 100.0 Z"/>
+  <rect class="node" x="366" y="64" width="106" height="64" rx="10" stroke-width="1.5"/>
+  <text class="label" x="419.0" y="101" text-anchor="middle">BUILD</text>
+  <text class="art" x="419.0" y="148" text-anchor="middle">the diff</text>
+  <path class="line" stroke-width="1.5" d="M474 96.0 L478 96.0"/>
+  <path class="head" d="M482 96.0 L476 92.0 L476 100.0 Z"/>
+  <rect class="gate" x="484" y="64" width="106" height="64" rx="10" stroke-width="1.5"/>
+  <text class="gtag" x="537.0" y="56" text-anchor="middle">GATE</text>
+  <text class="label" x="537.0" y="101" text-anchor="middle">VERIFY</text>
+  <text class="art" x="537.0" y="148" text-anchor="middle">real command output</text>
+  <path class="line" stroke-width="1.5" d="M592 96.0 L596 96.0"/>
+  <path class="head" d="M600 96.0 L594 92.0 L594 100.0 Z"/>
+  <rect class="gate" x="602" y="64" width="106" height="64" rx="10" stroke-width="1.5"/>
+  <text class="gtag" x="655.0" y="56" text-anchor="middle">GATE</text>
+  <text class="label" x="655.0" y="93" text-anchor="middle">SHIP</text>
+  <text class="label" x="655.0" y="110" text-anchor="middle">REVIEW</text>
+  <text class="art" x="655.0" y="148" text-anchor="middle">conformance + roles</text>
+  <path class="line" stroke-width="1.5" d="M710 96.0 L714 96.0"/>
+  <path class="head" d="M718 96.0 L712 92.0 L712 100.0 Z"/>
+  <rect class="node" x="720" y="64" width="106" height="64" rx="10" stroke-width="1.5"/>
+  <text class="label" x="773.0" y="101" text-anchor="middle">LOG</text>
+  <text class="art" x="773.0" y="148" text-anchor="middle">worklog entry</text>
+  <path class="line" stroke-width="1.5" d="M828 96.0 L832 96.0"/>
+  <path class="head" d="M836 96.0 L830 92.0 L830 100.0 Z"/>
+  <rect class="node" x="838" y="64" width="106" height="64" rx="10" stroke-width="1.5"/>
+  <text class="label" x="891.0" y="101" text-anchor="middle">CLOSE</text>
+  <text class="art" x="891.0" y="148" text-anchor="middle">backlog, ADRs, docs</text>
+  <path class="loop" stroke-width="2" stroke-dasharray="6 5" d="M891.0 160 L891.0 218 L65.0 218 L65.0 168"/>
+  <path class="loophead" d="M65.0 160 L59.0 170 L71.0 170 Z"/>
+  <text class="note" x="480.0" y="242" text-anchor="middle">Findings, incidents and repeated review mistakes come back as new work items</text>
+</svg>

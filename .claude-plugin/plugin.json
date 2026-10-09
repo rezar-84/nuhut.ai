@@ -1,0 +1,25 @@
+{
+  "name": "ai-sdlc",
+  "description": "Make a coding agent work like a delivery team: risk tiers, role reviews, an evidence doctrine that covers measured results, and traceability. Provides the /sdlc-* commands; run ./install.sh to install the documentation kit and the per-project skills into a repository.",
+  "version": "3.4.1",
+  "author": {
+    "name": "rezar-84",
+    "url": "https://github.com/rezar-84/nuhut.ai"
+  },
+  "homepage": "https://github.com/rezar-84/nuhut.ai",
+  "license": "MIT",
+  "keywords": [
+    "sdlc",
+    "process",
+    "code-review",
+    "evidence",
+    "traceability",
+    "governance",
+    "spec-driven",
+    "mlops",
+    "data-engineering",
+    "performance",
+    "multi-agent"
+  ],
+  "commands": "./optional/claude-commands"
+}

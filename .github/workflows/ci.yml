@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.8", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Compile
+        run: python -m py_compile install.py validate.py tests/smoke.py optional/runtime/sdlc.py optional/runtime/view.py benchmarks/lib/scoring.py benchmarks/effort-modes/score.py benchmarks/kit-value/*.py
+      - name: Validate kit
+        run: python validate.py
+      - name: Run installer smoke tests
+        run: python tests/smoke.py

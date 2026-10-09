@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 200" width="640" height="200" role="img" aria-labelledby="t d">
+  <title id="t">Nuhut</title>
+  <desc id="d">A chickpea with a green check mark, next to the word Nuhut.</desc>
+  <style>
+    .pea { fill: #E9C98E; stroke: #B8843E; }
+    .seam { fill: none; stroke: #B8843E; }
+    .shine { fill: #FFF3DA; opacity: .75; }
+    .face { fill: #5A3B17; }
+    .smile { fill: none; stroke: #5A3B17; }
+    .word { fill: #1F2328; }
+    .tag { fill: #57606A; }
+    @media (prefers-color-scheme: dark) {
+      .word { fill: #E6EDF3; }
+      .tag { fill: #9DA7B3; }
+      .pea { stroke: #D9A962; }
+    }
+  </style>
+  <g transform="translate(8 4)">
+    <path class="pea" stroke-width="4" stroke-linejoin="round"
+      d="M100 32 C60 32 30 64 32 104 C34 147 70 174 108 172 C148 170 172 138 170 100
+         C168 66 146 42 122 36 C118 27 112 19 103 16 C106 23 104 28 100 32 Z"/>
+    <path class="seam" stroke-width="3" stroke-linecap="round" d="M101 33 C95 55 97 74 110 90"/>
+    <ellipse class="shine" cx="64" cy="82" rx="12" ry="22" transform="rotate(24 64 82)"/>
+    <circle class="face" cx="84" cy="108" r="6"/>
+    <circle class="face" cx="124" cy="108" r="6"/>
+    <path class="smile" stroke-width="4" stroke-linecap="round" d="M90 128 Q104 140 118 128"/>
+    <circle cx="158" cy="152" r="23" fill="#2F8F5B"/>
+    <path d="M147 152 L155 160 L170 143" fill="none" stroke="#FFFFFF" stroke-width="5"
+      stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text class="word" x="222" y="108" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+    font-size="72" font-weight="700" letter-spacing="-1">Nuhut</text>
+  <text class="tag" x="225" y="146" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
+    font-size="20">Evidence-first delivery for AI coding agents</text>
+</svg>
