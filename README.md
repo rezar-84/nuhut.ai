@@ -214,8 +214,14 @@ installs only the skills that do not depend on an answer. The target directory i
 in this mode — without a terminal there is nobody to ask. Other flags: `--docs-dir <name>`
 to install the docs under a different directory, `--harness <list>`, `--profile
 <full|compact>`, `--effort-mode <lean|normal|beast>`, `--acquisition-profile
-<standard|advanced>`, `--hooks`, `--create`, `--no-skills`, `--dry-run`, `--lang <code>`,
+<standard|advanced>`, `--hooks`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`, `--lang <code>`,
 `--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`, and `--upgrade`.
+
+### Ignoring runtime tools in Git
+
+For teams or developers using the kit locally on shared codebases without committing runtime tooling:
+- `--gitignore-tools`: appends `.ai-sdlc/` to the project's root `.gitignore` so runtime scripts, manifests, and local viewer caches stay uncommitted.
+- `--git-exclude`: appends `.ai-sdlc/` to `.git/info/exclude` (local stealth mode: leaves `.gitignore` completely untouched for team pull requests).
 
 ### Deployment platforms
 

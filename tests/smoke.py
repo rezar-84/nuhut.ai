@@ -245,6 +245,29 @@ def test_custom_docs_dir():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_gitignore_options():
+    print("--gitignore-tools and --git-exclude")
+    d = tempfile.mkdtemp(prefix="sdlc-gi-")
+    code, out = run([d, "GIT", "-y", "--gitignore-tools"])
+    check("--gitignore-tools exits 0", code == 0, out[-300:])
+    gi_path = os.path.join(d, ".gitignore")
+    check(".gitignore created", os.path.isfile(gi_path))
+    check(".ai-sdlc/ ignored in .gitignore", ".ai-sdlc/" in read(d, ".gitignore"))
+    code, out = run([d, "GIT", "-y", "--gitignore-tools"])
+    check("re-running --gitignore-tools is idempotent", read(d, ".gitignore").count(".ai-sdlc/") == 1)
+    shutil.rmtree(d, ignore_errors=True)
+
+    d = tempfile.mkdtemp(prefix="sdlc-ge-")
+    subprocess.run(["git", "init", d], check=True, stdout=subprocess.DEVNULL)
+    code, out = run([d, "GIT", "-y", "--git-exclude"])
+    check("--git-exclude exits 0", code == 0, out[-300:])
+    ex_path = os.path.join(d, ".git", "info", "exclude")
+    check(".git/info/exclude has .ai-sdlc/", os.path.isfile(ex_path) and ".ai-sdlc/" in read(d, ".git/info/exclude"))
+    code, out = run([d, "GIT", "-y", "--git-exclude"])
+    check("re-running --git-exclude is idempotent", read(d, ".git/info/exclude").count(".ai-sdlc/") == 1)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_managed_upgrade():
     print("managed upgrade")
     d = tempfile.mkdtemp(prefix="sdlc-upgrade-")
@@ -1707,7 +1730,7 @@ def test_epics():
 
 def main():
     for test in (test_guards, test_non_interactive, test_dry_run,
-                 test_custom_docs_dir, test_managed_upgrade, test_command_detection,
+                 test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_runtime, test_view, test_kit_value_benchmark,
                  test_dashboard,

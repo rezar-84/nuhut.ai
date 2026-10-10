@@ -183,6 +183,9 @@ EN = {
     "l.docsdir": "Docs directory",
     "l.commands": "Slash commands",
     "q.commands": "Install the five /sdlc-* slash commands?",
+    "q.gitignore_tools": "Ignore AI SDLC runtime tools (.ai-sdlc/) in .gitignore?",
+    "h.gitignore_tools": "Appends .ai-sdlc/ to the repository's .gitignore so runtime scripts, manifests, and local viewer caches are not committed to git.",
+    "l.gitignore_tools": "Ignore tools in git",
     "q.skills": "Install the ticked skills? (y = yes, e = choose each, n = none)",
 
     "hint.detected": "read from the repository -- confirm, do not assume:",
@@ -341,6 +344,10 @@ USAGE = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      unmanaged -- sections 1-8 of AGENTS.md and the /sdlc-* commands.
                      The previous copies are backed up first. Needed once per project
                      installed before 3.3; the upgrade says when.
+  --gitignore-tools  append .ai-sdlc/ to the project's root .gitignore so kit
+                     tools, runtime binaries, and local viewer state are ignored.
+  --git-exclude      append .ai-sdlc/ to .git/info/exclude (local stealth mode:
+                     leaves .gitignore untracked and clean for team repositories).
   --dry-run          list what would be written, write nothing
   --lang <code>      language for this setup's own prompts (default: en)
   --upgrade          refresh manifest-owned portable docs and installed skills. Stops
@@ -362,6 +369,8 @@ class Options(object):
         self.scaffold_ci = ""
         self.create = False
         self.dry_run = False
+        self.gitignore_tools = False
+        self.git_exclude = False
         self.harnesses = None   # None: not given; [] : only native harnesses named
         self.profile = "full"
         self.effort_mode = "normal"
@@ -475,6 +484,10 @@ def parse_args(argv):
             o.create = True
         elif arg == "--dry-run":
             o.dry_run = True
+        elif arg == "--gitignore-tools":
+            o.gitignore_tools = True
+        elif arg == "--git-exclude":
+            o.git_exclude = True
         elif arg.startswith("-"):
             sys.stderr.write("unknown option: %s\n" % arg)
             usage()
@@ -2401,6 +2414,8 @@ def build_steps(w):
         Step("docsdir", "sec.install", "text", "q.docsdir", default=default_docsdir, label="l.docsdir",
              validate=validate_docsdir),
         Step("commands", "sec.install", "yesno", "q.commands", default=True, label="l.commands"),
+        Step("gitignore_tools", "sec.install", "yesno", "q.gitignore_tools", help="h.gitignore_tools",
+             default=lambda w: bool(w.o.gitignore_tools), label="l.gitignore_tools"),
         Step("skills_ok", "sec.install", "key", "q.skills", options="yen", default="y",
              before=show_skills, after=after_skills_ok),
     ]
@@ -3094,6 +3109,77 @@ class Installer(object):
               % ("merge         " if added else "unchanged     ", added,
                  "" if added == 1 else "s"))
 
+    def apply_git_ignores(self):
+        want_gitignore = bool(self.w.a.get("gitignore_tools") if getattr(self.w, "interactive", False) else self.o.gitignore_tools)
+        want_exclude = bool(self.o.git_exclude)
+
+        if want_gitignore:
+            gi_path = ensure_inside(self.target, self.target / ".gitignore")
+            already = False
+            content = ""
+            if gi_path.exists():
+                try:
+                    content = gi_path.read_text(encoding="utf-8")
+                    for line in content.splitlines():
+                        if re.match(r"^\s*(\/)?\.ai-sdlc(\/)?\s*$", line):
+                            already = True
+                            break
+                except (IOError, OSError):
+                    pass
+            if already:
+                self.skipped += 1
+                print("  skip (exists)  .ai-sdlc/ already in %s" % self.rel(gi_path))
+            elif self.o.dry_run:
+                self.added += 1
+                print("  would ignore   .ai-sdlc/ in %s" % self.rel(gi_path))
+            else:
+                entry = ("\n" if content and not content.endswith("\n") else "") + "# Nuhut AI SDLC tools and runtime\n.ai-sdlc/\n"
+                atomic_write_text(gi_path, content + entry)
+                self.added += 1
+                print("  gitignore      .ai-sdlc/ (added to %s)" % self.rel(gi_path))
+
+        if want_exclude:
+            git_dir = self.target / ".git"
+            ex_path = None
+            if git_dir.is_dir():
+                ex_path = git_dir / "info" / "exclude"
+            elif git_dir.is_file():
+                try:
+                    txt = git_dir.read_text(encoding="utf-8").strip()
+                    if txt.startswith("gitdir:"):
+                        gd = Path(txt[7:].strip())
+                        if not gd.is_absolute():
+                            gd = (self.target / gd).resolve()
+                        ex_path = gd / "info" / "exclude"
+                except (IOError, OSError):
+                    pass
+            if ex_path is not None:
+                already = False
+                content = ""
+                if ex_path.exists():
+                    try:
+                        content = ex_path.read_text(encoding="utf-8")
+                        for line in content.splitlines():
+                            if re.match(r"^\s*(\/)?\.ai-sdlc(\/)?\s*$", line):
+                                already = True
+                                break
+                    except (IOError, OSError):
+                        pass
+                if already:
+                    self.skipped += 1
+                    print("  skip (exists)  .ai-sdlc/ already in %s" % self.rel(ex_path))
+                elif self.o.dry_run:
+                    self.added += 1
+                    print("  would exclude  .ai-sdlc/ in %s" % self.rel(ex_path))
+                else:
+                    ex_path.parent.mkdir(parents=True, exist_ok=True)
+                    entry = ("\n" if content and not content.endswith("\n") else "") + "# Nuhut AI SDLC tools and runtime\n.ai-sdlc/\n"
+                    atomic_write_text(ex_path, content + entry)
+                    self.added += 1
+                    print("  git-exclude    .ai-sdlc/ (added to %s)" % self.rel(ex_path))
+            elif not self.o.dry_run:
+                sys.stderr.write("warning: --git-exclude requested but %s is not a git repository\n" % self.target)
+
     # -- the dashboard's state ------------------------------------------------
     def read_installed(self, rel):
         path = self.target / self.docs / rel
@@ -3293,6 +3379,8 @@ class Installer(object):
             "harnesses": sorted(self.wired),
             "platform": w.a.get("platform", "") if w.a.get("platform", "none") != "none" else "",
             "deploy_platforms": installed_platforms(self.target, self.docs, self.platforms),
+            "gitignore_tools": bool(w.a.get("gitignore_tools") if getattr(w, "interactive", False) else self.o.gitignore_tools),
+            "git_exclude": bool(self.o.git_exclude),
             "detected": {
                 "adapters": d.adapters,
                 "languages": d.lang,
@@ -3924,6 +4012,7 @@ def upgrade(target, o):
         if repaired:
             print("  update         .claude/settings.json (%d hook command%s anchored on "
                   "$CLAUDE_PROJECT_DIR)" % (repaired, "" if repaired == 1 else "s"))
+        inst.apply_git_ignores()
     except Exception as exc:
         for rel, data in originals.items():
             path = target / rel
@@ -4124,6 +4213,7 @@ def main(argv):
         tailored = inst.tailor()
         inst.scaffold()
         inst.install_hooks()
+        inst.apply_git_ignores()
         inst.record_manifest()
         inst.write_dashboard_state()
         inst.write_profile()

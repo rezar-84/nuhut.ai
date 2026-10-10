@@ -4,6 +4,14 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Gitignore options for runtime tooling (`--gitignore-tools`, `--git-exclude`):**
+  - `--gitignore-tools`: appends `.ai-sdlc/` to the project's root `.gitignore` so kit
+    runtime binaries, manifests, and local viewer caches are not committed to git.
+  - `--git-exclude`: appends `.ai-sdlc/` to `.git/info/exclude` (local stealth mode:
+    keeps `.gitignore` untouched for pull requests on team codebases).
+  - The setup wizard gains an interactive prompt under `What to install`.
+  - Re-running or upgrading is idempotent and never creates duplicate entries.
+
 - **Epics, an opt-in development method:**
   - **Item** (the default, unchanged) works one item at a time.
   - **Epic** plans several items together. It needs one human approval for the plan and
