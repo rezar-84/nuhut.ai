@@ -137,11 +137,12 @@
   select, .filters input { font: inherit; padding: 3px 6px; border-radius: 6px;
     border: 1px solid var(--line); background: var(--bg); color: var(--text); }
   .board { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; padding-bottom: 8px; }
-  .colm { flex: 0 0 250px; background: var(--panel); border: 1px solid var(--line);
+  .colm { flex: 0 0 270px; width: 270px; min-width: 0; max-width: 270px; box-sizing: border-box; background: var(--panel); border: 1px solid var(--line);
     border-radius: 8px; padding: 8px; min-height: 80px; }
+  .colm-body { width: 100%; min-width: 0; box-sizing: border-box; }
   .colm h3 { margin: 0 0 8px; font-size: 13px; display: flex; justify-content: space-between;
-    border-top: 3px solid var(--c-Other); padding-top: 6px; align-items: center; }
-  .colm.collapsed { flex: 0 0 38px; cursor: pointer; user-select: none; padding: 8px 4px; }
+    border-top: 3px solid var(--c-Other); padding-top: 6px; align-items: center; min-width: 0; overflow: hidden; }
+  .colm.collapsed { flex: 0 0 38px; width: 38px; min-width: 38px; max-width: 38px; box-sizing: border-box; cursor: pointer; user-select: none; padding: 8px 4px; }
   .colm.collapsed:hover { background: var(--chip); }
   .colm.collapsed .colm-body { display: none; }
   .colm.collapsed h3 { writing-mode: vertical-rl; transform: rotate(180deg); margin: 0; padding: 8px 2px;
@@ -149,9 +150,11 @@
   .colm .col-collapse-btn { background: none; border: none; font-size: 11px; cursor: pointer; color: var(--muted); padding: 0 4px; }
   .colm .col-collapse-btn:hover { color: var(--text); }
   .card { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
-    padding: 6px 8px; margin-bottom: 6px; transition: border-color .15s ease, box-shadow .15s ease; }
+    padding: 6px 8px; margin-bottom: 6px; transition: border-color .15s ease, box-shadow .15s ease;
+    box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; }
   .card:hover { border-color: var(--link); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-  .card .t { margin: 2px 0 4px; }
+  .card .t { margin: 2px 0 4px; overflow-wrap: break-word; word-break: break-word; word-wrap: break-word; hyphens: auto; line-height: 1.35; }
+  .card .chip { max-width: 100%; white-space: normal; overflow-wrap: break-word; word-break: break-word; }
   .card.blocked { border-left: 3px solid var(--bad); }
   .card-pips { display: flex; gap: 3px; margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--line); }
   .card-pip { flex: 1; height: 3px; border-radius: 2px; background: var(--line); }
@@ -2165,9 +2168,9 @@
         if (e.target.tagName !== "A") openItemDrawer(id);
       } }
     }, [
-      el("div", { style: "display: flex; justify-content: space-between; align-items: baseline;" }, [
-        itemLink(id),
-        el("span", { cls: "muted", style: "font-size: 11px;", text: stepsDone + "/" + M.steps.length })
+      el("div", { style: "display: flex; justify-content: space-between; align-items: baseline; min-width: 0; gap: 6px;" }, [
+        el("span", { style: "overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 600;" }, [itemLink(id)]),
+        el("span", { cls: "muted", style: "font-size: 11px; flex-shrink: 0;", text: stepsDone + "/" + M.steps.length })
       ]),
       el("div", { cls: "t", text: clip(it.title, 110) }),
       el("div", { style: "display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;" }, [
