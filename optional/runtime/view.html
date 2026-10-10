@@ -192,7 +192,12 @@
   .doc h2 { font-size: 17px; } .doc h3 { font-size: 15px; } .doc h4 { font-size: 14px; }
   .doc code, .entry code { background: var(--chip); padding: 0 4px; border-radius: 4px; font-size: 12px; }
   .doc blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
-  .flash { outline: 2px solid var(--accent); }
+  @keyframes itemHighlightPulse {
+    0% { box-shadow: 0 0 0 0 rgba(79, 142, 247, 0.85); outline: 2px solid var(--accent); }
+    40% { box-shadow: 0 0 0 10px rgba(79, 142, 247, 0.25); outline: 3px solid var(--accent); }
+    100% { box-shadow: 0 0 0 0 rgba(79, 142, 247, 0); outline: 2px solid var(--accent); }
+  }
+  .flash { outline: 2px solid var(--accent); animation: itemHighlightPulse 2s ease-out; }
   /* Code blocks */
   .codeblock { margin: 8px 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
   .codeblock-hdr { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px;
@@ -2152,6 +2157,8 @@
     });
 
     var c = el("div", {
+      id: "card-" + id,
+      "data-id": id,
       cls: "card" + (open.length && it.column !== "Done" ? " blocked" : ""),
       style: "cursor: pointer;",
       on: { click: function (e) {
@@ -2195,7 +2202,7 @@
     return copy;
   }
 
-  function renderColumn(c, itemIds) {
+  function renderColumn(c, itemIds, onToggle) {
     var isCollapsed = !!COLLAPSED_COLS[c];
     var hd = el("h3", null, [
       el("span", { text: c }),
@@ -2207,7 +2214,8 @@
         on: { click: function (e) {
           e.stopPropagation();
           COLLAPSED_COLS[c] = !isCollapsed;
-          render();
+          if (typeof onToggle === "function") onToggle();
+          else render();
         } }
       })
     ]);
@@ -2218,7 +2226,11 @@
       cls: "colm" + (isCollapsed ? " collapsed" : ""),
       title: isCollapsed ? "Click to expand " + c : "",
       on: { click: function () {
-        if (isCollapsed) { COLLAPSED_COLS[c] = false; render(); }
+        if (isCollapsed) {
+          COLLAPSED_COLS[c] = false;
+          if (typeof onToggle === "function") onToggle();
+          else render();
+        }
       } }
     }, [hd]);
 
@@ -2276,6 +2288,8 @@
       }
 
       var tr = el("tr", {
+        id: "row-" + id,
+        "data-id": id,
         cls: "board-table-row",
         style: "cursor: pointer;",
         on: { click: function (e) {
@@ -2300,18 +2314,34 @@
     return el("div", { cls: "wrap" }, [t]);
   }
 
-  function viewBoard() {
+  function viewBoard(focusId, stageFilter) {
     tab("board");
     crumbs([[M.project || "Project", "map"], ["Board"]]);
     main.appendChild(h(1, "Board"));
 
     FILTER.view = FILTER.view || "kanban";
 
+    // If an item to focus is specified, ensure it is not hidden by filters/collapses
+    if (focusId && ITEMS[focusId]) {
+      var targetItem = ITEMS[focusId];
+      if (targetItem.column === "Dropped") FILTER.dropped = true;
+      if (COLLAPSED_COLS[targetItem.column]) COLLAPSED_COLS[targetItem.column] = false;
+      if (FILTER.text && (focusId + " " + (targetItem.title || "")).toLowerCase().indexOf(FILTER.text.toLowerCase()) < 0) {
+        FILTER.text = "";
+      }
+      if (FILTER.owner && targetItem.owner && FILTER.owner !== targetItem.owner) {
+        FILTER.owner = "";
+      }
+      if (FILTER.tier && targetItem.tier && FILTER.tier !== targetItem.tier) {
+        FILTER.tier = "";
+      }
+    }
+
     var owners = {}, tiers = {};
     M.order.forEach(function (id) { if (ITEMS[id].owner) owners[ITEMS[id].owner] = 1; if (ITEMS[id].tier) tiers[ITEMS[id].tier] = 1; });
 
     function sel(key, label, values) {
-      var s = el("select", { "aria-label": label, on: { change: function () { FILTER[key] = s.value; render(); } } },
+      var s = el("select", { "aria-label": label, on: { change: function () { FILTER[key] = s.value; updateBoardContent(); } } },
         [el("option", { value: "", text: "All " + label })].concat(Object.keys(values).sort().map(function (v) {
           var o = el("option", { value: v, text: v });
           if (FILTER[key] === v) o.selected = true;
@@ -2326,13 +2356,13 @@
     }
     groupOpts.push(el("option", { value: "owner", text: "Group: By Owner Role" }));
     groupOpts.push(el("option", { value: "tier", text: "Group: By Risk Tier" }));
-    var groupSel = el("select", { "aria-label": "Group by", on: { change: function () { FILTER.group = groupSel.value; render(); } } }, groupOpts);
+    var groupSel = el("select", { "aria-label": "Group by", on: { change: function () { FILTER.group = groupSel.value; updateBoardContent(); } } }, groupOpts);
     if (FILTER.group === "epic" && (!M.epics || !M.epics.length)) {
       FILTER.group = "none";
     }
     groupSel.value = FILTER.group;
 
-    var sortSel = el("select", { "aria-label": "Sort by", on: { change: function () { FILTER.sort = sortSel.value; render(); } } }, [
+    var sortSel = el("select", { "aria-label": "Sort by", on: { change: function () { FILTER.sort = sortSel.value; updateBoardContent(); } } }, [
       el("option", { value: "default", text: "Sort: Backlog order" }),
       el("option", { value: "tier", text: "Sort: Tier (Tier 1 first)" }),
       el("option", { value: "title", text: "Sort: Title (A-Z)" }),
@@ -2341,22 +2371,31 @@
     sortSel.value = FILTER.sort;
 
     var text = el("input", { type: "search", placeholder: "Filter titles or IDs", value: FILTER.text,
-      on: { input: function () { FILTER.text = text.value; render(); } } });
-    var dropped = el("input", { type: "checkbox", id: "dropped", on: { change: function () { FILTER.dropped = dropped.checked; render(); } } });
+      on: { input: function () { FILTER.text = text.value; updateBoardContent(); } } });
+    var dropped = el("input", { type: "checkbox", id: "dropped", on: { change: function () { FILTER.dropped = dropped.checked; updateBoardContent(); } } });
     dropped.checked = FILTER.dropped;
 
-    var viewSwitcher = el("div", { cls: "view-segmented" }, [
-      el("button", {
-        cls: (FILTER.view !== "table" ? "active" : ""),
-        text: "📋 Kanban Columns",
-        on: { click: function () { FILTER.view = "kanban"; render(); } }
-      }),
-      el("button", {
-        cls: (FILTER.view === "table" ? "active" : ""),
-        text: "📄 Interactive Table",
-        on: { click: function () { FILTER.view = "table"; render(); } }
-      })
-    ]);
+    var btnKanban = el("button", {
+      cls: (FILTER.view !== "table" ? "active" : ""),
+      text: "📋 Kanban Columns",
+      on: { click: function () {
+        FILTER.view = "kanban";
+        btnKanban.classList.add("active");
+        btnTable.classList.remove("active");
+        updateBoardContent();
+      } }
+    });
+    var btnTable = el("button", {
+      cls: (FILTER.view === "table" ? "active" : ""),
+      text: "📄 Interactive Table",
+      on: { click: function () {
+        FILTER.view = "table";
+        btnTable.classList.add("active");
+        btnKanban.classList.remove("active");
+        updateBoardContent();
+      } }
+    });
+    var viewSwitcher = el("div", { cls: "view-segmented" }, [btnKanban, btnTable]);
 
     main.appendChild(el("div", { cls: "sub-toolbar" }, [
       el("div", { cls: "sub-toolbar-left" }, [viewSwitcher]),
@@ -2370,6 +2409,9 @@
       ])
     ]));
 
+    var boardContent = el("div", { id: "board-content" });
+    main.appendChild(boardContent);
+
     function itemPasses(id) {
       var it = ITEMS[id];
       return (!FILTER.owner || it.owner === FILTER.owner) &&
@@ -2377,105 +2419,127 @@
         (!FILTER.text || (id + " " + it.title).toLowerCase().indexOf(FILTER.text.toLowerCase()) >= 0);
     }
 
-    if (FILTER.view === "table" && FILTER.group === "none") {
-      var passingIds = M.order.filter(function (id) {
-        if (ITEMS[id].column === "Dropped" && !FILTER.dropped) return false;
-        return itemPasses(id);
-      });
-      main.appendChild(renderItemTable(passingIds));
-      return;
-    }
-
-    if (FILTER.group === "none") {
-      var board = el("div", { cls: "board" });
-      M.columns.forEach(function (c) {
-        if (c === "Dropped" && !FILTER.dropped) return;
-        var ids = M.order.filter(function (id) {
-          return ITEMS[id].column === c && itemPasses(id);
+    function updateBoardContent() {
+      boardContent.innerHTML = "";
+      if (FILTER.view === "table" && FILTER.group === "none") {
+        var passingIds = M.order.filter(function (id) {
+          if (ITEMS[id].column === "Dropped" && !FILTER.dropped) return false;
+          return itemPasses(id);
         });
-        if (c === "Other" && !ids.length) return;
-        board.appendChild(renderColumn(c, ids));
-      });
-      main.appendChild(board);
-    } else {
-      var groups = [];
-      if (FILTER.group === "epic") {
-        var assigned = {};
-        M.epics.forEach(function (e) {
-          e.items.forEach(function (id) { assigned[id] = true; });
-          groups.push({ key: "e:" + e.name, title: "Epic: " + e.name, ids: e.items.filter(itemPasses) });
-        });
-        var unassigned = M.order.filter(function (id) { return !assigned[id] && itemPasses(id); });
-        if (unassigned.length) groups.push({ key: "e:none", title: "No Epic", ids: unassigned });
-      } else if (FILTER.group === "owner") {
-        var byO = {};
-        M.order.filter(itemPasses).forEach(function (id) {
-          var o = ITEMS[id].owner || "Unassigned";
-          (byO[o] = byO[o] || []).push(id);
-        });
-        Object.keys(byO).sort().forEach(function (o) {
-          groups.push({ key: "o:" + o, title: "Owner: " + o, ids: byO[o] });
-        });
-      } else if (FILTER.group === "tier") {
-        var byT = {};
-        M.order.filter(itemPasses).forEach(function (id) {
-          var t = ITEMS[id].tier ? "Tier " + ITEMS[id].tier : "Untiered";
-          (byT[t] = byT[t] || []).push(id);
-        });
-        ["Tier 1", "Tier 2", "Tier 3", "Untiered"].forEach(function (t) {
-          if (byT[t] && byT[t].length) groups.push({ key: "t:" + t, title: t, ids: byT[t] });
-        });
-      }
-
-      if (!groups.length) {
-        main.appendChild(el("p", { cls: "muted", text: "No items match the current filters." }));
+        boardContent.appendChild(renderItemTable(passingIds));
         return;
       }
 
-      groups.forEach(function (g) {
-        var isCollapsed = !!COLLAPSED_SWIMLANES[g.key];
-        var doneCount = g.ids.filter(function (id) { return ITEMS[id].column === "Done"; }).length;
-        var pct = g.ids.length ? Math.round((doneCount / g.ids.length) * 100) : 0;
-
-        var progBar = el("div", { cls: "swimlane-progress", title: pct + "% completed (" + doneCount + "/" + g.ids.length + ")" }, [
-          el("div", { cls: "swimlane-progress-bar", style: "width: " + pct + "%;" })
-        ]);
-
-        var hdr = el("div", {
-          cls: "swimlane-hdr",
-          on: { click: function () {
-            COLLAPSED_SWIMLANES[g.key] = !isCollapsed;
-            render();
-          } }
-        }, [
-          el("div", { style: "display: flex; align-items: center; gap: 8px;" }, [
-            el("span", { cls: "muted", style: "font-size: 11px;", text: isCollapsed ? "▶" : "▼" }),
-            el("strong", { text: g.title }),
-            el("span", { cls: "chip", text: String(g.ids.length) }),
-            progBar,
-            el("span", { cls: "muted", style: "font-size: 12px;", text: pct + "% done" })
-          ]),
-          el("span", { cls: "muted", style: "font-size: 11px;", text: isCollapsed ? "Click to expand" : "Click to collapse" })
-        ]);
-
-        var swimlane = el("div", { cls: "swimlane" + (isCollapsed ? " collapsed" : "") }, [hdr]);
-
-        if (FILTER.view === "table") {
-          var body = el("div", { cls: "swimlane-body", style: "padding: 8px 12px;" });
-          body.appendChild(renderItemTable(g.ids));
-          swimlane.appendChild(body);
-        } else {
-          var body = el("div", { cls: "swimlane-body" });
-          M.columns.forEach(function (c) {
-            if (c === "Dropped" && !FILTER.dropped) return;
-            var colIds = g.ids.filter(function (id) { return ITEMS[id].column === c; });
-            if (c === "Other" && !colIds.length) return;
-            body.appendChild(renderColumn(c, colIds));
+      if (FILTER.group === "none") {
+        var board = el("div", { cls: "board" });
+        M.columns.forEach(function (c) {
+          if (c === "Dropped" && !FILTER.dropped) return;
+          var ids = M.order.filter(function (id) {
+            return ITEMS[id].column === c && itemPasses(id);
           });
-          swimlane.appendChild(body);
+          if (c === "Other" && !ids.length) return;
+          board.appendChild(renderColumn(c, ids, updateBoardContent));
+        });
+        boardContent.appendChild(board);
+      } else {
+        var groups = [];
+        if (FILTER.group === "epic") {
+          var assigned = {};
+          M.epics.forEach(function (e) {
+            e.items.forEach(function (id) { assigned[id] = true; });
+            groups.push({ key: "e:" + e.name, title: "Epic: " + e.name, ids: e.items.filter(itemPasses) });
+          });
+          var unassigned = M.order.filter(function (id) { return !assigned[id] && itemPasses(id); });
+          if (unassigned.length) groups.push({ key: "e:none", title: "No Epic", ids: unassigned });
+        } else if (FILTER.group === "owner") {
+          var byO = {};
+          M.order.filter(itemPasses).forEach(function (id) {
+            var o = ITEMS[id].owner || "Unassigned";
+            (byO[o] = byO[o] || []).push(id);
+          });
+          Object.keys(byO).sort().forEach(function (o) {
+            groups.push({ key: "o:" + o, title: "Owner: " + o, ids: byO[o] });
+          });
+        } else if (FILTER.group === "tier") {
+          var byT = {};
+          M.order.filter(itemPasses).forEach(function (id) {
+            var t = ITEMS[id].tier ? "Tier " + ITEMS[id].tier : "Untiered";
+            (byT[t] = byT[t] || []).push(id);
+          });
+          ["Tier 1", "Tier 2", "Tier 3", "Untiered"].forEach(function (t) {
+            if (byT[t] && byT[t].length) groups.push({ key: "t:" + t, title: t, ids: byT[t] });
+          });
         }
-        main.appendChild(swimlane);
-      });
+
+        if (!groups.length) {
+          boardContent.appendChild(el("p", { cls: "muted", text: "No items match the current filters." }));
+          return;
+        }
+
+        groups.forEach(function (g) {
+          var isCollapsed = !!COLLAPSED_SWIMLANES[g.key];
+          if (focusId && g.ids.indexOf(focusId) >= 0 && isCollapsed) {
+            COLLAPSED_SWIMLANES[g.key] = false;
+            isCollapsed = false;
+          }
+          var doneCount = g.ids.filter(function (id) { return ITEMS[id].column === "Done"; }).length;
+          var pct = g.ids.length ? Math.round((doneCount / g.ids.length) * 100) : 0;
+
+          var progBar = el("div", { cls: "swimlane-progress", title: pct + "% completed (" + doneCount + "/" + g.ids.length + ")" }, [
+            el("div", { cls: "swimlane-progress-bar", style: "width: " + pct + "%;" })
+          ]);
+
+          var hdr = el("div", {
+            cls: "swimlane-hdr",
+            on: { click: function () {
+              COLLAPSED_SWIMLANES[g.key] = !isCollapsed;
+              updateBoardContent();
+            } }
+          }, [
+            el("div", { style: "display: flex; align-items: center; gap: 8px;" }, [
+              el("span", { cls: "muted", style: "font-size: 11px;", text: isCollapsed ? "▶" : "▼" }),
+              el("strong", { text: g.title }),
+              el("span", { cls: "chip", text: String(g.ids.length) }),
+              progBar,
+              el("span", { cls: "muted", style: "font-size: 12px;", text: pct + "% done" })
+            ]),
+            el("span", { cls: "muted", style: "font-size: 11px;", text: isCollapsed ? "Click to expand" : "Click to collapse" })
+          ]);
+
+          var swimlane = el("div", { cls: "swimlane" + (isCollapsed ? " collapsed" : "") }, [hdr]);
+
+          if (FILTER.view === "table") {
+            var body = el("div", { cls: "swimlane-body", style: "padding: 8px 12px;" });
+            body.appendChild(renderItemTable(g.ids));
+            swimlane.appendChild(body);
+          } else {
+            var body = el("div", { cls: "swimlane-body" });
+            M.columns.forEach(function (c) {
+              if (c === "Dropped" && !FILTER.dropped) return;
+              var colIds = g.ids.filter(function (id) { return ITEMS[id].column === c; });
+              if (c === "Other" && !colIds.length) return;
+              body.appendChild(renderColumn(c, colIds, updateBoardContent));
+            });
+            swimlane.appendChild(body);
+          }
+          boardContent.appendChild(swimlane);
+        });
+      }
+    }
+
+    updateBoardContent();
+
+    if (focusId) {
+      setTimeout(function () {
+        var target = document.getElementById("card-" + focusId) ||
+                     document.getElementById("row-" + focusId) ||
+                     document.querySelector("[data-id='" + focusId + "']");
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+          target.classList.add("flash");
+          setTimeout(function () { target.classList.remove("flash"); }, 2400);
+        }
+      }, 100);
     }
   }
 
@@ -3711,14 +3775,33 @@
   function viewItem(id) {
     var it = ITEMS[id];
     tab("");
-    crumbs([[M.project || "Project", "map"], ["Board", "board"], [id]]);
-    if (!it) { main.appendChild(el("p", { text: "No work item " + id + " in the records." })); return; }
+    if (!it) {
+      crumbs([[M.project || "Project", "map"], ["Board", "board"], [id]]);
+      main.appendChild(el("p", { text: "No work item " + id + " in the records." }));
+      return;
+    }
+    var stageName = it.column || it.status || "Backlog";
+    crumbs([
+      [M.project || "Project", "map"],
+      ["Board", "board"],
+      [stageName, "board/focus/" + encodeURIComponent(id)],
+      [id]
+    ]);
     main.appendChild(el("h1", null, [id + " — " + (it.title || "(untitled)")]));
-    main.appendChild(el("div", null, [colChip(it.column), it.status ? el("span", { cls: "chip", text: it.status }) : null,
+    main.appendChild(el("div", null, [
+      colChip(it.column),
+      it.status ? el("span", { cls: "chip", text: it.status }) : null,
       it.tier ? el("span", { cls: "chip", text: "Tier " + it.tier }) : null,
       it.owner ? el("span", { cls: "chip", text: it.owner }) : null,
       it.orphan ? el("span", { cls: "chip", text: "not in the backlog" }) : null,
-      it.row ? el("span", { cls: "muted", text: " " + it.row }) : null]));
+      it.row ? el("span", { cls: "muted", text: " " + it.row }) : null,
+      el("a", {
+        cls: "chip",
+        href: "#/board/focus/" + encodeURIComponent(id),
+        text: "🎯 Jump to on Board (" + stageName + ")",
+        style: "color: var(--link); font-weight: 500; text-decoration: none; margin-left: 6px;"
+      })
+    ]));
     var steps = el("div", { cls: "steps", title: "Lifecycle, filled from the records that exist" });
     M.steps.forEach(function (s) {
       var st = (it.steps || {})[s] || "n/a";
@@ -4243,7 +4326,18 @@
       window.removeEventListener("scroll", currentDocScrollSpy);
       currentDocScrollSpy = null;
     }
-    if (route === "board") viewBoard();
+    if (route === "board") {
+      var focusId = null, stageFilter = null;
+      if (parts[1] === "focus") {
+        focusId = decodeURIComponent(parts[2] || "");
+      } else if (parts[1] === "stage") {
+        stageFilter = decodeURIComponent(parts[2] || "");
+        if (parts[3]) focusId = decodeURIComponent(parts[3] || "");
+      } else if (parts[1] && ITEMS[decodeURIComponent(parts[1])]) {
+        focusId = decodeURIComponent(parts[1]);
+      }
+      viewBoard(focusId, stageFilter);
+    }
     else if (route === "activity") viewActivity();
     else if (route === "waiting" || route === "blockages") viewWaiting();
     else if (route === "git") viewGit();
