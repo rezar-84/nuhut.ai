@@ -193,6 +193,49 @@
   .doc code, .entry code { background: var(--chip); padding: 0 4px; border-radius: 4px; font-size: 12px; }
   .doc blockquote { margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--line); color: var(--muted); }
   .flash { outline: 2px solid var(--accent); }
+  /* Code blocks */
+  .codeblock { margin: 8px 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
+  .codeblock-hdr { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px;
+    background: var(--chip); border-bottom: 1px solid var(--line); font-size: 11px; }
+  .codeblock-lang { color: var(--muted); font-family: monospace; font-weight: 600; text-transform: uppercase; }
+  .codeblock-copy { background: none; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px;
+    font-size: 11px; cursor: pointer; color: var(--text); }
+  .codeblock-copy:hover { background: var(--panel); }
+  .codeblock pre { margin: 0; padding: 8px 10px; background: transparent; border-radius: 0; font-size: 12px; }
+  /* Heading anchors */
+  .doc-heading { position: relative; }
+  .heading-anchor { opacity: 0; margin-left: 6px; color: var(--muted); font-weight: 400; text-decoration: none; font-size: 0.85em; }
+  .doc-heading:hover .heading-anchor { opacity: 1; }
+  .heading-anchor:hover { color: var(--link); text-decoration: underline; }
+  /* Outline scroll spy */
+  .outline a.active { color: var(--link); font-weight: 600; border-left: 2px solid var(--link); padding-left: 6px !important; }
+  /* Command Palette */
+  .palette-backdrop { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(2px); z-index: 60; opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+  .palette-backdrop.open { opacity: 1; pointer-events: auto; }
+  .palette { position: fixed; top: 15%; left: 50%; transform: translateX(-50%) scale(0.96); width: 620px;
+    max-width: 92vw; max-height: 70vh; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.25); z-index: 70; display: flex; flex-direction: column; overflow: hidden;
+    opacity: 0; pointer-events: none; transition: opacity .15s ease, transform .15s ease; }
+  .palette.open { opacity: 1; pointer-events: auto; transform: translateX(-50%) scale(1); }
+  .palette-input-wrap { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--bg); display: flex; align-items: center; gap: 8px; }
+  .palette-input { width: 100%; font: inherit; font-size: 15px; border: none; background: transparent; color: var(--text); outline: none; }
+  .palette-results { overflow-y: auto; padding: 6px 0; flex: 1; }
+  .palette-section { padding: 8px 16px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .palette-item { padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; color: var(--text); }
+  .palette-item:hover, .palette-item.selected { background: var(--chip); }
+  .palette-item strong { font-size: 13px; }
+  .palette-footer { padding: 8px 16px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; background: var(--bg); }
+  .palette-footer kbd { background: var(--chip); padding: 1px 5px; border-radius: 3px; border: 1px solid var(--line); font-family: monospace; }
+  /* Shortcuts modal */
+  .shortcuts-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 440px;
+    max-width: 90vw; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.25); z-index: 75; padding: 20px; display: none; }
+  .shortcuts-modal.open { display: block; }
+  .shortcuts-modal h3 { margin: 0 0 12px; font-size: 16px; }
+  .shortcut-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .shortcut-row:last-child { border-bottom: none; }
+  .shortcut-row kbd { background: var(--chip); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); font-family: monospace; font-size: 12px; }
   @media (max-width: 720px) {
     .docgrid { grid-template-columns: 1fr; }
     .outline { position: static; max-height: none; border-right: none; }
@@ -206,7 +249,7 @@
     <a data-r="map">Map</a><a data-r="board">Board</a><a data-r="activity">Activity</a>
     <a data-r="waiting">Waiting on you</a><a data-r="git">Git</a><a data-r="docs">Documents</a>
   </nav>
-  <input id="q" type="search" placeholder="Search IDs, titles, documents…" aria-label="Search">
+  <input id="q" type="search" placeholder="Search or ⌘K…" aria-label="Search">
   <div class="meta" id="meta"></div>
 </header>
 <div id="crumbs"></div>
@@ -214,6 +257,9 @@
 <div id="drawer-backdrop" class="drawer-backdrop"></div>
 <div id="drawer" class="drawer"></div>
 <div id="map-tooltip" class="map-tooltip"></div>
+<div id="palette-backdrop" class="palette-backdrop"></div>
+<div id="palette" class="palette"></div>
+<div id="shortcuts-modal" class="shortcuts-modal"></div>
 <script>var M = /*NUHUT_MODEL*/null;</script>
 <script>
 (function () {
@@ -334,16 +380,56 @@
       var line = lines[i], m;
       if (/^```/.test(line)) {
         flush();
+        var lang = line.slice(3).trim();
         var buf = [];
         i++;
         while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
-        box.appendChild(el("pre", { text: buf.join("\n") }));
+        var codeText = buf.join("\n");
+        var codeBlock = el("div", { cls: "codeblock" });
+        var codeHdr = el("div", { cls: "codeblock-hdr" }, [
+          el("span", { cls: "codeblock-lang", text: lang || "code" }),
+          el("button", {
+            cls: "codeblock-copy",
+            text: "Copy",
+            title: "Copy code to clipboard",
+            on: { click: (function (txt) {
+              return function (e) {
+                var btn = e.target;
+                if (navigator.clipboard) {
+                  navigator.clipboard.writeText(txt).then(function () {
+                    btn.textContent = "Copied!";
+                    setTimeout(function () { btn.textContent = "Copy"; }, 1500);
+                  });
+                }
+              };
+            })(codeText) }
+          })
+        ]);
+        codeBlock.appendChild(codeHdr);
+        codeBlock.appendChild(el("pre", { text: codeText }));
+        box.appendChild(codeBlock);
         i++;
         continue;
       }
       if ((m = /^(#{1,4})\s+(.*)$/.exec(line))) {
         flush();
-        var hd = el("h" + m[1].length, { id: "L" + i }, [inline(m[2], baseDir)]);
+        var lineNum = i;
+        var hd = el("h" + m[1].length, { id: "L" + lineNum, cls: "doc-heading" }, [
+          inline(m[2], baseDir),
+          el("a", {
+            cls: "heading-anchor",
+            href: "#L" + lineNum,
+            text: "#",
+            title: "Copy link to section",
+            on: { click: function (e) {
+              e.preventDefault();
+              var baseRoute = (location.hash || "").split("/").slice(0, 2).join("/");
+              var targetUrl = location.origin + location.pathname + baseRoute + "/" + lineNum;
+              if (navigator.clipboard) navigator.clipboard.writeText(targetUrl);
+              history.replaceState(null, "", baseRoute + "/" + lineNum);
+            } }
+          })
+        ]);
         box.appendChild(hd);
         i++;
         continue;
@@ -446,12 +532,24 @@
       style: "margin-left: 6px; padding: 2px 8px; font-size: 11px;",
       on: { click: exportHtml }
     }));
+    meta.appendChild(el("button", {
+      text: "?",
+      title: "Keyboard shortcuts (?)",
+      style: "margin-left: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600;",
+      on: { click: function () { if (typeof openShortcutsModal === "function") openShortcutsModal(); } }
+    }));
   }
   paintMeta();
   var q = document.getElementById("q"), qTimer;
   q.addEventListener("input", function () {
     clearTimeout(qTimer);
     qTimer = setTimeout(function () { if (q.value.trim()) go("search/" + encodeURIComponent(q.value.trim())); }, 200);
+  });
+  q.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && q.value.trim()) {
+      clearTimeout(qTimer);
+      go("search/" + encodeURIComponent(q.value.trim()));
+    }
   });
   document.getElementById("tabs").addEventListener("click", function (e) {
     if (e.target.dataset.r) go(e.target.dataset.r);
@@ -470,32 +568,63 @@
     });
   }
 
-  // ---------------------------------------------------------------- map
+  // ---------------------------------------------------------------- map & dependencies
+  function computeDependencies() {
+    var blockers = [], blockedItems = [], readyItems = [];
+    M.order.forEach(function (id) {
+      var it = ITEMS[id];
+      if (!it) return;
+      var openBlocked = (it.depends || []).filter(function (d) { return !ITEMS[d] || ITEMS[d].column !== "Done"; });
+      var openDependents = (it.dependents || []).filter(function (d) { return ITEMS[d] && ITEMS[d].column !== "Done"; });
+
+      if (openDependents.length && ["Done", "Dropped"].indexOf(it.column) < 0) {
+        blockers.push({ id: id, count: openDependents.length, dependents: openDependents });
+      }
+      if (openBlocked.length && ["Done", "Dropped"].indexOf(it.column) < 0) {
+        blockedItems.push({ id: id, count: openBlocked.length, dependencies: openBlocked });
+      }
+      if (!openBlocked.length && ["Now", "Next"].indexOf(it.column) >= 0) {
+        readyItems.push(id);
+      }
+    });
+    blockers.sort(function (a, b) { return b.count - a.count || a.id.localeCompare(b.id); });
+    blockedItems.sort(function (a, b) { return b.count - a.count || a.id.localeCompare(b.id); });
+    return { blockers: blockers, blockedItems: blockedItems, readyItems: readyItems };
+  }
+
   var OPEN = {};
   function mapTree() {
     var ids = M.order;
-    function itemNode(id) {
+    function itemNode(id, customKey) {
       var it = ITEMS[id];
-      var isBlocked = (it.depends || []).some(function (d) { return !ITEMS[d] || ITEMS[d].column !== "Done"; });
+      if (!it) return null;
+      var openBlocked = (it.depends || []).filter(function (d) { return !ITEMS[d] || ITEMS[d].column !== "Done"; });
+      var isBlocked = openBlocked.length > 0;
+      var openDependents = (it.dependents || []).filter(function (d) { return ITEMS[d] && ITEMS[d].column !== "Done"; });
+      var isBlocker = openDependents.length > 0 && it.column !== "Done";
       var stepCount = 0;
       if (it.steps) {
         Object.keys(it.steps).forEach(function (s) { if (it.steps[s] === "done") stepCount++; });
       }
       return {
-        key: "i:" + id,
+        key: customKey || ("i:" + id),
         id: id,
-        label: id + "  " + clip(it.title, 52),
+        label: id + "  " + clip(it.title, 50),
         full: id + " " + (it.title || ""),
         route: "item/" + id,
         col: it.column,
         tier: it.tier,
         owner: it.owner,
         blocked: isBlocked,
+        blockedBy: openBlocked,
+        isBlocker: isBlocker,
+        blocksCount: openDependents.length,
+        blocksItems: openDependents,
         stepsDone: stepCount
       };
     }
     var byCol = M.columns.map(function (c) {
-      var kids = ids.filter(function (id) { return ITEMS[id].column === c; }).map(itemNode);
+      var kids = ids.filter(function (id) { return ITEMS[id].column === c; }).map(function (id) { return itemNode(id); });
       return kids.length ? { key: "c:" + c, label: c, col: c, children: kids } : null;
     }).filter(Boolean);
     var owners = {};
@@ -504,7 +633,7 @@
       if (o && ["Done", "Dropped"].indexOf(ITEMS[id].column) < 0) (owners[o] = owners[o] || []).push(id);
     });
     var byOwner = Object.keys(owners).sort().map(function (o) {
-      return { key: "o:" + o, label: o, children: owners[o].map(itemNode) };
+      return { key: "o:" + o, label: o, children: owners[o].map(function (id) { return itemNode(id); }) };
     });
     var kinds = {};
     DOCS.forEach(function (d, n) {
@@ -522,14 +651,90 @@
               route: docRoute(n, x.line) }; }) };
       }) };
     });
+
+    var depsData = computeDependencies();
+    var blockerNodes = depsData.blockers.map(function (b) {
+      var it = ITEMS[b.id];
+      var node = itemNode(b.id, "blk:" + b.id);
+      node.label = b.id + " (blocks " + b.count + ") " + clip(it.title, 40);
+      node.isBlocker = true;
+      node.blocksCount = b.count;
+      node.children = b.dependents.map(function (depId) {
+        var depIt = ITEMS[depId];
+        var dNode = itemNode(depId, "blk:" + b.id + ":" + depId);
+        if (depIt) dNode.label = depId + " (" + depIt.column + ") " + clip(depIt.title, 36);
+        return dNode;
+      });
+      return node;
+    });
+
+    var blockedWorkNodes = depsData.blockedItems.map(function (b) {
+      var it = ITEMS[b.id];
+      var node = itemNode(b.id, "wait:" + b.id);
+      node.label = b.id + " (waits on " + b.count + ") " + clip(it.title, 40);
+      node.children = b.dependencies.map(function (depId) {
+        var depIt = ITEMS[depId];
+        if (depIt) {
+          var dNode = itemNode(depId, "wait:" + b.id + ":" + depId);
+          dNode.label = depId + " (" + depIt.column + (depIt.owner ? " · " + depIt.owner : "") + ") " + clip(depIt.title, 34);
+          return dNode;
+        }
+        return {
+          key: "wait:" + b.id + ":missing:" + depId,
+          id: depId,
+          label: depId + " (missing in backlog!)",
+          full: depId,
+          col: "Blocked",
+          blocked: true
+        };
+      });
+      return node;
+    });
+
+    var readyNodes = depsData.readyItems.map(function (id) {
+      return itemNode(id, "rdy:" + id);
+    });
+
+    var depGroups = [];
+    if (blockerNodes.length) {
+      depGroups.push({
+        key: "g:blk",
+        label: "Bottlenecks / Root blockers (" + blockerNodes.length + ")",
+        children: blockerNodes
+      });
+    }
+    if (blockedWorkNodes.length) {
+      depGroups.push({
+        key: "g:wait",
+        label: "Blocked work items (" + blockedWorkNodes.length + ")",
+        children: blockedWorkNodes
+      });
+    }
+    if (readyNodes.length) {
+      depGroups.push({
+        key: "g:rdy",
+        label: "Ready to work (0 blockers) (" + readyNodes.length + ")",
+        children: readyNodes
+      });
+    }
+
+    var depBranch = {
+      key: "g:deps",
+      label: "Dependency map & blockages (" + (blockerNodes.length + blockedWorkNodes.length) + ")",
+      children: depGroups.length ? depGroups : [
+        { key: "g:nodeps", label: "No active blockages or dependencies", children: [] }
+      ]
+    };
+
     var root = { key: "root", label: M.project || "Project", children: [
       { key: "g:status", label: "Work by status", children: byCol },
+      depBranch,
       { key: "g:owner", label: "Open work by owner role", children: byOwner },
       { key: "g:docs", label: "Documents", children: byDoc }
     ] };
-    if (M.epics.length) {
-      root.children.splice(1, 0, { key: "g:epics", label: "Epics", children: M.epics.map(function (e) {
-        return { key: "e:" + e.name, label: e.name, children: e.items.filter(function (id) { return ITEMS[id]; }).map(itemNode) };
+    if (M.epics && M.epics.length) {
+      root.children.splice(2, 0, { key: "g:epics", label: "Epics", children: M.epics.map(function (e) {
+        return { key: "e:" + e.name, label: e.name, children: e.items.filter(function (id) { return ITEMS[id]; }).map(function (id) { return itemNode(id); }) };
       }) });
     }
     return root;
@@ -779,6 +984,10 @@
         var open = unresolved(it);
         metaLines.push("⚠ Blocked: waits on " + open.join(", "));
       }
+      var openDeps = (it.dependents || []).filter(function (d) { return ITEMS[d] && ITEMS[d].column !== "Done"; });
+      if (openDeps.length && it.column !== "Done") {
+        metaLines.push("⛔ Active Blocker: blocks " + openDeps.join(", "));
+      }
       if (it.steps) {
         metaLines.push("Progress: " + (n.stepsDone || 0) + "/" + M.steps.length + " lifecycle steps");
       }
@@ -817,9 +1026,6 @@
     if (backdropEl) backdropEl.className = "drawer-backdrop";
   }
   if (backdropEl) backdropEl.addEventListener("click", closeDrawer);
-  window.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") closeDrawer();
-  });
 
   function openDrawer(content) {
     if (!drawerEl || !backdropEl) return;
@@ -860,23 +1066,78 @@
     });
     body.appendChild(steps);
 
-    if (it.depends && it.depends.length) {
-      var pDep = el("div", { style: "margin-bottom: 6px; font-size: 12px;" }, [el("span", { cls: "muted", text: "Depends on: " })]);
-      it.depends.forEach(function (d, n) {
-        if (n) pDep.appendChild(document.createTextNode(", "));
-        pDep.appendChild(itemLink(d));
-        if (ITEMS[d]) pDep.appendChild(el("span", { cls: "muted", text: " (" + ITEMS[d].column + ")" }));
-      });
-      body.appendChild(pDep);
+    var openBlocked = (it.depends || []).filter(function (d) { return !ITEMS[d] || ITEMS[d].column !== "Done"; });
+    var openDependents = (it.dependents || []).filter(function (d) { return ITEMS[d] && ITEMS[d].column !== "Done"; });
+
+    if (openBlocked.length && it.column !== "Done") {
+      body.appendChild(el("div", {
+        cls: "banner bad",
+        style: "margin-bottom: 12px; padding: 8px 12px; font-size: 12px; background: var(--badbg); border-left: 3px solid var(--bad);"
+      }, [
+        el("strong", { text: "⚠ Blocked: " }),
+        document.createTextNode("Waiting on " + openBlocked.join(", ") + " before this can finish.")
+      ]));
+    } else if (openDependents.length && it.column !== "Done") {
+      body.appendChild(el("div", {
+        cls: "banner",
+        style: "margin-bottom: 12px; padding: 8px 12px; font-size: 12px; background: rgba(191, 135, 0, 0.1); border-left: 3px solid var(--warn, #bf8700); color: var(--text);"
+      }, [
+        el("strong", { text: "⛔ Active Blocker: " }),
+        document.createTextNode("Holding up " + openDependents.length + " downstream item" + (openDependents.length === 1 ? "" : "s") + " (" + openDependents.join(", ") + ").")
+      ]));
     }
-    if (it.dependents && it.dependents.length) {
-      var pDepBy = el("div", { style: "margin-bottom: 12px; font-size: 12px;" }, [el("span", { cls: "muted", text: "Needed by: " })]);
-      it.dependents.forEach(function (d, n) {
-        if (n) pDepBy.appendChild(document.createTextNode(", "));
-        pDepBy.appendChild(itemLink(d));
-        if (ITEMS[d]) pDepBy.appendChild(el("span", { cls: "muted", text: " (" + ITEMS[d].column + ")" }));
+
+    if ((it.depends && it.depends.length) || (it.dependents && it.dependents.length)) {
+      var depCard = el("div", {
+        style: "margin-bottom: 14px; padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;"
       });
-      body.appendChild(pDepBy);
+      depCard.appendChild(el("div", {
+        style: "font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.05em;",
+        text: "Dependency Flow & Blockages"
+      }));
+
+      var depCols = el("div", { style: "display: grid; grid-template-columns: 1fr 1fr; gap: 8px;" });
+
+      var leftCol = el("div");
+      leftCol.appendChild(el("div", { style: "font-size: 11px; font-weight: 600; margin-bottom: 4px;", text: "Prerequisites (" + (it.depends ? it.depends.length : 0) + ")" }));
+      if (it.depends && it.depends.length) {
+        it.depends.forEach(function (d) {
+          var dIt = ITEMS[d];
+          var row = el("div", {
+            style: "display: flex; align-items: center; justify-content: space-between; padding: 3px 6px; margin-bottom: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; font-size: 11px; cursor: pointer;",
+            on: { click: function () { openItemDrawer(d); } }
+          }, [
+            el("span", { style: "font-weight: 500;", text: d }),
+            dIt ? colChip(dIt.column) : el("span", { cls: "chip", style: "color: var(--bad);", text: "missing" })
+          ]);
+          leftCol.appendChild(row);
+        });
+      } else {
+        leftCol.appendChild(el("div", { cls: "muted", style: "font-size: 11px;", text: "None (independent)" }));
+      }
+      depCols.appendChild(leftCol);
+
+      var rightCol = el("div");
+      rightCol.appendChild(el("div", { style: "font-size: 11px; font-weight: 600; margin-bottom: 4px;", text: "Blocks (" + (it.dependents ? it.dependents.length : 0) + ")" }));
+      if (it.dependents && it.dependents.length) {
+        it.dependents.forEach(function (d) {
+          var dIt = ITEMS[d];
+          var row = el("div", {
+            style: "display: flex; align-items: center; justify-content: space-between; padding: 3px 6px; margin-bottom: 3px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; font-size: 11px; cursor: pointer;",
+            on: { click: function () { openItemDrawer(d); } }
+          }, [
+            el("span", { style: "font-weight: 500;", text: d }),
+            dIt ? colChip(dIt.column) : el("span", { cls: "chip", style: "color: var(--bad);", text: "missing" })
+          ]);
+          rightCol.appendChild(row);
+        });
+      } else {
+        rightCol.appendChild(el("div", { cls: "muted", style: "font-size: 11px;", text: "None (end node)" }));
+      }
+      depCols.appendChild(rightCol);
+
+      depCard.appendChild(depCols);
+      body.appendChild(depCard);
     }
 
     var wl = (it.worklog || []), records = (it.records || []), commits = (it.commits || []);
@@ -958,6 +1219,284 @@
     container.appendChild(body);
     openDrawer(container);
   }
+
+  // ---------------------------------------------------------------- command palette & shortcuts
+  var paletteEl = document.getElementById("palette");
+  var paletteBackdropEl = document.getElementById("palette-backdrop");
+  var shortcutsEl = document.getElementById("shortcuts-modal");
+  var paletteSelectedIndex = 0;
+  var paletteCurrentItems = [];
+
+  function closePalette() {
+    if (paletteEl) paletteEl.className = "palette";
+    if (paletteBackdropEl) paletteBackdropEl.className = "palette-backdrop";
+  }
+  if (paletteBackdropEl) paletteBackdropEl.addEventListener("click", function () {
+    closePalette();
+    closeShortcutsModal();
+  });
+
+  function closeShortcutsModal() {
+    if (shortcutsEl) shortcutsEl.className = "shortcuts-modal";
+    if (paletteBackdropEl) paletteBackdropEl.className = "palette-backdrop";
+  }
+
+  function openShortcutsModal() {
+    closePalette();
+    closeDrawer();
+    if (!shortcutsEl || !paletteBackdropEl) return;
+    shortcutsEl.textContent = "";
+
+    var hdr = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;" }, [
+      el("h3", { style: "margin: 0;", text: "Keyboard Shortcuts" }),
+      el("button", { cls: "drawer-close", text: "✕", on: { click: closeShortcutsModal } })
+    ]);
+    shortcutsEl.appendChild(hdr);
+
+    var rows = [
+      ["Cmd/Ctrl + K  or  /", "Open command palette"],
+      ["1 … 6", "Jump to tabs (1: Map, 2: Board, 3: Activity, 4: Waiting, 5: Git, 6: Docs)"],
+      ["t", "Toggle Dark / Light theme"],
+      ["?", "Show this shortcuts help"],
+      ["Esc", "Close palette, modal, or drawer"]
+    ];
+
+    rows.forEach(function (r) {
+      shortcutsEl.appendChild(el("div", { cls: "shortcut-row" }, [
+        el("span", { text: r[1] }),
+        el("kbd", { text: r[0] })
+      ]));
+    });
+
+    shortcutsEl.className = "shortcuts-modal open";
+    paletteBackdropEl.className = "palette-backdrop open";
+  }
+
+  function openPalette() {
+    closeShortcutsModal();
+    closeDrawer();
+    if (!paletteEl || !paletteBackdropEl) return;
+    paletteEl.textContent = "";
+    paletteSelectedIndex = 0;
+
+    var input = el("input", {
+      cls: "palette-input",
+      placeholder: "Type a command, work item ID, or doc title…",
+      "aria-label": "Command Palette"
+    });
+
+    var inputWrap = el("div", { cls: "palette-input-wrap" }, [
+      el("span", { style: "color: var(--muted); font-size: 15px;", text: "⌕" }),
+      input
+    ]);
+
+    var resultsContainer = el("div", { cls: "palette-results" });
+
+    var footer = el("div", { cls: "palette-footer" }, [
+      el("div", null, [
+        el("kbd", { text: "↑↓" }), document.createTextNode(" navigate "),
+        el("kbd", { text: "↵" }), document.createTextNode(" select "),
+        el("kbd", { text: "esc" }), document.createTextNode(" close")
+      ]),
+      el("div", null, [
+        el("kbd", { text: "?" }), document.createTextNode(" shortcuts")
+      ])
+    ]);
+
+    paletteEl.appendChild(inputWrap);
+    paletteEl.appendChild(resultsContainer);
+    paletteEl.appendChild(footer);
+
+    function buildPaletteItems(query) {
+      var needle = (query || "").trim().toLowerCase();
+      var items = [];
+
+      var navActions = [
+        { label: "Go to Project Map", hint: "Tab 1", run: function () { go("map"); } },
+        { label: "Go to Kanban Board", hint: "Tab 2", run: function () { go("board"); } },
+        { label: "Go to Activity Log", hint: "Tab 3", run: function () { go("activity"); } },
+        { label: "Go to Waiting Queue", hint: "Tab 4", run: function () { go("waiting"); } },
+        { label: "Go to Git Traceability", hint: "Tab 5", run: function () { go("git"); } },
+        { label: "Go to Documents", hint: "Tab 6", run: function () { go("docs"); } },
+        { label: "View Dependencies & Blockages Map", hint: "Map Focus", run: function () { go("map"); setTimeout(function () { var b = document.querySelector('[data-p="blockages"]'); if (b) b.click(); }, 60); } },
+        { label: "Toggle Theme (Dark / Light)", hint: "Key: T", run: function () { toggleTheme(); } },
+        { label: "Export Standalone HTML", hint: "Action", run: function () { exportHtml(); } },
+        { label: "View Keyboard Shortcuts", hint: "Key: ?", run: function () { openShortcutsModal(); } }
+      ];
+
+      var matchedActions = navActions.filter(function (a) {
+        return !needle || a.label.toLowerCase().indexOf(needle) >= 0 || (a.hint && a.hint.toLowerCase().indexOf(needle) >= 0);
+      });
+      if (matchedActions.length) {
+        items.push({ section: "Actions & Navigation" });
+        items = items.concat(matchedActions);
+      }
+
+      var matchedItems = M.order.filter(function (id) {
+        var it = ITEMS[id];
+        return !needle || id.toLowerCase().indexOf(needle) >= 0 || (it.title || "").toLowerCase().indexOf(needle) >= 0;
+      }).slice(0, needle ? 12 : 5).map(function (id) {
+        var it = ITEMS[id];
+        return {
+          label: id + " — " + clip(it.title, 55),
+          hint: it.column + (it.tier ? " · T" + it.tier : ""),
+          run: function () { openItemDrawer(id); }
+        };
+      });
+      if (matchedItems.length) {
+        items.push({ section: "Work Items" });
+        items = items.concat(matchedItems);
+      }
+
+      var matchedDocs = DOCS.filter(function (d) {
+        return !needle || d.path.toLowerCase().indexOf(needle) >= 0 || (d.title || "").toLowerCase().indexOf(needle) >= 0;
+      }).slice(0, needle ? 8 : 4).map(function (d) {
+        var docIdx = DOCS.indexOf(d);
+        return {
+          label: d.path,
+          hint: d.kind,
+          run: function () { go(docRoute(docIdx)); }
+        };
+      });
+      if (matchedDocs.length) {
+        items.push({ section: "Documents" });
+        items = items.concat(matchedDocs);
+      }
+
+      return items;
+    }
+
+    function renderPalette() {
+      resultsContainer.textContent = "";
+      var allEntries = buildPaletteItems(input.value);
+      var selectableItems = [];
+      paletteCurrentItems = selectableItems;
+
+      allEntries.forEach(function (entry) {
+        if (entry.section) {
+          resultsContainer.appendChild(el("div", { cls: "palette-section", text: entry.section }));
+          return;
+        }
+        var itemIndex = selectableItems.length;
+        selectableItems.push(entry);
+
+        var isSelected = itemIndex === paletteSelectedIndex;
+        var row = el("div", {
+          cls: "palette-item" + (isSelected ? " selected" : ""),
+          on: {
+            mouseenter: function () {
+              paletteSelectedIndex = itemIndex;
+              updatePaletteSelection();
+            },
+            click: function () {
+              closePalette();
+              entry.run();
+            }
+          }
+        }, [
+          el("strong", { text: entry.label }),
+          entry.hint ? el("span", { cls: "muted", style: "font-size: 11px;", text: entry.hint }) : null
+        ]);
+        resultsContainer.appendChild(row);
+      });
+
+      if (!selectableItems.length) {
+        resultsContainer.appendChild(el("div", { cls: "muted", style: "padding: 16px; text-align: center;", text: "No matching commands or items" }));
+      }
+    }
+
+    function updatePaletteSelection() {
+      var itemEls = resultsContainer.querySelectorAll(".palette-item");
+      for (var k = 0; k < itemEls.length; k++) {
+        if (k === paletteSelectedIndex) {
+          itemEls[k].classList.add("selected");
+          itemEls[k].scrollIntoView({ block: "nearest" });
+        } else {
+          itemEls[k].classList.remove("selected");
+        }
+      }
+    }
+
+    input.addEventListener("input", function () {
+      paletteSelectedIndex = 0;
+      renderPalette();
+    });
+
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (paletteCurrentItems.length) {
+          paletteSelectedIndex = (paletteSelectedIndex + 1) % paletteCurrentItems.length;
+          updatePaletteSelection();
+        }
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (paletteCurrentItems.length) {
+          paletteSelectedIndex = (paletteSelectedIndex - 1 + paletteCurrentItems.length) % paletteCurrentItems.length;
+          updatePaletteSelection();
+        }
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (paletteCurrentItems[paletteSelectedIndex]) {
+          closePalette();
+          paletteCurrentItems[paletteSelectedIndex].run();
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closePalette();
+      }
+    });
+
+    paletteEl.className = "palette open";
+    paletteBackdropEl.className = "palette-backdrop open";
+    renderPalette();
+    setTimeout(function () { input.focus(); }, 50);
+  }
+
+  // Unified global keyboard navigation
+  window.addEventListener("keydown", function (e) {
+    var tag = (e.target && e.target.tagName) || "";
+    var isInput = /^(INPUT|SELECT|TEXTAREA)$/.test(tag);
+
+    if (e.key === "Escape") {
+      closePalette();
+      closeShortcutsModal();
+      closeDrawer();
+      if (isInput) e.target.blur();
+      return;
+    }
+
+    if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+      e.preventDefault();
+      openPalette();
+      return;
+    }
+
+    if (isInput) return;
+
+    if (e.key === "/") {
+      e.preventDefault();
+      openPalette();
+    } else if (e.key === "?") {
+      e.preventDefault();
+      openShortcutsModal();
+    } else if (e.key === "t" || e.key === "T") {
+      e.preventDefault();
+      toggleTheme();
+    } else if (e.key === "1") {
+      go("map");
+    } else if (e.key === "2") {
+      go("board");
+    } else if (e.key === "3") {
+      go("activity");
+    } else if (e.key === "4") {
+      go("waiting");
+    } else if (e.key === "5") {
+      go("git");
+    } else if (e.key === "6") {
+      go("docs");
+    }
+  });
 
   // ---------------------------------------------------------------- map canvas
   var MAP_STATE = {
@@ -1171,10 +1710,15 @@
         gNode.appendChild(ct);
       }
 
+      var isBlocker = n.isBlocker || (n.blocksCount && n.blocksCount > 0);
       if (n.blocked) {
         var warnTag = s("text", { x: n.x + 16 + n.label.length * 7.2 + (kids.length && !open ? 24 : 0), y: n.y + 4, fill: "var(--bad)", "font-weight": "700" });
         warnTag.textContent = "⚠ blocked";
         gNode.appendChild(warnTag);
+      } else if (isBlocker) {
+        var blkTag = s("text", { x: n.x + 16 + n.label.length * 7.2 + (kids.length && !open ? 24 : 0), y: n.y + 4, fill: "#bf8700", "font-weight": "700" });
+        blkTag.textContent = "⛔ blocks " + n.blocksCount;
+        gNode.appendChild(blkTag);
       }
 
       gNodes.appendChild(gNode);
@@ -1334,9 +1878,14 @@
         OPEN = { root: true };
       } else if (preset === "active") {
         OPEN = { root: true, "g:status": true, "c:Now": true, "c:Next": true };
+      } else if (preset === "blockages") {
+        OPEN = { root: true, "g:deps": true, "g:blk": true, "g:wait": true, "g:rdy": false };
+        var cd = computeDependencies();
+        cd.blockers.forEach(function (b) { OPEN["blk:" + b.id] = true; });
+        cd.blockedItems.forEach(function (b) { OPEN["wait:" + b.id] = true; });
       } else if (preset === "bottlenecks") {
         OPEN = { root: true, "g:status": true, "c:Blocked": true, "c:Parked": true };
-      } else if (preset === "epics") {
+      } else if (preset === "epics" && M.epics && M.epics.length) {
         OPEN = { root: true, "g:epics": true };
         M.epics.forEach(function (e) { OPEN["e:" + e.name] = true; });
       } else if (preset === "docs") {
@@ -1353,16 +1902,24 @@
       updateMapInPlace(false);
     }
 
-    var presetsBar = el("div", { cls: "presets" }, [
+    var cdPreview = computeDependencies();
+    var blkTotal = cdPreview.blockers.length + cdPreview.blockedItems.length;
+
+    var presetButtons = [
       el("span", { cls: "muted", style: "font-size: 12px; margin-right: 4px;", text: "Focus:" }),
       el("button", { cls: "preset-btn" + (MAP_STATE.preset === "all" ? " active" : ""), "data-p": "all", text: "All", on: { click: function () { applyPreset("all"); } } }),
       el("button", { cls: "preset-btn" + (MAP_STATE.preset === "active" ? " active" : ""), "data-p": "active", text: "Active work (Now/Next)", on: { click: function () { applyPreset("active"); } } }),
-      el("button", { cls: "preset-btn" + (MAP_STATE.preset === "bottlenecks" ? " active" : ""), "data-p": "bottlenecks", text: "Bottlenecks (Blocked/Parked)", on: { click: function () { applyPreset("bottlenecks"); } } }),
-      el("button", { cls: "preset-btn" + (MAP_STATE.preset === "epics" ? " active" : ""), "data-p": "epics", text: "Epics", on: { click: function () { applyPreset("epics"); } } }),
-      el("button", { cls: "preset-btn" + (MAP_STATE.preset === "docs" ? " active" : ""), "data-p": "docs", text: "Documents", on: { click: function () { applyPreset("docs"); } } }),
-      el("button", { cls: "preset-btn" + (MAP_STATE.preset === "owner" ? " active" : ""), "data-p": "owner", text: "By Owner", on: { click: function () { applyPreset("owner"); } } }),
-      el("button", { cls: "preset-btn" + (MAP_STATE.preset === "collapse" ? " active" : ""), "data-p": "collapse", text: "Collapse", on: { click: function () { applyPreset("collapse"); } } })
-    ]);
+      el("button", { cls: "preset-btn" + (MAP_STATE.preset === "blockages" ? " active" : ""), "data-p": "blockages", text: "Dependencies & Blockages" + (blkTotal ? " (" + blkTotal + ")" : ""), title: "Focus on dependency chains, root blockers, and blocked work", on: { click: function () { applyPreset("blockages"); } } }),
+      el("button", { cls: "preset-btn" + (MAP_STATE.preset === "bottlenecks" ? " active" : ""), "data-p": "bottlenecks", text: "Bottlenecks (Blocked/Parked)", on: { click: function () { applyPreset("bottlenecks"); } } })
+    ];
+    if (M.epics && M.epics.length) {
+      presetButtons.push(el("button", { cls: "preset-btn" + (MAP_STATE.preset === "epics" ? " active" : ""), "data-p": "epics", text: "Epics", on: { click: function () { applyPreset("epics"); } } }));
+    }
+    presetButtons.push(el("button", { cls: "preset-btn" + (MAP_STATE.preset === "docs" ? " active" : ""), "data-p": "docs", text: "Documents", on: { click: function () { applyPreset("docs"); } } }));
+    presetButtons.push(el("button", { cls: "preset-btn" + (MAP_STATE.preset === "owner" ? " active" : ""), "data-p": "owner", text: "By Owner", on: { click: function () { applyPreset("owner"); } } }));
+    presetButtons.push(el("button", { cls: "preset-btn" + (MAP_STATE.preset === "collapse" ? " active" : ""), "data-p": "collapse", text: "Collapse", on: { click: function () { applyPreset("collapse"); } } }));
+
+    var presetsBar = el("div", { cls: "presets" }, presetButtons);
     main.appendChild(presetsBar);
 
     var filterInput = el("input", {
@@ -1590,12 +2147,16 @@
       return s;
     }
 
-    var groupSel = el("select", { "aria-label": "Group by", on: { change: function () { FILTER.group = groupSel.value; render(); } } }, [
-      el("option", { value: "none", text: "Group: None" }),
-      el("option", { value: "epic", text: "Group: By Epic" }),
-      el("option", { value: "owner", text: "Group: By Owner Role" }),
-      el("option", { value: "tier", text: "Group: By Risk Tier" })
-    ]);
+    var groupOpts = [el("option", { value: "none", text: "Group: None" })];
+    if (M.epics && M.epics.length) {
+      groupOpts.push(el("option", { value: "epic", text: "Group: By Epic" }));
+    }
+    groupOpts.push(el("option", { value: "owner", text: "Group: By Owner Role" }));
+    groupOpts.push(el("option", { value: "tier", text: "Group: By Risk Tier" }));
+    var groupSel = el("select", { "aria-label": "Group by", on: { change: function () { FILTER.group = groupSel.value; render(); } } }, groupOpts);
+    if (FILTER.group === "epic" && (!M.epics || !M.epics.length)) {
+      FILTER.group = "none";
+    }
     groupSel.value = FILTER.group;
 
     var sortSel = el("select", { "aria-label": "Sort by", on: { change: function () { FILTER.sort = sortSel.value; render(); } } }, [
@@ -2062,6 +2623,7 @@
     });
     main.appendChild(el("div", { cls: "wrap" }, [t]));
   }
+  var currentDocScrollSpy = null;
   function viewDoc(path, line) {
     var n = DOC_BY_PATH[path];
     tab("docs");
@@ -2070,7 +2632,7 @@
     var d = DOCS[n];
     var outline = el("div", { cls: "outline" });
     d.headings.forEach(function (x) {
-      var a = el("a", { href: "#/" + docRoute(n, x.line), text: x.text });
+      var a = el("a", { href: "#/" + docRoute(n, x.line), text: x.text, "data-line": String(x.line) });
       a.style.paddingLeft = (x.level - 1) * 10 + "px";
       outline.appendChild(a);
     });
@@ -2081,6 +2643,38 @@
       var target = document.getElementById("L" + line);
       if (target) { target.scrollIntoView(); target.classList.add("flash"); }
     }
+
+    if (currentDocScrollSpy) {
+      window.removeEventListener("scroll", currentDocScrollSpy);
+      currentDocScrollSpy = null;
+    }
+
+    var headingLinks = outline.querySelectorAll("a[data-line]");
+    function updateOutlineActive() {
+      var headings = body.querySelectorAll("h1, h2, h3, h4");
+      var currentId = "";
+      for (var i = 0; i < headings.length; i++) {
+        var rect = headings[i].getBoundingClientRect();
+        if (rect.top <= 90) {
+          currentId = headings[i].id;
+        } else {
+          break;
+        }
+      }
+      if (!currentId && headings.length) currentId = headings[0].id;
+      var curLine = currentId.replace(/^L/, "");
+      for (var j = 0; j < headingLinks.length; j++) {
+        var aEl = headingLinks[j];
+        if (aEl.getAttribute("data-line") === curLine) {
+          aEl.className = "active";
+        } else {
+          aEl.className = "";
+        }
+      }
+    }
+    currentDocScrollSpy = updateOutlineActive;
+    window.addEventListener("scroll", updateOutlineActive, { passive: true });
+    setTimeout(updateOutlineActive, 80);
   }
 
   // ---------------------------------------------------------------- search
@@ -2138,6 +2732,10 @@
     var y = window.scrollY;
     main.textContent = "";
     var route = parts[0] || "map";
+    if (currentDocScrollSpy && route !== "doc") {
+      window.removeEventListener("scroll", currentDocScrollSpy);
+      currentDocScrollSpy = null;
+    }
     if (route === "board") viewBoard();
     else if (route === "activity") viewActivity();
     else if (route === "waiting") viewWaiting();
