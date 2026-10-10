@@ -1035,6 +1035,14 @@ def run(rt, project, opts):
             handle.write(svg_content)
         print("wrote %s" % os.path.relpath(target_svg, project.root))
 
+    custom_html = getattr(opts, "export_html", None)
+    if custom_html:
+        target_html = project.path(custom_html) if not os.path.isabs(custom_html) else custom_html
+        os.makedirs(os.path.dirname(target_html), exist_ok=True)
+        with open(target_html, "w", encoding="utf-8") as handle:
+            handle.write(render(model, template))
+        print("wrote %s" % os.path.relpath(target_html, project.root))
+
     if getattr(opts, "json", False):
         print(json.dumps(model, indent=2, ensure_ascii=False))
         return 0

@@ -20,6 +20,7 @@ that pattern in every file it installs. Regexes spell it '[{][{]'.
 """
 
 import argparse
+import concurrent.futures
 import datetime
 import hashlib
 import json
@@ -562,6 +563,53 @@ def check_epics(project, out):
                         "says it is in %s, which is not an epic row in the backlog" % parent)
 
 
+def check_dependencies(project, out):
+    """Backlog item dependencies must exist, not be circular, and items must not depend on themselves."""
+    prefix = project.prefix
+    legacy_prefixes = getattr(project, "legacy_prefixes", None)
+    if not prefix and not legacy_prefixes:
+        return
+    rows = backlog_rows(project.records("backlog.md"), prefix, legacy_prefixes)
+    known = set(row[0] for row in rows)
+    backlog_where = os.path.join(project.docs, "project", "backlog.md")
+
+    deps_map = {}
+    for item, status, cells in rows:
+        if len(cells) > 4:
+            raw_deps = cells[4]
+            dep_ids = set(ids_in(raw_deps, prefix, known))
+            for token in re.findall(r"`([^`]+)`", UNFILLED.sub("", raw_deps)):
+                token = token.strip()
+                if token and token not in ("-", "—", "none", "n/a"):
+                    dep_ids.add(token)
+            deps_map[item] = []
+            for dep in sorted(dep_ids, key=id_sort_key):
+                if dep == item:
+                    out.add("fail", "dependencies", "%s %s" % (backlog_where, item),
+                            "item cannot depend on itself")
+                elif dep not in known:
+                    out.add("warn", "dependencies", "%s %s" % (backlog_where, item),
+                            "depends on %s, which is not in the backlog" % dep)
+                else:
+                    deps_map[item].append(dep)
+
+    visited = {}
+    def dfs(node, path):
+        visited[node] = 1
+        for neighbor in deps_map.get(node, []):
+            if visited.get(neighbor) == 1:
+                cycle_slice = path[path.index(neighbor):] + [neighbor]
+                out.add("fail", "dependencies", "%s %s" % (backlog_where, neighbor),
+                        "circular dependency detected: %s" % " -> ".join(cycle_slice))
+            elif visited.get(neighbor, 0) == 0:
+                dfs(neighbor, path + [neighbor])
+        visited[node] = 2
+
+    for node in sorted(deps_map.keys(), key=id_sort_key):
+        if visited.get(node, 0) == 0:
+            dfs(node, [node])
+
+
 def doctor(project, today=None):
     out = Findings()
     today = today or datetime.date.today()
@@ -571,6 +619,7 @@ def doctor(project, today=None):
     check_staleness(project, out, today)
     check_traceability(project, out)
     check_epics(project, out)
+    check_dependencies(project, out)
     check_worklog_size(project, out)
     check_known_mistakes(project, out)
     check_rollback(project, out, today)
@@ -609,7 +658,7 @@ def evidence_dir(project):
     return path
 
 
-def verify(project, selected, timeout):
+def verify(project, selected, timeout, parallel=False):
     charter = charter_commands(project.charter)
     recorded = project.profile.get("commands") or {}
     drift = []
@@ -621,44 +670,62 @@ def verify(project, selected, timeout):
     folder = evidence_dir(project)
     head = project.git("rev-parse", "HEAD").strip()
     dirty = bool(project.git("status", "--porcelain").strip())
-    results = []
+
+    def run_stage(stage, command):
+        log = os.path.join(folder, stage + ".log")
+        started = time.time()
+        with open(log, "wb") as handle:
+            try:
+                code = subprocess.run(command, shell=True, cwd=project.root,
+                                      stdin=subprocess.DEVNULL, stdout=handle,
+                                      stderr=subprocess.STDOUT, timeout=timeout).returncode
+                timed_out = False
+            except subprocess.TimeoutExpired:
+                code, timed_out = None, True
+        with open(log, "rb") as handle:
+            raw = handle.read().decode("utf-8", "replace")
+        clean, masked = redact(raw)
+        if masked:
+            with open(log, "w", encoding="utf-8") as handle:
+                handle.write(clean)
+        with open(log, "rb") as handle:
+            digest = hashlib.sha256(handle.read()).hexdigest()
+        sec = round(time.time() - started, 1)
+        res = ("Verified: fail (timed out after %ds)" % timeout) if timed_out else ("Verified: pass" if code == 0 else "Verified: fail")
+        return {
+            "exit_code": code, "seconds": sec, "log": os.path.relpath(log, project.root),
+            "log_sha256": digest, "redacted": masked, "result": res
+        }
+
+    runnable = []
+    stage_entries = {}
     for stage in STAGES:
         command = charter.get(stage, "")
         entry = {"stage": stage, "command": command if command != "absent" else ""}
         if selected and stage not in selected:
             entry["result"] = "Not run (not selected)"
+            stage_entries[stage] = entry
         elif command == "absent":
             entry["result"] = "Absent (declared)"
+            stage_entries[stage] = entry
         elif not command:
             entry["result"] = "Absent (no command in the charter)"
+            stage_entries[stage] = entry
         else:
-            log = os.path.join(folder, stage + ".log")
-            started = time.time()
-            with open(log, "wb") as handle:
-                try:
-                    code = subprocess.run(command, shell=True, cwd=project.root,
-                                          stdin=subprocess.DEVNULL, stdout=handle,
-                                          stderr=subprocess.STDOUT, timeout=timeout).returncode
-                    timed_out = False
-                except subprocess.TimeoutExpired:
-                    code, timed_out = None, True
-            # A test that prints a token must not leave it on disk in the evidence.
-            with open(log, "rb") as handle:
-                raw = handle.read().decode("utf-8", "replace")
-            clean, masked = redact(raw)
-            if masked:
-                with open(log, "w", encoding="utf-8") as handle:
-                    handle.write(clean)
-            with open(log, "rb") as handle:
-                digest = hashlib.sha256(handle.read()).hexdigest()
-            entry.update({"exit_code": code, "seconds": round(time.time() - started, 1),
-                          "log": os.path.relpath(log, project.root), "log_sha256": digest,
-                          "redacted": masked})
-            if timed_out:
-                entry["result"] = "Verified: fail (timed out after %ds)" % timeout
-            else:
-                entry["result"] = "Verified: pass" if code == 0 else "Verified: fail"
-        results.append(entry)
+            stage_entries[stage] = entry
+            runnable.append((stage, command))
+
+    if parallel and len(runnable) > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(runnable), 4)) as executor:
+            f_map = {executor.submit(run_stage, s, c): s for s, c in runnable}
+            for fut in concurrent.futures.as_completed(f_map):
+                s = f_map[fut]
+                stage_entries[s].update(fut.result())
+    else:
+        for s, c in runnable:
+            stage_entries[s].update(run_stage(s, c))
+
+    results = [stage_entries[stage] for stage in STAGES]
     summary = {
         "generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "root": project.root, "git_head": head, "dirty": dirty,
@@ -817,6 +884,24 @@ def plan_check(project, item, base=None):
             rel = os.path.join(folder, named[0])
     text = read(project.path(rel))
     if not text:
+        spec_candidates = [
+            os.path.join(".sdlc", "specs", item, "spec.md"),
+            os.path.join(".sdlc", "specs", item, "walkthrough.md"),
+            os.path.join(project.docs, "plans", item + ".md"),
+        ]
+        specs_dir = project.path(os.path.join(".sdlc", "specs"))
+        if os.path.isdir(specs_dir):
+            for d in sorted(os.listdir(specs_dir)):
+                if d.startswith(item + "-"):
+                    spec_candidates.append(os.path.join(".sdlc", "specs", d, "spec.md"))
+        for cand in spec_candidates:
+            if os.path.isfile(project.path(cand)):
+                cand_text = read(project.path(cand))
+                if cand_text:
+                    rel = cand
+                    text = cand_text
+                    break
+    if not text:
         return None, ("no plan at %s. Tier 1 items have one; a Tier 2 or 3 plan lives in "
                       "the response and cannot be checked mechanically." % rel)
     planned = planned_paths(text)
@@ -836,6 +921,12 @@ def plan_check(project, item, base=None):
 
 
 def print_plan_check(result):
+    use_color = sys.stdout.isatty()
+    c_red = "\033[31m" if use_color else ""
+    c_yellow = "\033[33m" if use_color else ""
+    c_green = "\033[32m" if use_color else ""
+    c_reset = "\033[0m" if use_color else ""
+
     print("plan-check %s: %d planned, %d changed since %s"
           % (result["item"], len(result["planned"]), len(result["changed"]),
              result["base"]))
@@ -844,12 +935,14 @@ def print_plan_check(result):
               "item's branch, before it merges." % result["base"])
         return
     for f in result["unplanned"]:
-        print("warn  unplanned   %s  (changed, but not in the plan's Files that change)" % f)
+        print("%swarn  unplanned   %s  (changed, but not in the plan's Files that change)%s"
+              % (c_red, f, c_reset))
     for p in result["untouched"]:
-        print("warn  untouched   %s  (in the plan, but nothing matching it changed)" % p)
+        print("%swarn  untouched   %s  (in the plan, but nothing matching it changed)%s"
+              % (c_yellow, p, c_reset))
     if not result["unplanned"] and not result["untouched"]:
-        print("The diff matches the plan's file list. Whether it matches the plan's intent "
-              "is the review's conformance pass.")
+        print("%sThe diff matches the plan's file list. Whether it matches the plan's intent "
+              "is the review's conformance pass.%s" % (c_green, c_reset))
     else:
         print("\nEach gap is either a plan to update (in the same commit) or a change to "
               "question. Neither is decided here.")
@@ -900,6 +993,28 @@ def selftest():
     fake = "token=AKIA" + "ABCDEFGHIJKLMNOP and " + "ghp_" + "a" * 36
     clean, n = redact(fake)
     assert n == 2 and "ABCDEFGHIJKLMNOP" not in clean and "[redacted: AWS access key]" in clean, clean
+    dep_backlog = (
+        "| ID | Task | Tier | Owner role | Depends on | Status |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| ACME-1 | First task | 2 | qa | | Done |\n"
+        "| ACME-2 | Second task | 2 | qa | `ACME-1` | Now |\n"
+        "| ACME-3 | Broken dep | 2 | qa | `ACME-99` | Blocked |\n"
+        "| ACME-4 | Self loop | 2 | qa | `ACME-4` | Blocked |\n"
+        "| ACME-5 | Cycle A | 2 | qa | `ACME-6` | Blocked |\n"
+        "| ACME-6 | Cycle B | 2 | qa | `ACME-5` | Blocked |\n"
+    )
+    class FakeProj(object):
+        prefix = "ACME"
+        legacy_prefixes = set()
+        docs = "docs"
+        def records(self, name):
+            return dep_backlog if name == "backlog.md" else ""
+    df = Findings()
+    check_dependencies(FakeProj(), df)
+    d_items = [(f["check"], f["level"], f["message"]) for f in df.items]
+    assert any("depends on ACME-99" in m for c, l, m in d_items)
+    assert any("cannot depend on itself" in m for c, l, m in d_items)
+    assert any("circular dependency" in m for c, l, m in d_items)
     plan = ("# Plan\n## Files that change\n\n_(hint with `x/y`)_\n\n- `path/or/glob`\n"
             "- `src/billing/**` and `./db/0042_*.sql`\n- `README.md`, `.github/ci.yml`\n"
             "## Order of work\n"
@@ -945,6 +1060,8 @@ def main(argv):
                          "the evidence")
     ver.add_argument("--stage", help="comma-separated stages to run, e.g. unit,lint")
     ver.add_argument("--timeout", type=int, default=1800, help="seconds per stage")
+    ver.add_argument("--parallel", "-j", action="store_true",
+                     help="run independent verification stages concurrently")
     chk = sub.add_parser("plan-check", help="compare a Tier 1 plan's file list with the "
                          "branch's diff")
     chk.add_argument("item", help="work item ID, e.g. ACME-12")
@@ -958,13 +1075,15 @@ def main(argv):
     vw.add_argument("--no-open", action="store_true", help="write the page, do not open it")
     vw.add_argument("--json", action="store_true", help="print the model instead")
     vw.add_argument("--serve", action="store_true", help="live mode: serve the page on "
-                    "127.0.0.1 and update it as the records change")
+                     "127.0.0.1 and update it as the records change")
     vw.add_argument("--port", type=int, default=8765, help="live mode port (default 8765; "
-                    "0 picks a free one)")
+                     "0 picks a free one)")
     vw.add_argument("--interval", type=int, default=2, help="live mode: seconds between "
-                    "checks for changes (default 2)")
+                     "checks for changes (default 2)")
     vw.add_argument("--svg", nargs="?", const="", default=None,
                     help="export the mind map as a formatted SVG file (.ai-sdlc/view/map.svg by default)")
+    vw.add_argument("--export-html", nargs="?", const="dashboard.html", default=None,
+                    help="export the standalone dashboard HTML file (default: dashboard.html)")
     met = sub.add_parser("metrics", help="process measures from the records and git")
     met.add_argument("--json", action="store_true", help="print as JSON")
     opts = parser.parse_args(argv)
@@ -1008,7 +1127,7 @@ def main(argv):
         sys.stderr.write("no charter at %s: nothing says which commands to run\n"
                          % project.charter_path)
         return 2
-    summary, text = verify(project, selected, opts.timeout)
+    summary, text = verify(project, selected, opts.timeout, parallel=getattr(opts, "parallel", False))
     print(text)
     failed = [e for e in summary["stages"] if e["result"].startswith("Verified: fail")]
     return 1 if failed else 0
