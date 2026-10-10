@@ -51,7 +51,7 @@ python3 .ai-sdlc/bin/sdlc.py metrics         # process numbers in the terminal
 | **Board** | Where is every item? Now, Next, Blocked, Parked, Later, Done, filtered by owner, tier or title. A red edge or warning chip indicates dependency blockages. |
 | **Activity** | What are the agents doing? Items in flight, the latest worklog entries, and a summary of uncommitted working tree changes. |
 | **Blockages & Flow** | Where is work stuck? 3-column triage (Root Blockers ➔ Blocked Tasks ➔ Waiting on Human), bottleneck blast radius matrix, and human decision stall log. |
-| **Git Lens** | How did the code evolve? Interactive commit graph with branch/merge lanes, commit badges, author avatars, uncommitted delta banner, and commit inspector drawer. |
+| **Git Graph** | How did the code evolve? Interactive commit graph with branch/merge lanes, commit badges, author avatars, uncommitted delta banner, and commit inspector drawer. |
 | **Documents** | Every record with its status, owner and age. Open one to read it with an outline; IDs and links are clickable. |
 
 Click any ID to open that item: its row, plan, reviews, worklog entries, commits and

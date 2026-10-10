@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 660" width="1080" height="660" role="img" aria-labelledby="v-title v-desc">
   <title id="v-title">Nuhut SDLC Interactive Viewer Dashboard</title>
-  <desc id="v-desc">Interactive dashboard showing Git Lens commit graph, Blockages &amp; Flow command center, work item lifecycle inspector, and project navigation.</desc>
+  <desc id="v-desc">Interactive dashboard showing Git Graph commit graph, Blockages &amp; Flow command center, work item lifecycle inspector, and project navigation.</desc>
   <defs>
     <filter id="shadow" x="-4%" y="-2%" width="108%" height="106%" filterUnits="userSpaceOnUse">
       <feGaussianBlur stdDeviation="8" result="blur"/>
@@ -57,49 +57,49 @@
       <line x1="0" y1="44" x2="1048" y2="44" stroke="#30363D" stroke-width="1"/>
 
       <!-- Tab: Map -->
-      <text class="tab-text" x="24" y="26">🗺️ Map</text>
+      <text class="tab-text" x="24" y="26">Map</text>
 
       <!-- Tab: Board -->
-      <text class="tab-text" x="96" y="26">📋 Board</text>
+      <text class="tab-text" x="96" y="26">Board</text>
 
       <!-- Tab: Activity -->
-      <text class="tab-text" x="176" y="26">⚡ Activity</text>
+      <text class="tab-text" x="176" y="26">Activity</text>
 
       <!-- Tab: Blockages & Flow -->
-      <text class="tab-text" x="264" y="26">⛔ Blockages &amp; Flow</text>
+      <text class="tab-text" x="264" y="26">Blockages &amp; Flow</text>
       <rect x="390" y="16" width="18" height="15" rx="7.5" fill="#DA3633" fill-opacity="0.25"/>
       <text x="395" y="27" fill="#F85149" font-size="10px" font-weight="700">2</text>
 
-      <!-- Tab: Git Lens (Active) -->
+      <!-- Tab: Git Graph (Active) -->
       <rect x="424" y="6" width="98" height="36" rx="4" fill="url(#grad-active)"/>
-      <text class="tab-active" x="436" y="26">🌿 Git Lens</text>
+      <text class="tab-active" x="436" y="26">Git Graph</text>
       <line x1="432" y1="43" x2="514" y2="43" class="tab-border"/>
 
       <!-- Tab: Documents -->
-      <text class="tab-text" x="542" y="26">📄 Documents</text>
+      <text class="tab-text" x="542" y="26">Documents</text>
 
       <!-- Search & Shortcuts on right -->
       <rect x="750" y="8" width="170" height="28" rx="6" fill="#0D1117" stroke="#30363D"/>
-      <text x="762" y="26" fill="#6E7681" font-size="11px">🔍 Search... </text>
+      <text x="762" y="26" fill="#6E7681" font-size="11px">Search... </text>
       <rect x="886" y="13" width="26" height="18" rx="3" fill="#21262D"/>
       <text x="890" y="26" fill="#8B949E" font-size="10px" font-weight="600">⌘K</text>
 
       <rect x="930" y="8" width="98" height="28" rx="6" fill="#21262D" stroke="#30363D"/>
-      <text x="940" y="26" fill="#C9D1D9" font-size="11px" font-weight="500">⌨️ Help (?)</text>
+      <text x="940" y="26" fill="#C9D1D9" font-size="11px" font-weight="500">Help (?)</text>
     </g>
 
     <!-- Main Content Area -->
     <g transform="translate(18, 98)">
 
-      <!-- Top Section: Git Lens Tree Graph (Priority Layout) -->
+      <!-- Top Section: Git Graph Tree Graph (Priority Layout) -->
       <rect width="1012" height="160" rx="8" class="sub-card"/>
       <g transform="translate(16, 16)">
-        <text class="sec-head" x="0" y="6">🌿 Git Lens · Topological Commit Graph</text>
+        <text class="sec-head" x="0" y="6">Git Graph · Topological Commit Graph</text>
         <text class="body-muted" x="310" y="6">Interactive branch lanes, commit tags, and author history</text>
 
         <!-- Uncommitted delta alert pill -->
         <rect x="760" y="-8" width="220" height="22" rx="4" fill="#D29922" fill-opacity="0.15" stroke="#D29922" stroke-opacity="0.3"/>
-        <text x="770" y="7" fill="#E3B341" font-size="11px">⚡ 2 uncommitted working tree changes</text>
+        <text x="770" y="7" fill="#E3B341" font-size="11px">2 uncommitted working tree changes</text>
 
         <!-- Commit Lane 1 -->
         <g transform="translate(0, 32)">
@@ -156,7 +156,7 @@
         <!-- Left Column: Blockages & Dependencies Flow Board -->
         <rect width="520" height="300" rx="8" class="sub-card"/>
         <g transform="translate(16, 16)">
-          <text class="sec-head" x="0" y="6">⛔ Blockages &amp; Directed Dependency Flow</text>
+          <text class="sec-head" x="0" y="6">Blockages &amp; Directed Dependency Flow</text>
           <text class="body-muted" x="0" y="24">Real-time blocker propagation and critical bottleneck path</text>
 
           <!-- 3 Columns inside Blockage Board -->
@@ -173,7 +173,7 @@
             <text x="82" y="49" fill="#58A6FF" font-size="9px">In Progress</text>
             <text x="12" y="66" fill="#C9D1D9" font-size="11px" font-weight="500">Auth Token API</text>
             <rect x="12" y="74" width="118" height="16" rx="3" fill="#DA3633" fill-opacity="0.15"/>
-            <text x="16" y="86" fill="#F85149" font-size="10px">💥 Blast radius: 2 blocked</text>
+            <text x="16" y="86" fill="#F85149" font-size="10px">Blast radius: 2 blocked</text>
           </g>
 
           <!-- Flow Arrow 1 -->
@@ -290,9 +290,9 @@
             <!-- Linked Evidence & Artifacts Box -->
             <g transform="translate(0, 160)">
               <rect width="448" height="66" rx="4" fill="#161B22" stroke="#30363D"/>
-              <text x="12" y="20" fill="#58A6FF" font-size="11px">📄 plan.md: <tspan fill="#C9D1D9">docs/project/plans/ACME-104.md (approved)</tspan></text>
-              <text x="12" y="38" fill="#3FB950" font-size="11px">🛡️ security review: <tspan fill="#C9D1D9">PASS with 1 recommendation (token TTL)</tspan></text>
-              <text x="12" y="54" fill="#D29922" font-size="11px">⚠️ gate status: <tspan fill="#C9D1D9">Paused at Build until ACME-102 resolves</tspan></text>
+              <text x="12" y="20" fill="#58A6FF" font-size="11px">plan.md: <tspan fill="#C9D1D9">docs/project/plans/ACME-104.md (approved)</tspan></text>
+              <text x="12" y="38" fill="#3FB950" font-size="11px">security review: <tspan fill="#C9D1D9">PASS with 1 recommendation (token TTL)</tspan></text>
+              <text x="12" y="54" fill="#D29922" font-size="11px">gate status: <tspan fill="#C9D1D9">Paused at Build until ACME-102 resolves</tspan></text>
             </g>
           </g>
         </g>

@@ -437,14 +437,14 @@ plan, two reviews and a worklog entry. `sdlc.py view` reads them all at the mome
 it and opens one comprehensive, navigable page joined by work item ID:
 
 <p align="center">
-  <img src="assets/viewer-preview.svg" alt="Nuhut SDLC Interactive Viewer Dashboard: Git Lens, Blockages & Flow, Lifecycle Inspector, and Map" width="100%">
+  <img src="assets/viewer-preview.svg" alt="Nuhut SDLC Interactive Viewer Dashboard: Git Graph, Blockages & Flow, Lifecycle Inspector, and Map" width="100%">
 </p>
 
 The dashboard organizes project reality across six dedicated views:
 
 - **Map:** the whole project as a mind map (status, owner role, documents), folding and
   unfolding, with clipped titles, child count badges, doctor findings, and a quick-jump
-  `⚡ Blockages & Flow` button.
+  `Blockages & Flow` button.
 - **Board:** Kanban columns (Now, Next, Blocked, Parked, Later, Done), filtered by owner,
   tier, or text search. Cards show dependency blockers and downstream impact.
 - **Activity:** what is in flight right now, recent worklog entries, and a collapsible
@@ -454,7 +454,7 @@ The dashboard organizes project reality across six dedicated views:
   - **Bottleneck Matrix:** items ranked by blast radius (number of downstream tasks blocked).
   - **Human Decision Log:** items parked awaiting human sign-off with stall durations.
   - **Dependency Table:** explicit relationships and quick navigation.
-- **Git Lens:** visual topological Git commit graph positioned prominently above the fold:
+- **Git Graph:** visual topological Git commit graph positioned prominently above the fold:
   - Multi-branch commit lanes with branch splits, merges, and commit dots.
   - Commit badges (`main`, `review:passed`), author avatars, and relative timestamps.
   - Interactive commit drawer showing full commit message, SHA, author, and changed files.
@@ -477,7 +477,7 @@ fault.
 | --- | --- |
 | **`⌘K`** or **`Ctrl+K`** | Open Command Palette to search all work items, documents, and headings. |
 | **`?`** | Toggle the Keyboard Shortcuts & Help modal. |
-| **`1` - `6`** | Switch views instantly: `1` Map, `2` Board, `3` Activity, `4` Blockages, `5` Git Lens, `6` Documents. |
+| **`1` - `6`** | Switch views instantly: `1` Map, `2` Board, `3` Activity, `4` Blockages, `5` Git Graph, `6` Documents. |
 | **`/`** | Focus the header search input. |
 | **`Esc`** | Close open modal, commit drawer, or clear active search filter. |
 

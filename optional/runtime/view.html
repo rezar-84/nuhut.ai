@@ -242,7 +242,7 @@
   .shortcuts-modal.open { display: block; }
   .shortcuts-modal h3 { margin: 0 0 12px; font-size: 16px; }
   .shortcut-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
-  /* Git Graph / GitLens */
+  /* Git Graph */
   .git-graph-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
   .git-graph-table th { background: var(--panel); border-bottom: 2px solid var(--line); padding: 8px 10px; font-size: 11px; text-transform: uppercase; color: var(--muted); }
   .git-row { transition: background .12s ease; cursor: pointer; }
@@ -292,19 +292,29 @@
   .sub-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0 14px; }
   .sub-toolbar-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .sub-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  /* In-flight tasks grid */
+  .in-flight-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 8px 0 20px; }
+  .in-flight-grid .card { margin-bottom: 0; background: var(--panel); }
+  /* Form controls */
+  .filter-input { font: inherit; font-size: 12px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+  .filter-input:focus { border-color: var(--link); box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.2); }
+  .filter-select { font: inherit; font-size: 12px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; outline: none; transition: border-color .15s ease; }
+  .filter-select:focus { border-color: var(--link); }
   /* Board Table View */
   .board-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
   .board-table th { background: var(--panel); border-bottom: 2px solid var(--line); padding: 8px 10px; font-weight: 600; }
   .board-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
   .board-table tr:hover { background: var(--chip); }
   /* Docs Split Explorer */
-  .docs-split { display: grid; grid-template-columns: 320px 1fr; gap: 16px; min-height: 72vh; margin-top: 10px; align-items: start; }
+  .docs-split { display: grid; grid-template-columns: 290px 1fr; gap: 16px; min-height: 72vh; margin-top: 10px; align-items: start; }
+  .docs-split.sidebar-hidden { grid-template-columns: 1fr; }
+  .docs-split.sidebar-hidden .docs-tree-pane { display: none; }
   @media (max-width: 900px) { .docs-split { grid-template-columns: 1fr; } }
   .docs-tree-pane { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; overflow-y: auto; max-height: 82vh; }
-  .docs-preview-pane { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 16px 20px; overflow-y: auto; max-height: 82vh; display: flex; flex-direction: column; }
+  .docs-preview-pane { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 16px 20px; overflow-y: auto; max-height: 82vh; display: flex; flex-direction: column; min-width: 0; }
   .docs-preview-hdr { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
   .tree-folder { margin-bottom: 8px; }
-  .tree-folder-title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 4px 6px; cursor: pointer; border-radius: 4px; user-select: none; }
+  .tree-folder-title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 4px 6px; cursor: pointer; border-radius: 4px; user-select: none; }
   .tree-folder-title:hover { background: rgba(127,127,127,0.08); color: var(--text); }
   .tree-doc-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; margin: 1px 0; border-radius: 6px; font-size: 13px; color: var(--text); cursor: pointer; text-decoration: none; border-left: 2px solid transparent; }
   .tree-doc-item:hover { background: rgba(127,127,127,0.08); text-decoration: none; }
@@ -1032,11 +1042,11 @@
       var metaLines = [];
       if (n.blocked) {
         var open = unresolved(it);
-        metaLines.push("⚠ Blocked: waits on " + open.join(", "));
+        metaLines.push("Blocked: waits on " + open.join(", "));
       }
       var openDeps = (it.dependents || []).filter(function (d) { return ITEMS[d] && ITEMS[d].column !== "Done"; });
       if (openDeps.length && it.column !== "Done") {
-        metaLines.push("⛔ Active Blocker: blocks " + openDeps.join(", "));
+        metaLines.push("Active Blocker: blocks " + openDeps.join(", "));
       }
       if (it.steps) {
         metaLines.push("Progress: " + (n.stepsDone || 0) + "/" + M.steps.length + " lifecycle steps");
@@ -1124,7 +1134,7 @@
         cls: "banner bad",
         style: "margin-bottom: 12px; padding: 8px 12px; font-size: 12px; background: var(--badbg); border-left: 3px solid var(--bad);"
       }, [
-        el("strong", { text: "⚠ Blocked: " }),
+        el("strong", { text: "Blocked: " }),
         document.createTextNode("Waiting on " + openBlocked.join(", ") + " before this can finish.")
       ]));
     } else if (openDependents.length && it.column !== "Done") {
@@ -1132,7 +1142,7 @@
         cls: "banner",
         style: "margin-bottom: 12px; padding: 8px 12px; font-size: 12px; background: rgba(191, 135, 0, 0.1); border-left: 3px solid var(--warn, #bf8700); color: var(--text);"
       }, [
-        el("strong", { text: "⛔ Active Blocker: " }),
+        el("strong", { text: "Active Blocker: " }),
         document.createTextNode("Holding up " + openDependents.length + " downstream item" + (openDependents.length === 1 ? "" : "s") + " (" + openDependents.join(", ") + ").")
       ]));
     }
@@ -1764,11 +1774,11 @@
       var tagOffset = n.x + 14 + n.label.length * 7.2 + (kids.length && !open ? 24 : 0);
       if (n.blocked) {
         var warnTag = s("text", { x: tagOffset, y: n.y + 4, fill: "var(--bad)", "font-weight": "700", "font-size": "11px" });
-        warnTag.textContent = (kids.length && open) ? "⚠" : "⚠ blocked";
+        warnTag.textContent = (kids.length && open) ? "blocked" : "blocked";
         gNode.appendChild(warnTag);
       } else if (isBlocker) {
         var blkTag = s("text", { x: tagOffset, y: n.y + 4, fill: "#bf8700", "font-weight": "700", "font-size": "11px" });
-        blkTag.textContent = (kids.length && open) ? ("⛔ " + n.blocksCount) : ("⛔ blocks " + n.blocksCount);
+        blkTag.textContent = (kids.length && open) ? ("blocks " + n.blocksCount) : ("blocks " + n.blocksCount);
         gNode.appendChild(blkTag);
       }
 
@@ -2000,7 +2010,7 @@
       el("div", { cls: "map-filter" }, [filterInput, clearFilterBtn]),
       matchBadge,
       el("button", {
-        text: "⚡ Blockages & Flow ↗",
+        text: "Blockages & Flow ↗",
         title: "Open dedicated Dependencies & Blockages command center",
         style: "font-weight: 600; color: var(--warn); border-color: var(--warn);",
         on: { click: function () { go("waiting"); } }
@@ -2061,7 +2071,7 @@
     ]));
 
     if (M.git && M.git.stats && M.git.stats.total) {
-      var gs = el("a", { cls: "stat clickable", href: "#/git", title: "Open Git Lens & Commit graph" }, [
+      var gs = el("a", { cls: "stat clickable", href: "#/git", title: "Open Git Graph & commit history" }, [
         el("b", { text: M.git.stats.rate + "%" }),
         el("span", { text: "git traceability (" + M.git.stats.linked + "/" + M.git.stats.total + ")" })
       ]);
@@ -2083,24 +2093,24 @@
       el("span", { cls: "muted", style: "font-size: 12px; margin-right: 4px;", text: "Quick Jump:" }),
       el("button", {
         cls: "preset-btn",
-        text: "⚡ Blockages & Flow ↗",
+        text: "Blockages & Flow ↗",
         style: "color: var(--warn); font-weight: 600; border-color: var(--warn);",
         on: { click: function () { go("waiting"); } }
       }),
       el("button", {
         cls: "preset-btn",
-        text: "🌿 Git Lens ↗",
+        text: "Git Graph ↗",
         style: "color: var(--link); font-weight: 600;",
         on: { click: function () { go("git"); } }
       }),
       el("button", {
         cls: "preset-btn",
-        text: "📋 Kanban Board ↗",
+        text: "Board ↗",
         on: { click: function () { go("board"); } }
       }),
       el("button", {
         cls: "preset-btn",
-        text: "🗂️ Documents Explorer ↗",
+        text: "Documents ↗",
         on: { click: function () { go("docs"); } }
       })
     ]);
@@ -2344,7 +2354,7 @@
     M.order.forEach(function (id) { if (ITEMS[id].owner) owners[ITEMS[id].owner] = 1; if (ITEMS[id].tier) tiers[ITEMS[id].tier] = 1; });
 
     function sel(key, label, values) {
-      var s = el("select", { "aria-label": label, on: { change: function () { FILTER[key] = s.value; updateBoardContent(); } } },
+      var s = el("select", { cls: "filter-select", "aria-label": label, on: { change: function () { FILTER[key] = s.value; updateBoardContent(); } } },
         [el("option", { value: "", text: "All " + label })].concat(Object.keys(values).sort().map(function (v) {
           var o = el("option", { value: v, text: v });
           if (FILTER[key] === v) o.selected = true;
@@ -2359,13 +2369,13 @@
     }
     groupOpts.push(el("option", { value: "owner", text: "Group: By Owner Role" }));
     groupOpts.push(el("option", { value: "tier", text: "Group: By Risk Tier" }));
-    var groupSel = el("select", { "aria-label": "Group by", on: { change: function () { FILTER.group = groupSel.value; updateBoardContent(); } } }, groupOpts);
+    var groupSel = el("select", { cls: "filter-select", "aria-label": "Group by", on: { change: function () { FILTER.group = groupSel.value; updateBoardContent(); } } }, groupOpts);
     if (FILTER.group === "epic" && (!M.epics || !M.epics.length)) {
       FILTER.group = "none";
     }
     groupSel.value = FILTER.group;
 
-    var sortSel = el("select", { "aria-label": "Sort by", on: { change: function () { FILTER.sort = sortSel.value; updateBoardContent(); } } }, [
+    var sortSel = el("select", { cls: "filter-select", "aria-label": "Sort by", on: { change: function () { FILTER.sort = sortSel.value; updateBoardContent(); } } }, [
       el("option", { value: "default", text: "Sort: Backlog order" }),
       el("option", { value: "tier", text: "Sort: Tier (Tier 1 first)" }),
       el("option", { value: "title", text: "Sort: Title (A-Z)" }),
@@ -2373,14 +2383,14 @@
     ]);
     sortSel.value = FILTER.sort;
 
-    var text = el("input", { type: "search", placeholder: "Filter titles or IDs", value: FILTER.text,
+    var text = el("input", { type: "search", cls: "filter-input", placeholder: "Filter titles or IDs", value: FILTER.text,
       on: { input: function () { FILTER.text = text.value; updateBoardContent(); } } });
     var dropped = el("input", { type: "checkbox", id: "dropped", on: { change: function () { FILTER.dropped = dropped.checked; updateBoardContent(); } } });
     dropped.checked = FILTER.dropped;
 
     var btnKanban = el("button", {
       cls: (FILTER.view !== "table" ? "active" : ""),
-      text: "📋 Kanban Columns",
+      text: "Board",
       on: { click: function () {
         FILTER.view = "kanban";
         btnKanban.classList.add("active");
@@ -2390,7 +2400,7 @@
     });
     var btnTable = el("button", {
       cls: (FILTER.view === "table" ? "active" : ""),
-      text: "📄 Interactive Table",
+      text: "Table",
       on: { click: function () {
         FILTER.view = "table";
         btnTable.classList.add("active");
@@ -2574,9 +2584,11 @@
     main.appendChild(h(2, "In flight"));
     var now = M.order.filter(function (id) { return ITEMS[id].column === "Now"; });
     if (!now.length) main.appendChild(el("p", { cls: "muted", text: "Nothing is In progress or In review." }));
-    var row = el("div", { cls: "board" });
-    now.forEach(function (id) { row.appendChild(card(id)); });
-    main.appendChild(row);
+    else {
+      var grid = el("div", { cls: "in-flight-grid" });
+      now.forEach(function (id) { grid.appendChild(card(id)); });
+      main.appendChild(grid);
+    }
     main.appendChild(h(2, "Latest worklog entries"));
     var order = WL.map(function (_, n) { return n; });
     order.sort(function (a, b) { return (WL[b].date || "").localeCompare(WL[a].date || "") || a - b; });
@@ -2687,22 +2699,23 @@
     var viewSwitcher = el("div", { cls: "view-segmented" }, [
       el("button", {
         cls: (BLOCKAGE_STATE.view === "flow" ? "active" : ""),
-        text: "⚡ Directed Flow Board",
+        text: "Flow Graph",
         on: { click: function () { BLOCKAGE_STATE.view = "flow"; render(); } }
       }),
       el("button", {
         cls: (BLOCKAGE_STATE.view === "matrix" ? "active" : ""),
-        text: "📊 Bottleneck Matrix",
+        text: "Blocker Matrix",
         on: { click: function () { BLOCKAGE_STATE.view = "matrix"; render(); } }
       }),
       el("button", {
         cls: (BLOCKAGE_STATE.view === "table" ? "active" : ""),
-        text: "📋 Dependency Table",
+        text: "Table",
         on: { click: function () { BLOCKAGE_STATE.view = "table"; render(); } }
       })
     ]);
 
     var tierSel = el("select", {
+      cls: "filter-select",
       "aria-label": "Filter by Tier",
       on: { change: function () { BLOCKAGE_STATE.tier = tierSel.value; renderBlockageContent(); } }
     }, [
@@ -2715,6 +2728,7 @@
 
     var qInput = el("input", {
       type: "search",
+      cls: "filter-input",
       placeholder: "Filter items, titles, owners…",
       value: BLOCKAGE_STATE.query,
       style: "flex: 1 1 200px; max-width: 280px;",
@@ -2786,7 +2800,7 @@
         if (showCol1) {
           var col1 = el("div", { cls: "dep-col" + (BLOCKAGE_STATE.filter === "blockers" ? " active" : "") });
           col1.appendChild(el("div", { cls: "dep-col-hdr" }, [
-            el("span", { text: "🛑 Root Blockers (Prerequisites)" }),
+            el("span", { text: "Root Blockers (Prerequisites)" }),
             el("span", { cls: "chip", text: String(fBlockers.length) })
           ]));
           col1.appendChild(el("p", { cls: "dep-col-desc", text: "Active tasks that other items are waiting on. Complete these to unblock downstream work." }));
@@ -2805,7 +2819,7 @@
                 it.owner ? el("span", { cls: "chip", text: it.owner }) : null
               ]);
               var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || b.id });
-              var badge = el("div", { cls: "dep-blast-badge", text: "⛔ Blocks " + b.count + " downstream item" + (b.count > 1 ? "s" : "") });
+              var badge = el("div", { cls: "dep-blast-badge", text: "Blocks " + b.count + " downstream item" + (b.count > 1 ? "s" : "") });
 
               var chips = el("div", { cls: "dep-chip-list" });
               chips.appendChild(el("span", { cls: "muted", style: "font-size: 11px; align-self: center; margin-right: 2px;", text: "↳ Blocks:" }));
@@ -2836,7 +2850,7 @@
         if (showCol2) {
           var col2 = el("div", { cls: "dep-col" + (BLOCKAGE_STATE.filter === "blocked" ? " active" : "") });
           col2.appendChild(el("div", { cls: "dep-col-hdr" }, [
-            el("span", { text: "⏳ Blocked Tasks" }),
+            el("span", { text: "Blocked Tasks" }),
             el("span", { cls: "chip", text: String(fBlocked.length) })
           ]));
           col2.appendChild(el("p", { cls: "dep-col-desc", text: "Tasks that cannot proceed because technical prerequisites are incomplete." }));
@@ -2855,7 +2869,7 @@
                 it.owner ? el("span", { cls: "chip", text: it.owner }) : null
               ]);
               var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || b.id });
-              var badge = el("div", { cls: "dep-blocked-badge", text: "⚠ Waits on " + b.count + " prerequisite" + (b.count > 1 ? "s" : "") });
+              var badge = el("div", { cls: "dep-blocked-badge", text: "Waits on " + b.count + " prerequisite" + (b.count > 1 ? "s" : "") });
 
               var chips = el("div", { cls: "dep-chip-list" });
               chips.appendChild(el("span", { cls: "muted", style: "font-size: 11px; align-self: center; margin-right: 2px;", text: "Prerequisites:" }));
@@ -2888,7 +2902,7 @@
         if (showCol3) {
           var col3 = el("div", { cls: "dep-col" + (BLOCKAGE_STATE.filter === "human" ? " active" : "") });
           col3.appendChild(el("div", { cls: "dep-col-hdr" }, [
-            el("span", { text: "👤 Waiting on Human" }),
+            el("span", { text: "Waiting on Human" }),
             el("span", { cls: "chip", text: String(fHuman.length) })
           ]));
           col3.appendChild(el("p", { cls: "dep-col-desc", text: "Parked items waiting for human input, API keys, credentials, or architectural review." }));
@@ -2932,7 +2946,7 @@
         if (BLOCKAGE_STATE.filter === "ready") {
           var col4 = el("div", { cls: "dep-col active" });
           col4.appendChild(el("div", { cls: "dep-col-hdr" }, [
-            el("span", { text: "🚀 Ready to Start (0 Blockers)" }),
+            el("span", { text: "Ready to Start (0 Blockers)" }),
             el("span", { cls: "chip", text: String(fReady.length) })
           ]));
           col4.appendChild(el("p", { cls: "dep-col-desc", text: "Active tasks with no pending technical prerequisites." }));
@@ -3148,7 +3162,7 @@
         var isHead = /HEAD/.test(r);
         var isTag = /^tag:/.test(r);
         var cls = isHead ? "git-ref git-ref-head" : (isTag ? "git-ref git-ref-tag" : "git-ref git-ref-remote");
-        refWrap.appendChild(el("span", { cls: cls, text: (isHead ? "⎇ " : (isTag ? "🏷 " : "")) + r.replace(/^tag:\s*/, "") }));
+        refWrap.appendChild(el("span", { cls: cls, text: (isTag ? "tag: " : "") + r.replace(/^tag:\s*/, "") }));
       });
       body.appendChild(refWrap);
     }
@@ -3489,18 +3503,18 @@
     var viewSwitcher = el("div", { cls: "view-segmented" }, [
       el("button", {
         cls: (GIT_STATE.tab === "graph" ? "active" : ""),
-        text: "🌿 Commit Graph & History (" + allCommits.length + ")",
+        text: "Commit Graph (" + allCommits.length + ")",
         on: { click: function () { GIT_STATE.tab = "graph"; render(); } }
       }),
       el("button", {
         cls: (GIT_STATE.tab === "working_tree" ? "active" : ""),
-        text: "⚠️ Working Tree (" + (git.clean ? "Clean" : git.modified_count) + ")",
+        text: "Working Tree (" + (git.clean ? "Clean" : git.modified_count) + ")",
         style: (!git.clean ? "color: var(--warn); font-weight: 600;" : ""),
         on: { click: function () { GIT_STATE.tab = "working_tree"; render(); } }
       }),
       el("button", {
         cls: (GIT_STATE.tab === "branches" ? "active" : ""),
-        text: "⎇ Branches & Remotes (" + ((git.branches || []).length) + ")",
+        text: "Branches & Remotes (" + ((git.branches || []).length) + ")",
         on: { click: function () { GIT_STATE.tab = "branches"; render(); } }
       })
     ]);
@@ -3511,6 +3525,7 @@
       allCommits.forEach(function (c) { if (c.author) authors[c.author] = (authors[c.author] || 0) + 1; });
 
       var authorSel = el("select", {
+        cls: "filter-select",
         "aria-label": "Filter by Author",
         on: { change: function () { GIT_STATE.author = authorSel.value; renderCommitList(); } }
       }, [
@@ -3522,6 +3537,7 @@
       })));
 
       var modeSel = el("select", {
+        cls: "filter-select",
         "aria-label": "Commit filter mode",
         on: { change: function () { GIT_STATE.mode = modeSel.value; renderCommitList(); } }
       }, [
@@ -3532,16 +3548,18 @@
       modeSel.value = GIT_STATE.mode;
 
       var viewStyleSel = el("select", {
+        cls: "filter-select",
         "aria-label": "Graph view style",
         on: { change: function () { GIT_STATE.viewStyle = viewStyleSel.value; renderCommitList(); } }
       }, [
-        el("option", { value: "graph", text: "Visual Git Graph (GitLens)" }),
-        el("option", { value: "table", text: "Compact Table View" })
+        el("option", { value: "graph", text: "Visual Graph" }),
+        el("option", { value: "table", text: "Table" })
       ]);
       viewStyleSel.value = GIT_STATE.viewStyle;
 
       var qInput = el("input", {
         type: "search",
+        cls: "filter-input",
         placeholder: "Filter commits, authors, SHAs…",
         value: GIT_STATE.query,
         style: "flex: 1 1 200px; max-width: 260px;",
@@ -3563,7 +3581,7 @@
       contentContainer.appendChild(h(2, "Working Tree & Local Modifications"));
       if (git.clean || !git.modified_files || !git.modified_files.length) {
         var cleanBox = el("div", { cls: "banner", style: "border-color: var(--accent); background: var(--okbg);" }, [
-          el("strong", { style: "color: var(--accent);", text: "✓ Working tree is clean." }),
+          el("strong", { style: "color: var(--accent);", text: "Working tree is clean." }),
           el("p", { cls: "muted", style: "margin: 4px 0 0; font-size: 13px;", text: "All tracked and local files match the current HEAD commit." })
         ]);
         contentContainer.appendChild(cleanBox);
@@ -3699,7 +3717,7 @@
               var cls = isHead ? "git-ref git-ref-head" : (isTag ? "git-ref git-ref-tag" : "git-ref git-ref-remote");
               subjectCell.appendChild(el("span", {
                 cls: cls,
-                text: (isHead ? "⎇ " : (isTag ? "🏷 " : "")) + refName.replace(/^tag:\s*/, "")
+                text: (isTag ? "tag: " : "") + refName.replace(/^tag:\s*/, "")
               }));
             });
           }
@@ -3801,7 +3819,7 @@
       el("a", {
         cls: "chip",
         href: "#/board/focus/" + encodeURIComponent(id),
-        text: "🎯 Jump to on Board (" + stageName + ")",
+        text: "Jump to Board (" + stageName + ")",
         style: "color: var(--link); font-weight: 500; text-decoration: none; margin-left: 6px;"
       })
     ]));
@@ -3874,7 +3892,8 @@
     view: "split",
     selectedPath: "",
     query: "",
-    status: "all"
+    status: "all",
+    sidebarVisible: true
   };
 
   function viewDocs() {
@@ -3889,27 +3908,54 @@
 
     // View mode toggle
     var seg = el("div", { cls: "view-segmented" });
-    var btnSplit = el("button", { text: "🗂️ Split Explorer & Quick View", cls: DOCS_STATE.view === "split" ? "active" : "" });
-    btnSplit.onclick = function () { DOCS_STATE.view = "split"; viewDocs(); };
-    var btnTable = el("button", { text: "📋 All Documents Table", cls: DOCS_STATE.view === "table" ? "active" : "" });
-    btnTable.onclick = function () { DOCS_STATE.view = "table"; viewDocs(); };
+    var btnSplit = el("button", { text: "Explorer", cls: DOCS_STATE.view === "split" ? "active" : "" });
+    var btnTable = el("button", { text: "Table", cls: DOCS_STATE.view === "table" ? "active" : "" });
     seg.appendChild(btnSplit);
     seg.appendChild(btnTable);
     left.appendChild(seg);
 
+    // Sidebar toggle button (for explorer mode)
+    var btnSidebar = el("button", {
+      cls: "btn" + (DOCS_STATE.sidebarVisible ? " active" : ""),
+      text: DOCS_STATE.sidebarVisible ? "Hide Sidebar" : "Show Sidebar",
+      style: DOCS_STATE.view === "split" ? "font-size: 12px; padding: 4px 10px;" : "display: none;"
+    });
+    left.appendChild(btnSidebar);
+
+    btnSplit.onclick = function () {
+      DOCS_STATE.view = "split";
+      btnSplit.classList.add("active");
+      btnTable.classList.remove("active");
+      btnSidebar.style.display = "";
+      renderDocsContent();
+    };
+
+    btnTable.onclick = function () {
+      DOCS_STATE.view = "table";
+      btnTable.classList.add("active");
+      btnSplit.classList.remove("active");
+      btnSidebar.style.display = "none";
+      renderDocsContent();
+    };
+
+    btnSidebar.onclick = function () {
+      DOCS_STATE.sidebarVisible = !DOCS_STATE.sidebarVisible;
+      btnSidebar.textContent = DOCS_STATE.sidebarVisible ? "Hide Sidebar" : "Show Sidebar";
+      btnSidebar.classList.toggle("active", DOCS_STATE.sidebarVisible);
+      var splitEl = document.getElementById("docs-split-container");
+      if (splitEl) {
+        splitEl.classList.toggle("sidebar-hidden", !DOCS_STATE.sidebarVisible);
+      }
+    };
+
     // Search filter input
     var searchInp = el("input", {
       type: "search",
-      placeholder: "Filter documents by name, path, owner...",
+      cls: "filter-input",
+      placeholder: "Filter documents...",
       value: DOCS_STATE.query || ""
     });
-    searchInp.style.fontSize = "12.5px";
-    searchInp.style.padding = "5px 10px";
-    searchInp.style.borderRadius = "6px";
-    searchInp.style.border = "1px solid var(--line)";
-    searchInp.style.background = "var(--panel)";
-    searchInp.style.color = "var(--text)";
-    searchInp.style.minWidth = "220px";
+    searchInp.style.minWidth = "200px";
     searchInp.oninput = function () {
       DOCS_STATE.query = searchInp.value;
       renderDocsContent();
@@ -3924,18 +3970,12 @@
     });
     allStatuses.sort();
 
-    var statusSel = el("select", null, [el("option", { value: "all", text: "All Statuses" })]);
+    var statusSel = el("select", { cls: "filter-select" }, [el("option", { value: "all", text: "All Statuses" })]);
     allStatuses.forEach(function (s) {
       var opt = el("option", { value: s, text: "Status: " + s });
       if (DOCS_STATE.status === s) opt.selected = true;
       statusSel.appendChild(opt);
     });
-    statusSel.style.fontSize = "12px";
-    statusSel.style.padding = "5px 8px";
-    statusSel.style.borderRadius = "6px";
-    statusSel.style.border = "1px solid var(--line)";
-    statusSel.style.background = "var(--panel)";
-    statusSel.style.color = "var(--text)";
     statusSel.onchange = function () {
       DOCS_STATE.status = statusSel.value;
       renderDocsContent();
@@ -4022,16 +4062,19 @@
 
         var tdActions = el("td", null, [
           el("button", {
-            text: "👁️ Preview",
+            text: "Preview",
             cls: "btn",
             style: "padding: 3px 8px; font-size: 11.5px; margin-right: 6px;",
             onclick: function () {
               DOCS_STATE.view = "split";
               DOCS_STATE.selectedPath = d.path;
-              viewDocs();
+              btnSplit.classList.add("active");
+              btnTable.classList.remove("active");
+              btnSidebar.style.display = "";
+              renderDocsContent();
             }
           }),
-          link("↗ Full View", docRoute(n))
+          link("Open ↗", docRoute(n))
         ]);
 
         t.appendChild(el("tr", null, [tdDoc, tdKind, tdStatus, tdOwner, tdReviewed, tdAge, tdActions]));
@@ -4056,7 +4099,10 @@
         DOCS_STATE.selectedPath = curSelected.path;
       }
 
-      var split = el("div", { cls: "docs-split" });
+      var split = el("div", {
+        id: "docs-split-container",
+        cls: "docs-split" + (DOCS_STATE.sidebarVisible ? "" : " sidebar-hidden")
+      });
       var treePane = el("div", { cls: "docs-tree-pane" });
       var previewPane = el("div", { cls: "docs-preview-pane" });
 
@@ -4076,7 +4122,7 @@
       groupOrder.forEach(function (dir) {
         var folderBox = el("div", { cls: "tree-folder" });
         var folderHdr = el("div", { cls: "tree-folder-title" });
-        folderHdr.innerHTML = "<span>📁</span> <span>" + dir + "</span> <span class='chip' style='margin-left:auto; font-size:10px;'>" + groups[dir].length + "</span>";
+        folderHdr.innerHTML = "<span>" + dir + "</span> <span class='chip' style='margin-left:auto; font-size:10px;'>" + groups[dir].length + "</span>";
 
         var folderItems = el("div", { cls: "tree-folder-items" });
 
@@ -4086,7 +4132,6 @@
           var itemRow = el("div", { cls: "tree-doc-item" + (isSelected ? " active" : "") });
 
           var leftPart = el("div", { style: "display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" });
-          leftPart.appendChild(el("span", { text: "📄", style: "font-size: 13px;" }));
           var titleEl = el("span", { text: fileName, style: "font-weight:" + (isSelected ? "600" : "400") + "; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" });
           titleEl.title = d.path + (d.title ? " (" + d.title + ")" : "");
           leftPart.appendChild(titleEl);
@@ -4133,7 +4178,7 @@
 
         var hdrLeft = el("div", null);
         var docTitle = doc.title || doc.path.slice(doc.path.lastIndexOf("/") + 1);
-        hdrLeft.appendChild(h(2, "📄 " + docTitle));
+        hdrLeft.appendChild(h(2, docTitle));
 
         var metaBar = el("div", { style: "display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:6px; font-size:12px;" });
         metaBar.appendChild(el("code", { text: doc.path, style: "color:var(--text); background:var(--chip); padding:2px 6px; border-radius:4px;" }));
@@ -4150,7 +4195,7 @@
         var openFullBtn = el("a", {
           href: "#/" + docRoute(n),
           cls: "btn primary",
-          text: "↗ Open Full View",
+          text: "Open Full View ↗",
           style: "font-weight:600; text-decoration:none; padding:6px 12px; font-size:12.5px;"
         });
         hdrRight.appendChild(openFullBtn);
@@ -4162,7 +4207,7 @@
         // Linked Items / mentions
         if (doc.mentions && doc.mentions.length) {
           var mentionsBox = el("div", { style: "margin-bottom:14px; padding:8px 12px; background:var(--panel); border:1px solid var(--line); border-radius:6px; font-size:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;" });
-          mentionsBox.appendChild(el("strong", { text: "🔗 Linked Work Items:" }));
+          mentionsBox.appendChild(el("strong", { text: "Linked Items:" }));
           doc.mentions.forEach(function (id) {
             mentionsBox.appendChild(itemLink(id));
           });
@@ -4172,7 +4217,7 @@
         // Quick table of contents outline if headings exist
         if (doc.headings && doc.headings.length > 1) {
           var tocBox = el("div", { style: "margin-bottom:16px; padding:10px 12px; background:var(--panel); border-radius:6px; border-left:3px solid var(--link); font-size:12px;" });
-          tocBox.appendChild(el("div", { text: "📑 Outline & Sections", style: "font-weight:600; margin-bottom:6px; color:var(--muted); text-transform:uppercase; font-size:11px; letter-spacing:0.04em;" }));
+          tocBox.appendChild(el("div", { text: "Outline", style: "font-weight:600; margin-bottom:6px; color:var(--muted); text-transform:uppercase; font-size:11px; letter-spacing:0.04em;" }));
           var tocList = el("div", { style: "display:flex; flex-wrap:wrap; gap:6px;" });
           doc.headings.forEach(function (hd) {
             var jumpLink = el("a", {

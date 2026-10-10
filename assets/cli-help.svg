@@ -62,7 +62,7 @@
       <!-- Line 3: view live server and export -->
       <text x="0" y="292"><tspan class="p-prompt">$ </tspan><tspan class="p-cmd">python3 .ai-sdlc/bin/sdlc.py view --serve --port 8765</tspan></text>
       <text x="0" y="312"><tspan class="t-ok">● Live viewer:</tspan><tspan class="t-purple"> http://127.0.0.1:8765 </tspan><tspan class="t-muted">(watching records &amp; git history)</tspan></text>
-      <text x="0" y="330"><tspan class="t-muted">Loaded 6 views: Map · Board · Activity · Blockages · Git Lens · Documents</tspan></text>
+      <text x="0" y="330"><tspan class="t-muted">Loaded 6 views: Map · Board · Activity · Blockages · Git Graph · Documents</tspan></text>
 
       <!-- Blank line -->
       <!-- Line 4: headless export -->
