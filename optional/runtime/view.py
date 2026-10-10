@@ -314,21 +314,31 @@ def build(rt, project):
         doc["stage"] = (m.group(2) or "") if m else ""
         model["docs"].append(doc)
 
-    # Commits that name an ID, plus full git traceability metadata.
-    log = project.git("log", "-n", str(MAX_COMMITS), "--date=short",
-                      "--format=%h%x1f%an%x1f%ad%x1f%s")
+    # Commits that name an ID, plus full git traceability metadata and graph linkages.
+    log = project.git("log", "--all", "-n", str(MAX_COMMITS), "--date=short",
+                      "--format=%h%x1f%p%x1f%d%x1f%an%x1f%ad%x1f%s")
     commits = {}
     all_commits = []
     for line in log.splitlines():
         parts = line.split("\x1f")
-        if len(parts) == 4:
+        if len(parts) >= 6:
+            sha, parents_raw, refs_raw, author, date = parts[0], parts[1], parts[2], parts[3], parts[4]
+            subject = "\x1f".join(parts[5:])
+            parents = [p for p in parents_raw.split() if p]
+            refs = [r.strip() for r in refs_raw.strip(" ()").split(",") if r.strip()]
+        elif len(parts) == 4:
             sha, author, date, subject = parts
+            parents = []
+            refs = []
         elif len(parts) == 3:
             sha, author, date, subject = parts[0], "", parts[1], parts[2]
+            parents = []
+            refs = []
         else:
             continue
         found = sorted(set(id_re.findall(subject)))
-        all_commits.append({"sha": sha, "author": author, "date": date,
+        all_commits.append({"sha": sha, "parents": parents, "refs": refs,
+                            "author": author, "date": date,
                             "subject": subject, "items": found})
         for fid in found:
             commits.setdefault(fid, []).append({"sha": sha, "author": author,
@@ -357,6 +367,21 @@ def build(rt, project):
             "date": bdate, "subject": bsubj, "items": bitems,
         })
 
+    remote_raw = project.git("remote", "get-url", "origin").strip()
+    remote_web = ""
+    if remote_raw:
+        if remote_raw.startswith("git@") and ":" in remote_raw:
+            host, rpath = remote_raw[4:].split(":", 1)
+            rpath = rpath.rstrip("/")
+            if rpath.endswith(".git"):
+                rpath = rpath[:-4]
+            remote_web = "https://%s/%s" % (host, rpath)
+        elif remote_raw.startswith("http://") or remote_raw.startswith("https://"):
+            rpath = remote_raw.rstrip("/")
+            if rpath.endswith(".git"):
+                rpath = rpath[:-4]
+            remote_web = rpath
+
     total_commits = len(all_commits)
     linked_commits = sum(1 for c in all_commits if c["items"])
     untracked_commits = total_commits - linked_commits
@@ -369,6 +394,7 @@ def build(rt, project):
         "modified_files": modified_files[:100],
         "branches": branches,
         "commits": all_commits[:1000],
+        "remote_url": remote_web,
         "stats": {
             "total": total_commits,
             "linked": linked_commits,
