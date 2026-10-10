@@ -49,7 +49,7 @@
       <text x="0" y="112"><tspan class="t-ok">doctor verdict: </tspan><tspan class="t-ok">PASS</tspan><tspan class="t-muted"> (0 errors, 1 warning)</tspan></text>
 
       <!-- Blank line -->
-      <!-- Line 2: verify --parallel -->
+      <!-- Line 2: verify parallel execution -->
       <text x="0" y="146"><tspan class="p-prompt">$ </tspan><tspan class="p-cmd">python3 .ai-sdlc/bin/sdlc.py verify --parallel</tspan></text>
       <text x="0" y="166"><tspan class="t-muted">sdlc.py verify · running check pipeline concurrently (ThreadPoolExecutor)...</tspan></text>
       <text x="0" y="186"><tspan class="t-ok">  [pass]</tspan><tspan fill="#F0F6FC"> lint</tspan><tspan class="t-muted">        npm run lint (0.42s)</tspan></text>
@@ -59,7 +59,7 @@
       <text x="0" y="258"><tspan class="t-cyan">evidence written:</tspan><tspan class="t-muted"> .ai-sdlc/evidence/2026-10-10-verify.txt</tspan></text>
 
       <!-- Blank line -->
-      <!-- Line 3: view --serve / --export-html -->
+      <!-- Line 3: view live server and export -->
       <text x="0" y="292"><tspan class="p-prompt">$ </tspan><tspan class="p-cmd">python3 .ai-sdlc/bin/sdlc.py view --serve --port 8765</tspan></text>
       <text x="0" y="312"><tspan class="t-ok">● Live viewer:</tspan><tspan class="t-purple"> http://127.0.0.1:8765 </tspan><tspan class="t-muted">(watching records &amp; git history)</tspan></text>
       <text x="0" y="330"><tspan class="t-muted">Loaded 6 views: Map · Board · Activity · Blockages · Git Lens · Documents</tspan></text>
