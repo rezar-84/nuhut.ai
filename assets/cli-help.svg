@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" width="960" height="480" role="img" aria-labelledby="c-title c-desc">
+  <title id="c-title">Nuhut SDLC CLI Commands and Doctor Suite</title>
+  <desc id="c-desc">Terminal screenshot showing the sdlc.py CLI commands: doctor, verify --parallel, plan-check, view --serve, and metrics.</desc>
+  <defs>
+    <filter id="term-shadow" x="-3%" y="-2%" width="106%" height="106%" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0   0 0 0 0 0   0 0 0 0 0  0 0 0 0.4 0"/>
+      <feComposite in2="blur" operator="over"/>
+    </filter>
+  </defs>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12.5px; }
+    .term-bg { fill: #0D1117; stroke: #30363D; stroke-width: 1; }
+    .term-header { fill: #161B22; border-bottom: 1px solid #30363D; }
+    .t-title { fill: #8B949E; font-size: 12px; font-weight: 500; }
+    .p-prompt { fill: #58A6FF; font-weight: 600; }
+    .p-cmd { fill: #F0F6FC; font-weight: 600; }
+    .t-ok { fill: #3FB950; font-weight: 600; }
+    .t-warn { fill: #D29922; }
+    .t-err { fill: #F85149; }
+    .t-muted { fill: #8B949E; }
+    .t-cyan { fill: #39C5CF; }
+    .t-purple { fill: #BC8CFF; }
+  </style>
+
+  <!-- Background -->
+  <rect width="960" height="480" rx="10" fill="#010409"/>
+
+  <!-- Terminal Window Frame -->
+  <g transform="translate(16, 16)">
+    <rect width="928" height="448" rx="8" class="term-bg" filter="url(#term-shadow)"/>
+
+    <!-- Header bar with buttons -->
+    <rect width="928" height="34" rx="8" class="term-header"/>
+    <circle cx="20" cy="17" r="5.5" fill="#FF5F56"/>
+    <circle cx="38" cy="17" r="5.5" fill="#FFBD2E"/>
+    <circle cx="56" cy="17" r="5.5" fill="#27C93F"/>
+    <text class="t-title" x="464" y="21" text-anchor="middle">terminal — python3 .ai-sdlc/bin/sdlc.py</text>
+
+    <!-- Terminal Output -->
+    <g transform="translate(20, 58)">
+      <!-- Line 1: doctor command -->
+      <text x="0" y="0"><tspan class="p-prompt">$ </tspan><tspan class="p-cmd">python3 .ai-sdlc/bin/sdlc.py doctor</tspan></text>
+      <text x="0" y="20"><tspan class="t-muted">sdlc.py doctor · auditing project records and dependencies...</tspan></text>
+      <text x="0" y="40"><tspan class="t-ok">  ✓ charter</tspan><tspan class="t-muted">        all active roles and check commands configured</tspan></text>
+      <text x="0" y="58"><tspan class="t-ok">  ✓ profile</tspan><tspan class="t-muted">        matches charter facts and kit version 2.2.0</tspan></text>
+      <text x="0" y="76"><tspan class="t-ok">  ✓ dependencies</tspan><tspan class="t-muted">   no self-dependency, no orphan IDs, no circular cycles</tspan></text>
+      <text x="0" y="94"><tspan class="t-warn">  ! staleness</tspan><tspan class="t-muted">      docs/project/threat-model.md last reviewed &gt; 90d ago</tspan></text>
+      <text x="0" y="112"><tspan class="t-ok">doctor verdict: </tspan><tspan class="t-ok">PASS</tspan><tspan class="t-muted"> (0 errors, 1 warning)</tspan></text>
+
+      <!-- Blank line -->
+      <!-- Line 2: verify --parallel -->
+      <text x="0" y="146"><tspan class="p-prompt">$ </tspan><tspan class="p-cmd">python3 .ai-sdlc/bin/sdlc.py verify --parallel</tspan></text>
+      <text x="0" y="166"><tspan class="t-muted">sdlc.py verify · running check pipeline concurrently (ThreadPoolExecutor)...</tspan></text>
+      <text x="0" y="186"><tspan class="t-ok">  [pass]</tspan><tspan fill="#F0F6FC"> lint</tspan><tspan class="t-muted">        npm run lint (0.42s)</tspan></text>
+      <text x="0" y="204"><tspan class="t-ok">  [pass]</tspan><tspan fill="#F0F6FC"> typecheck</tspan><tspan class="t-muted">   npx tsc --noEmit (1.18s)</tspan></text>
+      <text x="0" y="222"><tspan class="t-ok">  [pass]</tspan><tspan fill="#F0F6FC"> unit-test</tspan><tspan class="t-muted">   pytest tests/unit (0.85s)</tspan></text>
+      <text x="0" y="240"><tspan class="t-ok">  [pass]</tspan><tspan fill="#F0F6FC"> security</tspan><tspan class="t-muted">    git secrets --scan (0.12s)</tspan></text>
+      <text x="0" y="258"><tspan class="t-cyan">evidence written:</tspan><tspan class="t-muted"> .ai-sdlc/evidence/2026-10-10-verify.txt</tspan></text>
+
+      <!-- Blank line -->
+      <!-- Line 3: view --serve / --export-html -->
+      <text x="0" y="292"><tspan class="p-prompt">$ </tspan><tspan class="p-cmd">python3 .ai-sdlc/bin/sdlc.py view --serve --port 8765</tspan></text>
+      <text x="0" y="312"><tspan class="t-ok">● Live viewer:</tspan><tspan class="t-purple"> http://127.0.0.1:8765 </tspan><tspan class="t-muted">(watching records &amp; git history)</tspan></text>
+      <text x="0" y="330"><tspan class="t-muted">Loaded 6 views: Map · Board · Activity · Blockages · Git Lens · Documents</tspan></text>
+
+      <!-- Blank line -->
+      <!-- Line 4: headless export -->
+      <text x="0" y="364"><tspan class="p-prompt">$ </tspan><tspan class="p-cmd">python3 .ai-sdlc/bin/sdlc.py view --export-html dist/sdlc-dashboard.html</tspan></text>
+      <text x="0" y="384"><tspan class="t-ok">✓ exported self-contained dashboard:</tspan><tspan fill="#F0F6FC"> dist/sdlc-dashboard.html</tspan><tspan class="t-muted"> (318 KB)</tspan></text>
+    </g>
+  </g>
+</svg>

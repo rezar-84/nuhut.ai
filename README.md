@@ -397,18 +397,30 @@ check either passes or fails. So the parts of the process a machine can decide a
 script, not a paragraph. Every install gets
 `.ai-sdlc/bin/sdlc.py`: standard-library Python, kit-managed, and refreshed by `--upgrade`.
 
+<p align="center">
+  <img src="assets/cli-help.svg" alt="Nuhut SDLC CLI Commands: doctor, verify, plan-check, view, metrics" width="100%">
+</p>
+
 ```sh
-python3 .ai-sdlc/bin/sdlc.py doctor            # blank commands, stale records, IDs that
-                                               # do not join, profile drift, no contract pointer
-python3 .ai-sdlc/bin/sdlc.py doctor --strict   # exit 1 on a fail-level finding, for CI
-python3 .ai-sdlc/bin/sdlc.py verify            # run the charter's checks in order and record
-                                               # the output under .ai-sdlc/evidence/
-python3 .ai-sdlc/bin/sdlc.py plan-check ACME-12 # files the branch changed that the Tier 1
-                                               # plan does not name, and planned paths untouched
-python3 .ai-sdlc/bin/sdlc.py view              # draw the records as an interactive page
-python3 .ai-sdlc/bin/sdlc.py view --serve      # the same page, live: it follows the records
+python3 .ai-sdlc/bin/sdlc.py doctor            # audit commands, staleness, profile drift, and
+                                               # dependency loops/missing IDs
+python3 .ai-sdlc/bin/sdlc.py doctor --strict   # exit 1 on any fail-level finding, for CI
+python3 .ai-sdlc/bin/sdlc.py verify            # run charter checks in order and record evidence
+python3 .ai-sdlc/bin/sdlc.py verify --parallel # run independent checks concurrently (-j)
+python3 .ai-sdlc/bin/sdlc.py plan-check ACME-12 # check git diff against approved plan/spec
+python3 .ai-sdlc/bin/sdlc.py view              # draw records as an interactive HTML dashboard
+python3 .ai-sdlc/bin/sdlc.py view --serve      # the same page, live: follows records & git history
+python3 .ai-sdlc/bin/sdlc.py view --export-html out.html # export self-contained report for CI/CD
 python3 .ai-sdlc/bin/sdlc.py metrics           # process measures, leading and lagging
 ```
+
+| Command | Key Flags | Description |
+| --- | --- | --- |
+| **`doctor`** | `--strict` | Audits project records, active roles, check commands, staleness windows, and validates the dependency graph (flags self-dependencies, non-existent backlog IDs, and circular dependency loops). |
+| **`verify`** | `--parallel` (`-j`), `--dry-run` | Runs the charter's check pipeline in topological order, writes immutable test evidence to `.ai-sdlc/evidence/YYYY-MM-DD-verify.txt`. `--parallel` runs independent steps concurrently using a worker pool. |
+| **`plan-check <ID>`** | | Compares branch changes against the approved plan (`docs/project/plans/<ID>.md` or `.sdlc/specs/<ID>/spec.md`). Highlights unapproved file modifications and planned files left untouched with ANSI terminal colors. |
+| **`view`** | `--serve`, `--port`, `--interval`, `--export-html <file>`, `--no-open` | Generates the rich interactive developer dashboard. `--serve` runs a reactive local server on `127.0.0.1`. `--export-html` bundles an offline single-file report for CI/CD artifacts or PR previews. |
+| **`metrics`** | `--json` | Calculates quantitative project health metrics: work-in-progress (WIP), verification pass rate, cycle time, lead time, time waiting on humans, and lifecycle record gaps. |
 
 `verify` exists so a "Verified" claim can cite a file the script wrote instead of the
 agent's memory of a run. `/sdlc-doctor` and `/sdlc-verify` call the script first and keep
@@ -422,45 +434,65 @@ reads it.
 Records written for an agent are hard for a person to read once a project is real: a
 worklog runs to thousands of lines, and one item's story is spread over a backlog row, a
 plan, two reviews and a worklog entry. `sdlc.py view` reads them all at the moment you run
-it and opens one page, joined by work item ID:
+it and opens one comprehensive, navigable page joined by work item ID:
+
+<p align="center">
+  <img src="assets/viewer-preview.svg" alt="Nuhut SDLC Interactive Viewer Dashboard: Git Lens, Blockages & Flow, Lifecycle Inspector, and Map" width="100%">
+</p>
+
+The dashboard organizes project reality across six dedicated views:
 
 - **Map:** the whole project as a mind map (status, owner role, documents), folding and
-  unfolding, with each label a link.
-- **Board:** Now, Next, Blocked, Parked, Later and Done, filtered by owner or tier. Cards
-  show what each item still waits on.
-- **Activity:** what is in flight, and the latest worklog entries with what they left
-  undone.
-- **Waiting on you:** Parked and Blocked items, who they wait on, and for how long.
-- **Item:** the backlog row, plan, reviews, worklog entries, commits and every record
-  that mentions it, with a lifecycle stepper that shows which step has no record yet.
-- **Documents:** any record with a clickable outline, where IDs and relative links
-  become links.
+  unfolding, with clipped titles, child count badges, doctor findings, and a quick-jump
+  `⚡ Blockages & Flow` button.
+- **Board:** Kanban columns (Now, Next, Blocked, Parked, Later, Done), filtered by owner,
+  tier, or text search. Cards show dependency blockers and downstream impact.
+- **Activity:** what is in flight right now, recent worklog entries, and a collapsible
+  summary of uncommitted working tree changes.
+- **Blockages & Flow:** a dedicated dependency and blockage command center:
+  - **Directed Flow Board:** 3-column triage (`Root Blockers` ➔ `Blocked Tasks` ➔ `Waiting on Human`).
+  - **Bottleneck Matrix:** items ranked by blast radius (number of downstream tasks blocked).
+  - **Human Decision Log:** items parked awaiting human sign-off with stall durations.
+  - **Dependency Table:** explicit relationships and quick navigation.
+- **Git Lens:** visual topological Git commit graph positioned prominently above the fold:
+  - Multi-branch commit lanes with branch splits, merges, and commit dots.
+  - Commit badges (`main`, `review:passed`), author avatars, and relative timestamps.
+  - Interactive commit drawer showing full commit message, SHA, author, and changed files.
+  - Uncommitted working tree summary banner and local branches overview.
+- **Documents:** every project artifact with frontmatter status (`draft`, `approved`, `stale`),
+  accountable owner, and age. Click to open with interactive outlines and cross-linked IDs.
 
-It writes nothing into the records and adds no format for the agent to keep. The page
-goes to `.ai-sdlc/view/index.html`, which git ignores, and works offline.
+#### Item Lifecycle Stepper
 
-**Getting around.** Click a dot on the map to fold or unfold a branch, and a blue label
-to open it. Click any work item ID, anywhere, to open that item. Search in the header
-finds IDs, titles, documents and headings. The browser's back button and the breadcrumbs
-return you to where you were.
+Click any work item ID anywhere to open its deep inspector. The lifecycle stepper runs
+from Frame to Close (`Frame` ➔ `Plan` ➔ `Design Review` ➔ `Build` ➔ `Verify` ➔ `Ship Review` ➔ `Log` ➔ `Close`).
+Green means the record for that step exists. An amber **?** means the item's tier and
+status call for a record that does not exist yet (such as a Tier 1 item in progress with
+no plan, or a Done item with no worklog entry). That is a real gap to close, not a display
+fault.
 
-**Reading it.** On an item page, the lifecycle stepper runs from Frame to Close. Green
-means the record for that step exists. An amber **?** means the item's tier and status call
-for a record that does not exist yet, such as a Tier 1 item in progress with no plan, or a
-Done item with no worklog entry. That is a real gap to close, not a display fault. The Map
-page lists `doctor`'s findings and anything the view could not read.
+#### Keyboard Shortcuts & Navigation
 
-**A daily routine that works:** open **Waiting on you** first, then **Activity**. Before
-calling an item done, open it and check that no step is amber.
+| Shortcut | Action |
+| --- | --- |
+| **`⌘K`** or **`Ctrl+K`** | Open Command Palette to search all work items, documents, and headings. |
+| **`?`** | Toggle the Keyboard Shortcuts & Help modal. |
+| **`1` - `6`** | Switch views instantly: `1` Map, `2` Board, `3` Activity, `4` Blockages, `5` Git Lens, `6` Documents. |
+| **`/`** | Focus the header search input. |
+| **`Esc`** | Close open modal, commit drawer, or clear active search filter. |
 
-With `--serve` the page is live instead: leave it open while agents work, and it redraws
+**A daily routine that works:** open **Blockages & Flow** first to clear bottlenecks, then
+**Activity**. Before calling an item done, open its inspector and check that no step is amber.
+
+With `--serve` the page is live: leave it open while agents work, and it redraws
 within a couple of seconds of any record changing or a new commit, keeping your place, folds
 and filters. It serves only on 127.0.0.1, refuses requests addressed to any other host,
 and has no way to write. Ctrl+C stops it; `--port` and `--interval` tune it. Rows the view
-cannot read are listed on the page rather than dropped. `sdlc.py metrics` prints the
-process measures the page also shows (work in progress, time waiting on a human, verify
-pass rate, throughput, lead time, lifecycle gaps), each labelled leading or lagging, with
-the record it came from.
+cannot read are listed on the page rather than dropped.
+
+With `--export-html <path>`, `sdlc.py view` generates a standalone, self-contained single-file
+HTML bundle embedding the entire data model. It runs offline without a local server, making
+it ideal for CI/CD artifact publishing, PR status reports, and static team dashboards.
 
 The opt-in `--hooks` go one step further for Claude Code. They deny the tool call itself:
 

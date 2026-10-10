@@ -41,27 +41,31 @@ history) and joins them by work item ID into one page you click through.
 ```sh
 python3 .ai-sdlc/bin/sdlc.py view            # build the page and open it
 python3 .ai-sdlc/bin/sdlc.py view --serve    # live: the page follows the records
+python3 .ai-sdlc/bin/sdlc.py view --export-html dist/dashboard.html # export self-contained report
 python3 .ai-sdlc/bin/sdlc.py metrics         # process numbers in the terminal
 ```
 
 | Tab | Answers |
 | --- | --- |
-| **Map** | What is in this project? A mind map of work by status, open work by owner role, and documents. Click a dot to fold, a blue label to open. The page also shows the counts, `doctor` findings, the process measures, and anything it could not read. |
-| **Board** | Where is every item? Now, Next, Blocked, Parked, Later, Done, filtered by owner, tier or title. A red edge means it waits on something unfinished. |
-| **Activity** | What are the agents doing? Items in flight, then the latest worklog entries with what they left undone. |
-| **Waiting on you** | What needs a human? Parked and Blocked items, who they wait on, for what, and for how long. |
+| **Map** | What is in this project? A mind map of work by status, open work by owner role, and documents. Click a dot to fold, a blue label to open. Includes health metrics, `doctor` findings, and a quick-jump to blockages. |
+| **Board** | Where is every item? Now, Next, Blocked, Parked, Later, Done, filtered by owner, tier or title. A red edge or warning chip indicates dependency blockages. |
+| **Activity** | What are the agents doing? Items in flight, the latest worklog entries, and a summary of uncommitted working tree changes. |
+| **Blockages & Flow** | Where is work stuck? 3-column triage (Root Blockers ➔ Blocked Tasks ➔ Waiting on Human), bottleneck blast radius matrix, and human decision stall log. |
+| **Git Lens** | How did the code evolve? Interactive commit graph with branch/merge lanes, commit badges, author avatars, uncommitted delta banner, and commit inspector drawer. |
 | **Documents** | Every record with its status, owner and age. Open one to read it with an outline; IDs and links are clickable. |
 
 Click any ID to open that item: its row, plan, reviews, worklog entries, commits and
 every record that mentions it, with a lifecycle stepper from Frame to Close. An amber
 **?** on a step means the item's tier and status call for a record that does not exist
-yet. That is a real gap, not a display fault. Search in the header finds IDs, titles,
-documents and headings; the browser's back button works throughout.
+yet. That is a real gap, not a display fault. Search in the header (`⌘K` or `/`) finds IDs,
+titles, documents and headings; press `?` for keyboard shortcuts; the browser's back button works throughout.
 
 - **A snapshot or live.** Without `--serve` the page is a snapshot: run the command again
   to refresh it. With `--serve` it redraws within a couple of seconds of any record or
   commit changing, and keeps your place. The header says Live, or Disconnected if you
   stopped the server.
+- **Headless export.** `--export-html <file>` bundles an offline single-file report with
+  all data embedded, suitable for CI/CD artifacts and PR reviews without a local server.
 - **Read-only.** It never writes to these files, and it adds no format for anyone to
   keep. The snapshot goes to `.ai-sdlc/view/`, which git ignores; live mode serves only on
   127.0.0.1.
