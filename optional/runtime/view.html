@@ -269,6 +269,38 @@
   .dep-chip.active { background: var(--warnbg); border-color: var(--warn); color: var(--warn); }
   .dep-chip.missing { background: var(--badbg); border-color: var(--bad); color: var(--bad); }
   .matrix-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin: 12px 0 20px; }
+  /* Segmented view switcher */
+  .view-segmented { display: inline-flex; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 2px; gap: 2px; }
+  .view-segmented button { border: none; background: transparent; padding: 5px 12px; font-size: 12px; font-weight: 500; border-radius: 6px; cursor: pointer; color: var(--muted); transition: all .15s ease; display: inline-flex; align-items: center; gap: 5px; }
+  .view-segmented button:hover { color: var(--text); background: rgba(127,127,127,0.08); }
+  .view-segmented button.active { background: var(--bg); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid var(--line); }
+  /* Clickable stat filters */
+  .stat.clickable { cursor: pointer; transition: all .15s ease; user-select: none; }
+  .stat.clickable:hover { border-color: var(--link) !important; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .stat.clickable.active { border-color: var(--link) !important; background: var(--bg); box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.25); }
+  .stat-filter-badge { font-size: 10px; text-transform: uppercase; font-weight: 700; margin-left: 6px; padding: 1px 5px; border-radius: 10px; background: var(--chip); color: var(--muted); }
+  .stat.clickable.active .stat-filter-badge { background: var(--link); color: #fff; }
+  /* Subheader toolbar */
+  .sub-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0 14px; }
+  .sub-toolbar-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sub-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  /* Board Table View */
+  .board-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+  .board-table th { background: var(--panel); border-bottom: 2px solid var(--line); padding: 8px 10px; font-weight: 600; }
+  .board-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .board-table tr:hover { background: var(--chip); }
+  /* Docs Split Explorer */
+  .docs-split { display: grid; grid-template-columns: 320px 1fr; gap: 16px; min-height: 72vh; margin-top: 10px; align-items: start; }
+  @media (max-width: 900px) { .docs-split { grid-template-columns: 1fr; } }
+  .docs-tree-pane { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; overflow-y: auto; max-height: 82vh; }
+  .docs-preview-pane { border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 16px 20px; overflow-y: auto; max-height: 82vh; display: flex; flex-direction: column; }
+  .docs-preview-hdr { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+  .tree-folder { margin-bottom: 8px; }
+  .tree-folder-title { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 4px 6px; cursor: pointer; border-radius: 4px; user-select: none; }
+  .tree-folder-title:hover { background: rgba(127,127,127,0.08); color: var(--text); }
+  .tree-doc-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; margin: 1px 0; border-radius: 6px; font-size: 13px; color: var(--text); cursor: pointer; text-decoration: none; border-left: 2px solid transparent; }
+  .tree-doc-item:hover { background: rgba(127,127,127,0.08); text-decoration: none; }
+  .tree-doc-item.active { background: var(--bg); border-left-color: var(--link); font-weight: 600; color: var(--link); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
   @media (max-width: 720px) {
     .docgrid { grid-template-columns: 1fr; }
     .outline { position: static; max-height: none; border-right: none; }
@@ -1999,21 +2031,73 @@
     M.order.forEach(function (id) { var c = ITEMS[id].column; counts[c] = (counts[c] || 0) + 1; });
     var strip = el("div", { cls: "strip" });
     ["Now", "Next", "Blocked", "Parked", "Later", "Done"].forEach(function (c) {
-      var s = el("a", { cls: "stat", href: "#/board" }, [el("b", { text: String(counts[c] || 0) }), c]);
+      var s = el("a", { cls: "stat", href: "#/board", title: "View " + c + " tasks on Board" }, [
+        el("b", { text: String(counts[c] || 0) }),
+        el("span", { text: c })
+      ]);
       s.style.borderTop = "3px solid var(--c-" + c + ")";
       strip.appendChild(s);
     });
+
     var waiting = (counts.Blocked || 0) + (counts.Parked || 0);
-    strip.appendChild(el("a", { cls: "stat", href: "#/waiting" }, [el("b", { text: String(waiting) }), "waiting on a human"]));
-    strip.appendChild(el("a", { cls: "stat", href: "#/activity" }, [el("b", { text: String(WL.length) }), "worklog entries"]));
+    var sWait = el("a", { cls: "stat clickable", href: "#/waiting", title: "Open Dependencies & Blockages command center" }, [
+      el("b", { text: String(waiting) }),
+      el("span", { text: "waiting on human" })
+    ]);
+    sWait.style.borderTop = "3px solid " + (waiting ? "var(--bad)" : "var(--accent)");
+    strip.appendChild(sWait);
+
+    strip.appendChild(el("a", { cls: "stat", href: "#/activity", title: "View activity stream" }, [
+      el("b", { text: String(WL.length) }),
+      el("span", { text: "worklog entries" })
+    ]));
+
     if (M.git && M.git.stats && M.git.stats.total) {
-      var gs = el("a", { cls: "stat", href: "#/git" }, [
-        el("b", { text: M.git.stats.rate + "%" }), "git traceability (" + M.git.stats.linked + "/" + M.git.stats.total + ")"
+      var gs = el("a", { cls: "stat clickable", href: "#/git", title: "Open Git Lens & Commit graph" }, [
+        el("b", { text: M.git.stats.rate + "%" }),
+        el("span", { text: "git traceability (" + M.git.stats.linked + "/" + M.git.stats.total + ")" })
       ]);
       gs.style.borderTop = "3px solid var(--accent)";
       strip.appendChild(gs);
     }
+
+    var fails = M.alerts.filter(function (a) { return a.level === "fail"; });
+    var sDoc = el("div", { cls: "stat", title: "Doctor audit status" }, [
+      el("b", { text: fails.length ? "FAIL" : (M.alerts.length ? "WARN" : "OK"), style: "color: " + (fails.length ? "var(--bad)" : (M.alerts.length ? "var(--warn)" : "var(--accent)")) }),
+      el("span", { text: "doctor (" + M.alerts.length + " alerts)" })
+    ]);
+    sDoc.style.borderTop = "3px solid " + (fails.length ? "var(--bad)" : (M.alerts.length ? "var(--warn)" : "var(--accent)"));
+    strip.appendChild(sDoc);
+
     main.appendChild(strip);
+
+    var quickBar = el("div", { cls: "presets", style: "margin: 6px 0 14px;" }, [
+      el("span", { cls: "muted", style: "font-size: 12px; margin-right: 4px;", text: "Quick Jump:" }),
+      el("button", {
+        cls: "preset-btn",
+        text: "⚡ Blockages & Flow ↗",
+        style: "color: var(--warn); font-weight: 600; border-color: var(--warn);",
+        on: { click: function () { go("waiting"); } }
+      }),
+      el("button", {
+        cls: "preset-btn",
+        text: "🌿 Git Lens ↗",
+        style: "color: var(--link); font-weight: 600;",
+        on: { click: function () { go("git"); } }
+      }),
+      el("button", {
+        cls: "preset-btn",
+        text: "📋 Kanban Board ↗",
+        on: { click: function () { go("board"); } }
+      }),
+      el("button", {
+        cls: "preset-btn",
+        text: "🗂️ Documents Explorer ↗",
+        on: { click: function () { go("docs"); } }
+      })
+    ]);
+    main.appendChild(quickBar);
+
     if ((M.metrics || []).length) {
       var mt = el("details", { cls: "banner" }, [el("summary", { text: "Process measures (from the records and git)" })]);
       var tb = el("table", null, [el("tr", null, ["Measure", "Kind", "Value", "From"].map(function (x) { return el("th", { text: x }); }))]);
@@ -2024,7 +2108,6 @@
       mt.appendChild(tb);
       main.appendChild(mt);
     }
-    var fails = M.alerts.filter(function (a) { return a.level === "fail"; });
     if (M.alerts.length) {
       var det = el("details", { cls: "banner" + (fails.length ? " bad" : "") }, [
         el("summary", { text: M.alerts.length + " finding(s) from sdlc.py doctor (" + fails.length + " fail)" })]);
@@ -2146,10 +2229,83 @@
     return col;
   }
 
+  function renderItemTable(itemIds) {
+    var sorted = sortItemIds(itemIds);
+    var t = el("table", { cls: "board-table" });
+    t.appendChild(el("tr", null, [
+      el("th", { text: "ID", style: "width: 90px;" }),
+      el("th", { text: "Title" }),
+      el("th", { text: "Status", style: "width: 100px;" }),
+      el("th", { text: "Tier", style: "width: 80px;" }),
+      el("th", { text: "Owner", style: "width: 120px;" }),
+      el("th", { text: "Lifecycle Progress", style: "width: 120px;" }),
+      el("th", { text: "Dependencies" })
+    ]));
+    if (!sorted.length) {
+      t.appendChild(el("tr", null, [
+        el("td", { colspan: "7", cls: "muted", style: "text-align: center; padding: 14px;", text: "No items match current filter." })
+      ]));
+      return el("div", { cls: "wrap" }, [t]);
+    }
+    sorted.forEach(function (id) {
+      var it = ITEMS[id], open = unresolved(it);
+      var pips = el("div", { cls: "card-pips", title: "Lifecycle progress (Frame → Plan → Design → Build → Verify → Ship → Log → Close)" });
+      M.steps.forEach(function (s) {
+        var st = (it.steps || {})[s] || "na";
+        pips.appendChild(el("span", { cls: "card-pip " + st, title: s + ": " + st }));
+      });
+
+      var depCell = el("td");
+      if (it.depends && it.depends.length) {
+        it.depends.forEach(function (d) {
+          var depIt = ITEMS[d];
+          var isDone = depIt && depIt.column === "Done";
+          var chipCls = !depIt ? "missing" : (isDone ? "done" : "active");
+          depCell.appendChild(el("a", {
+            cls: "dep-chip " + chipCls,
+            href: "#/item/" + d,
+            on: { click: function (e) { e.stopPropagation(); openItemDrawer(d); } }
+          }, [
+            el("strong", { text: d }),
+            depIt ? el("span", { cls: "muted", text: "· " + depIt.column }) : el("span", { text: "!" })
+          ]));
+          depCell.appendChild(document.createTextNode(" "));
+        });
+      } else {
+        depCell.appendChild(el("span", { cls: "muted", text: "—" }));
+      }
+
+      var tr = el("tr", {
+        cls: "board-table-row",
+        style: "cursor: pointer;",
+        on: { click: function (e) {
+          if (e.target.tagName !== "A" && !e.target.classList.contains("dep-chip")) {
+            openItemDrawer(id);
+          }
+        } }
+      }, [
+        el("td", null, [itemLink(id)]),
+        el("td", null, [
+          el("span", { style: "font-weight: 500;", text: it.title || id }),
+          open.length ? el("span", { cls: "chip", style: "background: var(--badbg); color: var(--bad); font-weight: 600; margin-left: 6px;", text: "Blocked by " + open.join(", ") }) : null
+        ]),
+        el("td", null, [colChip(it.column)]),
+        el("td", null, [it.tier ? el("span", { cls: "chip", text: "Tier " + it.tier }) : el("span", { cls: "muted", text: "—" })]),
+        el("td", null, [it.owner ? el("span", { text: it.owner }) : el("span", { cls: "muted", text: "—" })]),
+        el("td", null, [pips]),
+        depCell
+      ]);
+      t.appendChild(tr);
+    });
+    return el("div", { cls: "wrap" }, [t]);
+  }
+
   function viewBoard() {
     tab("board");
     crumbs([[M.project || "Project", "map"], ["Board"]]);
     main.appendChild(h(1, "Board"));
+
+    FILTER.view = FILTER.view || "kanban";
 
     var owners = {}, tiers = {};
     M.order.forEach(function (id) { if (ITEMS[id].owner) owners[ITEMS[id].owner] = 1; if (ITEMS[id].tier) tiers[ITEMS[id].tier] = 1; });
@@ -2189,13 +2345,29 @@
     var dropped = el("input", { type: "checkbox", id: "dropped", on: { change: function () { FILTER.dropped = dropped.checked; render(); } } });
     dropped.checked = FILTER.dropped;
 
-    main.appendChild(el("div", { cls: "filters" }, [
-      groupSel,
-      sortSel,
-      sel("owner", "owner roles", owners),
-      sel("tier", "tiers", tiers),
-      text,
-      el("label", null, [dropped, " show Dropped"])
+    var viewSwitcher = el("div", { cls: "view-segmented" }, [
+      el("button", {
+        cls: (FILTER.view !== "table" ? "active" : ""),
+        text: "📋 Kanban Columns",
+        on: { click: function () { FILTER.view = "kanban"; render(); } }
+      }),
+      el("button", {
+        cls: (FILTER.view === "table" ? "active" : ""),
+        text: "📄 Interactive Table",
+        on: { click: function () { FILTER.view = "table"; render(); } }
+      })
+    ]);
+
+    main.appendChild(el("div", { cls: "sub-toolbar" }, [
+      el("div", { cls: "sub-toolbar-left" }, [viewSwitcher]),
+      el("div", { cls: "sub-toolbar-right" }, [
+        groupSel,
+        sortSel,
+        sel("owner", "owner roles", owners),
+        sel("tier", "tiers", tiers),
+        text,
+        el("label", null, [dropped, " show Dropped"])
+      ])
     ]));
 
     function itemPasses(id) {
@@ -2203,6 +2375,15 @@
       return (!FILTER.owner || it.owner === FILTER.owner) &&
         (!FILTER.tier || it.tier === FILTER.tier) &&
         (!FILTER.text || (id + " " + it.title).toLowerCase().indexOf(FILTER.text.toLowerCase()) >= 0);
+    }
+
+    if (FILTER.view === "table" && FILTER.group === "none") {
+      var passingIds = M.order.filter(function (id) {
+        if (ITEMS[id].column === "Dropped" && !FILTER.dropped) return false;
+        return itemPasses(id);
+      });
+      main.appendChild(renderItemTable(passingIds));
+      return;
     }
 
     if (FILTER.group === "none") {
@@ -2279,14 +2460,20 @@
 
         var swimlane = el("div", { cls: "swimlane" + (isCollapsed ? " collapsed" : "") }, [hdr]);
 
-        var body = el("div", { cls: "swimlane-body" });
-        M.columns.forEach(function (c) {
-          if (c === "Dropped" && !FILTER.dropped) return;
-          var colIds = g.ids.filter(function (id) { return ITEMS[id].column === c; });
-          if (c === "Other" && !colIds.length) return;
-          body.appendChild(renderColumn(c, colIds));
-        });
-        swimlane.appendChild(body);
+        if (FILTER.view === "table") {
+          var body = el("div", { cls: "swimlane-body", style: "padding: 8px 12px;" });
+          body.appendChild(renderItemTable(g.ids));
+          swimlane.appendChild(body);
+        } else {
+          var body = el("div", { cls: "swimlane-body" });
+          M.columns.forEach(function (c) {
+            if (c === "Dropped" && !FILTER.dropped) return;
+            var colIds = g.ids.filter(function (id) { return ITEMS[id].column === c; });
+            if (c === "Other" && !colIds.length) return;
+            body.appendChild(renderColumn(c, colIds));
+          });
+          swimlane.appendChild(body);
+        }
         main.appendChild(swimlane);
       });
     }
@@ -2340,7 +2527,7 @@
   }
 
   // ---------------------------------------------------------------- waiting & blockages
-  var BLOCKAGE_STATE = { view: "flow", query: "" };
+  var BLOCKAGE_STATE = { view: "flow", query: "", filter: "all", tier: "" };
 
   function viewWaiting() {
     tab("waiting");
@@ -2363,25 +2550,64 @@
       return (daysSince(ITEMS[b].extra.Since) || 0) - (daysSince(ITEMS[a].extra.Since) || 0);
     });
 
+    function toggleFilter(target) {
+      BLOCKAGE_STATE.filter = (BLOCKAGE_STATE.filter === target ? "all" : target);
+      render();
+    }
+
     var strip = el("div", { cls: "strip" });
 
-    var sBlk = el("div", { cls: "stat" }, [
+    var sBlk = el("div", {
+      cls: "stat clickable" + (BLOCKAGE_STATE.filter === "blockers" ? " active" : ""),
+      title: "Click to filter Root Bottlenecks",
+      on: { click: function () { toggleFilter("blockers"); } }
+    }, [
       el("b", { text: String(blockers.length) }),
-      el("span", { text: "Root Bottlenecks" })
+      el("span", { text: "Root Bottlenecks" }),
+      BLOCKAGE_STATE.filter === "blockers" ? el("span", { cls: "stat-filter-badge", text: "ACTIVE" }) : null
     ]);
     sBlk.style.borderTop = "3px solid " + (blockers.length ? "var(--warn)" : "var(--accent)");
     strip.appendChild(sBlk);
 
-    var sWait = el("div", { cls: "stat" }, [
+    var sWait = el("div", {
+      cls: "stat clickable" + (BLOCKAGE_STATE.filter === "blocked" ? " active" : ""),
+      title: "Click to filter Blocked Work Items",
+      on: { click: function () { toggleFilter("blocked"); } }
+    }, [
       el("b", { text: String(blockedItems.length) }),
-      el("span", { text: "Blocked Work Items" })
+      el("span", { text: "Blocked Work Items" }),
+      BLOCKAGE_STATE.filter === "blocked" ? el("span", { cls: "stat-filter-badge", text: "ACTIVE" }) : null
     ]);
     sWait.style.borderTop = "3px solid " + (blockedItems.length ? "var(--bad)" : "var(--accent)");
     strip.appendChild(sWait);
 
+    var sHuman = el("div", {
+      cls: "stat clickable" + (BLOCKAGE_STATE.filter === "human" ? " active" : ""),
+      title: "Click to filter items Waiting on Human",
+      on: { click: function () { toggleFilter("human"); } }
+    }, [
+      el("b", { text: String(parkedHumanIds.length) }),
+      el("span", { text: "Waiting on Human" }),
+      BLOCKAGE_STATE.filter === "human" ? el("span", { cls: "stat-filter-badge", text: "ACTIVE" }) : null
+    ]);
+    sHuman.style.borderTop = "3px solid var(--c-Parked)";
+    strip.appendChild(sHuman);
+
+    var sReady = el("div", {
+      cls: "stat clickable" + (BLOCKAGE_STATE.filter === "ready" ? " active" : ""),
+      title: "Click to filter Ready items (0 blockers)",
+      on: { click: function () { toggleFilter("ready"); } }
+    }, [
+      el("b", { text: String(readyItems.length) }),
+      el("span", { text: "Ready to Start" }),
+      BLOCKAGE_STATE.filter === "ready" ? el("span", { cls: "stat-filter-badge", text: "ACTIVE" }) : null
+    ]);
+    sReady.style.borderTop = "3px solid var(--accent)";
+    strip.appendChild(sReady);
+
     if (blockers.length) {
       var topBlk = blockers[0];
-      var sBlast = el("div", { cls: "stat" }, [
+      var sBlast = el("div", { cls: "stat", title: "Task with highest downstream impact" }, [
         el("b", { text: topBlk.id + " (blocks " + topBlk.count + ")" }),
         el("span", { text: "Top Blast Radius" })
       ]);
@@ -2389,50 +2615,67 @@
       strip.appendChild(sBlast);
     }
 
-    var sHuman = el("div", { cls: "stat" }, [
-      el("b", { text: String(parkedHumanIds.length) }),
-      el("span", { text: "Waiting on Human" })
-    ]);
-    sHuman.style.borderTop = "3px solid var(--c-Parked)";
-    strip.appendChild(sHuman);
-
-    var sReady = el("div", { cls: "stat" }, [
-      el("b", { text: String(readyItems.length) }),
-      el("span", { text: "Ready to Start (0 blockers)" })
-    ]);
-    sReady.style.borderTop = "3px solid var(--accent)";
-    strip.appendChild(sReady);
-
     main.appendChild(strip);
 
-    var viewSel = el("select", {
-      "aria-label": "Blockages view style",
-      on: { change: function () { BLOCKAGE_STATE.view = viewSel.value; renderBlockageContent(); } }
-    }, [
-      el("option", { value: "flow", text: "Directed Flow Board (3 Columns)" }),
-      el("option", { value: "matrix", text: "Bottleneck Matrix (Blast Radius)" }),
-      el("option", { value: "human", text: "Waiting on Human (" + parkedHumanIds.length + ")" }),
-      el("option", { value: "table", text: "Comprehensive Table View" })
+    var viewSwitcher = el("div", { cls: "view-segmented" }, [
+      el("button", {
+        cls: (BLOCKAGE_STATE.view === "flow" ? "active" : ""),
+        text: "⚡ Directed Flow Board",
+        on: { click: function () { BLOCKAGE_STATE.view = "flow"; render(); } }
+      }),
+      el("button", {
+        cls: (BLOCKAGE_STATE.view === "matrix" ? "active" : ""),
+        text: "📊 Bottleneck Matrix",
+        on: { click: function () { BLOCKAGE_STATE.view = "matrix"; render(); } }
+      }),
+      el("button", {
+        cls: (BLOCKAGE_STATE.view === "table" ? "active" : ""),
+        text: "📋 Dependency Table",
+        on: { click: function () { BLOCKAGE_STATE.view = "table"; render(); } }
+      })
     ]);
-    viewSel.value = BLOCKAGE_STATE.view;
+
+    var tierSel = el("select", {
+      "aria-label": "Filter by Tier",
+      on: { change: function () { BLOCKAGE_STATE.tier = tierSel.value; renderBlockageContent(); } }
+    }, [
+      el("option", { value: "", text: "All Tiers" }),
+      el("option", { value: "1", text: "Tier 1 (High Risk)" }),
+      el("option", { value: "2", text: "Tier 2 (Medium Risk)" }),
+      el("option", { value: "3", text: "Tier 3 (Low Risk)" })
+    ]);
+    tierSel.value = BLOCKAGE_STATE.tier || "";
 
     var qInput = el("input", {
       type: "search",
       placeholder: "Filter items, titles, owners…",
       value: BLOCKAGE_STATE.query,
-      style: "flex: 1 1 240px; max-width: 300px;",
+      style: "flex: 1 1 200px; max-width: 280px;",
       on: { input: function () { BLOCKAGE_STATE.query = qInput.value; renderBlockageContent(); } }
     });
 
-    var filterBar = el("div", { cls: "filters" }, [viewSel, qInput]);
-    main.appendChild(filterBar);
+    var rightControls = [tierSel, qInput];
+    if (BLOCKAGE_STATE.filter !== "all") {
+      var clearBtn = el("button", {
+        cls: "preset-btn active",
+        text: "✕ Filter: " + BLOCKAGE_STATE.filter,
+        on: { click: function () { BLOCKAGE_STATE.filter = "all"; render(); } }
+      });
+      rightControls.unshift(clearBtn);
+    }
+
+    main.appendChild(el("div", { cls: "sub-toolbar" }, [
+      el("div", { cls: "sub-toolbar-left" }, [viewSwitcher]),
+      el("div", { cls: "sub-toolbar-right" }, rightControls)
+    ]));
 
     var contentContainer = el("div");
     main.appendChild(contentContainer);
 
     function itemMatches(id, needle) {
-      if (!needle) return true;
       var it = ITEMS[id];
+      if (BLOCKAGE_STATE.tier && (!it || String(it.tier) !== String(BLOCKAGE_STATE.tier))) return false;
+      if (!needle) return true;
       if (!it) return id.toLowerCase().indexOf(needle) >= 0;
       if (id.toLowerCase().indexOf(needle) >= 0) return true;
       if ((it.title || "").toLowerCase().indexOf(needle) >= 0) return true;
@@ -2461,151 +2704,187 @@
         return desc.toLowerCase().indexOf(needle) >= 0;
       });
 
+      var fReady = readyItems.filter(function (id) {
+        return itemMatches(id, needle);
+      });
+
       if (BLOCKAGE_STATE.view === "flow") {
         var flow = el("div", { cls: "dep-flow" });
 
-        // Col 1: Bottlenecks / Root Blockers
-        var col1 = el("div", { cls: "dep-col" });
-        col1.appendChild(el("div", { cls: "dep-col-hdr" }, [
-          el("span", { text: "🛑 Root Blockers (Prerequisites)" }),
-          el("span", { cls: "chip", text: String(fBlockers.length) })
-        ]));
-        col1.appendChild(el("p", { cls: "dep-col-desc", text: "Active tasks that other items are waiting on. Complete these to unblock downstream work." }));
+        // Show/hide or highlight columns based on active filter
+        var showCol1 = BLOCKAGE_STATE.filter === "all" || BLOCKAGE_STATE.filter === "blockers";
+        var showCol2 = BLOCKAGE_STATE.filter === "all" || BLOCKAGE_STATE.filter === "blocked";
+        var showCol3 = BLOCKAGE_STATE.filter === "all" || BLOCKAGE_STATE.filter === "human";
 
-        if (!fBlockers.length) {
-          col1.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "No active root bottlenecks matching filter." }));
-        } else {
-          fBlockers.forEach(function (b) {
-            var it = ITEMS[b.id] || {};
-            var card = el("div", {
-              cls: "dep-card is-blocker",
-              on: { click: function () { openItemDrawer(b.id); } }
-            });
-            var topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;" }, [
-              el("span", null, [itemLink(b.id), " ", colChip(it.column)]),
-              it.owner ? el("span", { cls: "chip", text: it.owner }) : null
-            ]);
-            var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || b.id });
-            var badge = el("div", { cls: "dep-blast-badge", text: "⛔ Blocks " + b.count + " downstream item" + (b.count > 1 ? "s" : "") });
+        if (showCol1) {
+          var col1 = el("div", { cls: "dep-col" + (BLOCKAGE_STATE.filter === "blockers" ? " active" : "") });
+          col1.appendChild(el("div", { cls: "dep-col-hdr" }, [
+            el("span", { text: "🛑 Root Blockers (Prerequisites)" }),
+            el("span", { cls: "chip", text: String(fBlockers.length) })
+          ]));
+          col1.appendChild(el("p", { cls: "dep-col-desc", text: "Active tasks that other items are waiting on. Complete these to unblock downstream work." }));
 
-            var chips = el("div", { cls: "dep-chip-list" });
-            chips.appendChild(el("span", { cls: "muted", style: "font-size: 11px; align-self: center; margin-right: 2px;", text: "↳ Blocks:" }));
-            (b.dependents || []).forEach(function (depId) {
-              var depIt = ITEMS[depId];
-              var c = el("a", {
-                cls: "dep-chip" + (depIt && depIt.column === "Done" ? " done" : " active"),
-                href: "#/item/" + depId,
-                title: depIt ? (depId + ": " + depIt.title + " (" + depIt.column + ")") : depId,
-                on: { click: function (e) { e.stopPropagation(); openItemDrawer(depId); } }
-              }, [
-                el("strong", { text: depId }),
-                depIt ? el("span", { cls: "muted", text: "· " + depIt.column }) : null
+          if (!fBlockers.length) {
+            col1.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "No active root bottlenecks matching filter." }));
+          } else {
+            fBlockers.forEach(function (b) {
+              var it = ITEMS[b.id] || {};
+              var card = el("div", {
+                cls: "dep-card is-blocker",
+                on: { click: function () { openItemDrawer(b.id); } }
+              });
+              var topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;" }, [
+                el("span", null, [itemLink(b.id), " ", colChip(it.column)]),
+                it.owner ? el("span", { cls: "chip", text: it.owner }) : null
               ]);
-              chips.appendChild(c);
-            });
+              var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || b.id });
+              var badge = el("div", { cls: "dep-blast-badge", text: "⛔ Blocks " + b.count + " downstream item" + (b.count > 1 ? "s" : "") });
 
-            card.appendChild(topRow);
-            card.appendChild(title);
-            card.appendChild(badge);
-            card.appendChild(chips);
-            col1.appendChild(card);
-          });
+              var chips = el("div", { cls: "dep-chip-list" });
+              chips.appendChild(el("span", { cls: "muted", style: "font-size: 11px; align-self: center; margin-right: 2px;", text: "↳ Blocks:" }));
+              (b.dependents || []).forEach(function (depId) {
+                var depIt = ITEMS[depId];
+                var c = el("a", {
+                  cls: "dep-chip" + (depIt && depIt.column === "Done" ? " done" : " active"),
+                  href: "#/item/" + depId,
+                  title: depIt ? (depId + ": " + depIt.title + " (" + depIt.column + ")") : depId,
+                  on: { click: function (e) { e.stopPropagation(); openItemDrawer(depId); } }
+                }, [
+                  el("strong", { text: depId }),
+                  depIt ? el("span", { cls: "muted", text: "· " + depIt.column }) : null
+                ]);
+                chips.appendChild(c);
+              });
+
+              card.appendChild(topRow);
+              card.appendChild(title);
+              card.appendChild(badge);
+              card.appendChild(chips);
+              col1.appendChild(card);
+            });
+          }
+          flow.appendChild(col1);
         }
-        flow.appendChild(col1);
 
-        // Col 2: Blocked Work Items
-        var col2 = el("div", { cls: "dep-col" });
-        col2.appendChild(el("div", { cls: "dep-col-hdr" }, [
-          el("span", { text: "⏳ Blocked Tasks" }),
-          el("span", { cls: "chip", text: String(fBlocked.length) })
-        ]));
-        col2.appendChild(el("p", { cls: "dep-col-desc", text: "Tasks that cannot proceed because technical prerequisites are incomplete." }));
+        if (showCol2) {
+          var col2 = el("div", { cls: "dep-col" + (BLOCKAGE_STATE.filter === "blocked" ? " active" : "") });
+          col2.appendChild(el("div", { cls: "dep-col-hdr" }, [
+            el("span", { text: "⏳ Blocked Tasks" }),
+            el("span", { cls: "chip", text: String(fBlocked.length) })
+          ]));
+          col2.appendChild(el("p", { cls: "dep-col-desc", text: "Tasks that cannot proceed because technical prerequisites are incomplete." }));
 
-        if (!fBlocked.length) {
-          col2.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "No blocked work items matching filter." }));
-        } else {
-          fBlocked.forEach(function (b) {
-            var it = ITEMS[b.id] || {};
-            var card = el("div", {
-              cls: "dep-card is-blocked",
-              on: { click: function () { openItemDrawer(b.id); } }
-            });
-            var topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;" }, [
-              el("span", null, [itemLink(b.id), " ", colChip(it.column)]),
-              it.owner ? el("span", { cls: "chip", text: it.owner }) : null
-            ]);
-            var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || b.id });
-            var badge = el("div", { cls: "dep-blocked-badge", text: "⚠ Waits on " + b.count + " prerequisite" + (b.count > 1 ? "s" : "") });
-
-            var chips = el("div", { cls: "dep-chip-list" });
-            chips.appendChild(el("span", { cls: "muted", style: "font-size: 11px; align-self: center; margin-right: 2px;", text: "Prerequisites:" }));
-            (b.dependencies || []).forEach(function (depId) {
-              var depIt = ITEMS[depId];
-              var statusClass = !depIt ? " missing" : (depIt.column === "Done" ? " done" : " active");
-              var statusLabel = !depIt ? "missing in backlog" : (depIt.column + (depIt.owner ? " · " + depIt.owner : ""));
-              var c = el("a", {
-                cls: "dep-chip" + statusClass,
-                href: "#/item/" + depId,
-                title: depIt ? (depId + ": " + depIt.title + " (" + statusLabel + ")") : (depId + " (missing in backlog!)"),
-                on: { click: function (e) { e.stopPropagation(); openItemDrawer(depId); } }
-              }, [
-                el("strong", { text: depId }),
-                el("span", { cls: "muted", text: "· " + statusLabel })
+          if (!fBlocked.length) {
+            col2.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "No blocked work items matching filter." }));
+          } else {
+            fBlocked.forEach(function (b) {
+              var it = ITEMS[b.id] || {};
+              var card = el("div", {
+                cls: "dep-card is-blocked",
+                on: { click: function () { openItemDrawer(b.id); } }
+              });
+              var topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;" }, [
+                el("span", null, [itemLink(b.id), " ", colChip(it.column)]),
+                it.owner ? el("span", { cls: "chip", text: it.owner }) : null
               ]);
-              chips.appendChild(c);
+              var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || b.id });
+              var badge = el("div", { cls: "dep-blocked-badge", text: "⚠ Waits on " + b.count + " prerequisite" + (b.count > 1 ? "s" : "") });
+
+              var chips = el("div", { cls: "dep-chip-list" });
+              chips.appendChild(el("span", { cls: "muted", style: "font-size: 11px; align-self: center; margin-right: 2px;", text: "Prerequisites:" }));
+              (b.dependencies || []).forEach(function (depId) {
+                var depIt = ITEMS[depId];
+                var statusClass = !depIt ? " missing" : (depIt.column === "Done" ? " done" : " active");
+                var statusLabel = !depIt ? "missing in backlog" : (depIt.column + (depIt.owner ? " · " + depIt.owner : ""));
+                var c = el("a", {
+                  cls: "dep-chip" + statusClass,
+                  href: "#/item/" + depId,
+                  title: depIt ? (depId + ": " + depIt.title + " (" + statusLabel + ")") : (depId + " (missing in backlog!)"),
+                  on: { click: function (e) { e.stopPropagation(); openItemDrawer(depId); } }
+                }, [
+                  el("strong", { text: depId }),
+                  el("span", { cls: "muted", text: "· " + statusLabel })
+                ]);
+                chips.appendChild(c);
+              });
+
+              card.appendChild(topRow);
+              card.appendChild(title);
+              card.appendChild(badge);
+              card.appendChild(chips);
+              col2.appendChild(card);
             });
-
-            card.appendChild(topRow);
-            card.appendChild(title);
-            card.appendChild(badge);
-            card.appendChild(chips);
-            col2.appendChild(card);
-          });
+          }
+          flow.appendChild(col2);
         }
-        flow.appendChild(col2);
 
-        // Col 3: Waiting on Human
-        var col3 = el("div", { cls: "dep-col" });
-        col3.appendChild(el("div", { cls: "dep-col-hdr" }, [
-          el("span", { text: "👤 Waiting on Human" }),
-          el("span", { cls: "chip", text: String(fHuman.length) })
-        ]));
-        col3.appendChild(el("p", { cls: "dep-col-desc", text: "Parked items waiting for human input, API keys, credentials, or architectural review." }));
+        if (showCol3) {
+          var col3 = el("div", { cls: "dep-col" + (BLOCKAGE_STATE.filter === "human" ? " active" : "") });
+          col3.appendChild(el("div", { cls: "dep-col-hdr" }, [
+            el("span", { text: "👤 Waiting on Human" }),
+            el("span", { cls: "chip", text: String(fHuman.length) })
+          ]));
+          col3.appendChild(el("p", { cls: "dep-col-desc", text: "Parked items waiting for human input, API keys, credentials, or architectural review." }));
 
-        if (!fHuman.length) {
-          col3.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "Nothing is waiting on a human." }));
-        } else {
-          fHuman.forEach(function (id) {
-            var it = ITEMS[id] || {}, x = it.extra || {}, d = daysSince(x.Since);
-            var card = el("div", {
-              cls: "dep-card is-parked",
-              on: { click: function () { openItemDrawer(id); } }
+          if (!fHuman.length) {
+            col3.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "Nothing is waiting on a human." }));
+          } else {
+            fHuman.forEach(function (id) {
+              var it = ITEMS[id] || {}, x = it.extra || {}, d = daysSince(x.Since);
+              var card = el("div", {
+                cls: "dep-card is-parked",
+                on: { click: function () { openItemDrawer(id); } }
+              });
+              var topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;" }, [
+                el("span", null, [itemLink(id), " ", colChip(it.column)]),
+                d !== null ? el("span", { cls: "chip", style: "background: var(--warnbg); color: var(--warn); font-weight: 600;", text: d + "d waiting" }) : null
+              ]);
+              var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || id });
+
+              var details = el("div", { style: "font-size: 12px; line-height: 1.4; color: var(--text);" }, [
+                (x["Waiting on whom"] || x["Who can unblock"]) ? el("div", null, [
+                  el("span", { cls: "muted", text: "Waiting on: " }),
+                  el("strong", { text: x["Waiting on whom"] || x["Who can unblock"] })
+                ]) : null,
+                (x["For what decision"] || x["For what"]) ? el("div", null, [
+                  el("span", { cls: "muted", text: "For what: " }),
+                  el("span", { text: x["For what decision"] || x["For what"] })
+                ]) : null,
+                x.Since ? el("div", { cls: "muted", style: "font-size: 11px; margin-top: 3px;", text: "Since: " + x.Since }) : null
+              ]);
+
+              card.appendChild(topRow);
+              card.appendChild(title);
+              card.appendChild(details);
+              col3.appendChild(card);
             });
-            var topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;" }, [
-              el("span", null, [itemLink(id), " ", colChip(it.column)]),
-              d !== null ? el("span", { cls: "chip", style: "background: var(--warnbg); color: var(--warn); font-weight: 600;", text: d + "d waiting" }) : null
-            ]);
-            var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || id });
-
-            var details = el("div", { style: "font-size: 12px; line-height: 1.4; color: var(--text);" }, [
-              (x["Waiting on whom"] || x["Who can unblock"]) ? el("div", null, [
-                el("span", { cls: "muted", text: "Waiting on: " }),
-                el("strong", { text: x["Waiting on whom"] || x["Who can unblock"] })
-              ]) : null,
-              (x["For what decision"] || x["For what"]) ? el("div", null, [
-                el("span", { cls: "muted", text: "For what: " }),
-                el("span", { text: x["For what decision"] || x["For what"] })
-              ]) : null,
-              x.Since ? el("div", { cls: "muted", style: "font-size: 11px; margin-top: 3px;", text: "Since: " + x.Since }) : null
-            ]);
-
-            card.appendChild(topRow);
-            card.appendChild(title);
-            card.appendChild(details);
-            col3.appendChild(card);
-          });
+          }
+          flow.appendChild(col3);
         }
-        flow.appendChild(col3);
+
+        if (BLOCKAGE_STATE.filter === "ready") {
+          var col4 = el("div", { cls: "dep-col active" });
+          col4.appendChild(el("div", { cls: "dep-col-hdr" }, [
+            el("span", { text: "🚀 Ready to Start (0 Blockers)" }),
+            el("span", { cls: "chip", text: String(fReady.length) })
+          ]));
+          col4.appendChild(el("p", { cls: "dep-col-desc", text: "Active tasks with no pending technical prerequisites." }));
+          if (!fReady.length) {
+            col4.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "No ready tasks matching filter." }));
+          } else {
+            fReady.forEach(function (id) {
+              var it = ITEMS[id] || {};
+              var card = el("div", { cls: "dep-card", on: { click: function () { openItemDrawer(id); } } });
+              card.appendChild(el("div", { style: "display: flex; justify-content: space-between; align-items: center;" }, [
+                el("span", null, [itemLink(id), " ", colChip(it.column)]),
+                it.owner ? el("span", { cls: "chip", text: it.owner }) : null
+              ]));
+              card.appendChild(el("div", { style: "font-weight: 600; font-size: 13px; margin: 4px 0;", text: it.title || id }));
+              col4.appendChild(card);
+            });
+          }
+          flow.appendChild(col4);
+        }
 
         contentContainer.appendChild(flow);
 
@@ -2643,40 +2922,28 @@
           contentContainer.appendChild(mGrid);
         }
 
-      } else if (BLOCKAGE_STATE.view === "human") {
-        contentContainer.appendChild(h(2, "Waiting on Human Decisions (" + fHuman.length + ")"));
-        if (!fHuman.length) {
-          contentContainer.appendChild(el("p", { cls: "muted", text: "Nothing is waiting on anyone." }));
-        } else {
-          var ht = el("table", null, [el("tr", null, ["Item", "State", "Waiting on", "For what", "Since", "Days"].map(function (x) {
-            return el("th", { text: x });
-          }))]);
-          fHuman.forEach(function (id) {
-            var it = ITEMS[id], x = it.extra || {}, d = daysSince(x.Since);
-            ht.appendChild(el("tr", null, [
-              el("td", null, [itemLink(id), " " + clip(it.title, 80)]),
-              el("td", null, [colChip(it.column)]),
-              el("td", { text: x["Waiting on whom"] || x["Who can unblock"] || "" }),
-              el("td", { text: x["For what decision"] || x["For what"] || "" }),
-              el("td", { text: x.Since || "" }),
-              el("td", { text: d === null ? "" : String(d) })
-            ]));
-          });
-          contentContainer.appendChild(el("div", { cls: "wrap" }, [ht]));
-        }
-
       } else {
-        contentContainer.appendChild(h(2, "Complete Dependencies & Blockages Table"));
+        contentContainer.appendChild(h(2, "Comprehensive Dependencies Table"));
         var allIds = [];
         var seen = {};
-        fBlockers.forEach(function (b) { if (!seen[b.id]) { seen[b.id] = true; allIds.push(b.id); } });
-        fBlocked.forEach(function (b) { if (!seen[b.id]) { seen[b.id] = true; allIds.push(b.id); } });
-        fHuman.forEach(function (id) { if (!seen[id]) { seen[id] = true; allIds.push(id); } });
+
+        if (BLOCKAGE_STATE.filter === "all" || BLOCKAGE_STATE.filter === "blockers") {
+          fBlockers.forEach(function (b) { if (!seen[b.id]) { seen[b.id] = true; allIds.push(b.id); } });
+        }
+        if (BLOCKAGE_STATE.filter === "all" || BLOCKAGE_STATE.filter === "blocked") {
+          fBlocked.forEach(function (b) { if (!seen[b.id]) { seen[b.id] = true; allIds.push(b.id); } });
+        }
+        if (BLOCKAGE_STATE.filter === "all" || BLOCKAGE_STATE.filter === "human") {
+          fHuman.forEach(function (id) { if (!seen[id]) { seen[id] = true; allIds.push(id); } });
+        }
+        if (BLOCKAGE_STATE.filter === "ready") {
+          fReady.forEach(function (id) { if (!seen[id]) { seen[id] = true; allIds.push(id); } });
+        }
 
         if (!allIds.length) {
-          contentContainer.appendChild(el("p", { cls: "muted", text: "No items match the filter." }));
+          contentContainer.appendChild(el("p", { cls: "muted", text: "No items match current filters." }));
         } else {
-          var tt = el("table", null, [el("tr", null, ["Item", "State", "Owner", "Role in Dependencies", "Prerequisites / Downstream", "Waiting on (Human)", "Since"].map(function (x) {
+          var tt = el("table", null, [el("tr", null, ["Item", "State", "Tier", "Owner", "Role in Dependencies", "Prerequisites / Downstream", "Waiting on (Human)", "Since"].map(function (x) {
             return el("th", { text: x });
           }))]);
           allIds.forEach(function (id) {
@@ -2705,6 +2972,7 @@
             tt.appendChild(el("tr", null, [
               el("td", null, [itemLink(id), " " + clip(it.title, 50)]),
               el("td", null, [colChip(it.column)]),
+              el("td", null, [it.tier ? el("span", { cls: "chip", text: "Tier " + it.tier }) : el("span", { cls: "muted", text: "—" })]),
               el("td", { text: it.owner || "—" }),
               roleChips,
               linksCell,
@@ -3062,6 +3330,8 @@
     return svg;
   }
 
+  var GIT_STATE = { tab: "graph", mode: "all", query: "", author: "", viewStyle: "graph" };
+
   function viewGit() {
     tab("git");
     crumbs([[M.project || "Project", "map"], ["Git"]]);
@@ -3069,6 +3339,7 @@
 
     var git = M.git || { branch: "", clean: true, modified_count: 0, modified_files: [], branches: [], commits: [], stats: { total: 0, linked: 0, untracked: 0, rate: 0 } };
     var stats = git.stats || { total: 0, linked: 0, untracked: 0, rate: 0 };
+    var allCommits = git.commits || [];
 
     var strip = el("div", { cls: "strip" });
     if (git.branch) {
@@ -3079,99 +3350,240 @@
       sBranch.style.borderTop = "3px solid var(--link)";
       strip.appendChild(sBranch);
     }
-    var sStatus = el("div", { cls: "stat" }, [
+
+    var sStatus = el("div", {
+      cls: "stat clickable" + (GIT_STATE.tab === "working_tree" ? " active" : ""),
+      title: "Click to inspect working tree files",
+      on: { click: function () {
+        GIT_STATE.tab = (GIT_STATE.tab === "working_tree" ? "graph" : "working_tree");
+        render();
+      } }
+    }, [
       el("span", { cls: "muted", text: "Working tree: " }),
       git.clean
         ? el("span", { text: "Clean", style: "color: var(--accent); font-weight: 600;" })
-        : el("span", { text: git.modified_count + " uncommitted file" + (git.modified_count > 1 ? "s" : ""), style: "color: var(--warn); font-weight: 600;" })
+        : el("span", { text: git.modified_count + " uncommitted file" + (git.modified_count > 1 ? "s" : ""), style: "color: var(--warn); font-weight: 600;" }),
+      GIT_STATE.tab === "working_tree" ? el("span", { cls: "stat-filter-badge", text: "VIEWING" }) : null
     ]);
     sStatus.style.borderTop = "3px solid " + (git.clean ? "var(--accent)" : "var(--warn)");
     strip.appendChild(sStatus);
 
-    var sRate = el("div", { cls: "stat" }, [
+    var sRate = el("div", {
+      cls: "stat clickable" + (GIT_STATE.tab === "graph" && GIT_STATE.mode === "linked" ? " active" : ""),
+      title: "Click to filter linked commits",
+      on: { click: function () {
+        GIT_STATE.tab = "graph";
+        GIT_STATE.mode = (GIT_STATE.mode === "linked" ? "all" : "linked");
+        render();
+      } }
+    }, [
       el("b", { text: stats.rate + "%" }),
-      el("span", { text: "Traceability (" + stats.linked + "/" + stats.total + " commits linked)" })
+      el("span", { text: "Traceability (" + stats.linked + "/" + stats.total + " linked)" }),
+      (GIT_STATE.tab === "graph" && GIT_STATE.mode === "linked") ? el("span", { cls: "stat-filter-badge", text: "FILTER" }) : null
     ]);
     sRate.style.borderTop = "3px solid var(--accent)";
     strip.appendChild(sRate);
 
     if (stats.untracked > 0) {
-      var sUntracked = el("div", { cls: "stat" }, [
+      var sUntracked = el("div", {
+        cls: "stat clickable" + (GIT_STATE.tab === "graph" && GIT_STATE.mode === "untracked" ? " active" : ""),
+        title: "Click to filter untracked commits",
+        on: { click: function () {
+          GIT_STATE.tab = "graph";
+          GIT_STATE.mode = (GIT_STATE.mode === "untracked" ? "all" : "untracked");
+          render();
+        } }
+      }, [
         el("b", { text: String(stats.untracked) }),
-        el("span", { text: "Untracked commits" })
+        el("span", { text: "Untracked commits" }),
+        (GIT_STATE.tab === "graph" && GIT_STATE.mode === "untracked") ? el("span", { cls: "stat-filter-badge", text: "FILTER" }) : null
       ]);
       sUntracked.style.borderTop = "3px solid var(--muted)";
       strip.appendChild(sUntracked);
     }
 
     if (git.branches && git.branches.length) {
-      var sBranches = el("div", { cls: "stat" }, [
+      var sBranches = el("div", {
+        cls: "stat clickable" + (GIT_STATE.tab === "branches" ? " active" : ""),
+        title: "Click to view local branches",
+        on: { click: function () {
+          GIT_STATE.tab = (GIT_STATE.tab === "branches" ? "graph" : "branches");
+          render();
+        } }
+      }, [
         el("b", { text: String(git.branches.length) }),
-        el("span", { text: "Local branches" })
+        el("span", { text: "Local branches" }),
+        GIT_STATE.tab === "branches" ? el("span", { cls: "stat-filter-badge", text: "VIEWING" }) : null
       ]);
       strip.appendChild(sBranches);
     }
     main.appendChild(strip);
 
-    if (!git.clean && git.modified_files && git.modified_files.length) {
-      var det = el("details", { cls: "banner", style: "margin-bottom: 14px; border-left: 4px solid var(--warn);" }, [
-        el("summary", { style: "cursor: pointer; font-weight: 600;", text: "⚠️ Uncommitted changes in working tree (" + git.modified_files.length + " files) — click to inspect" })
+    var viewSwitcher = el("div", { cls: "view-segmented" }, [
+      el("button", {
+        cls: (GIT_STATE.tab === "graph" ? "active" : ""),
+        text: "🌿 Commit Graph & History (" + allCommits.length + ")",
+        on: { click: function () { GIT_STATE.tab = "graph"; render(); } }
+      }),
+      el("button", {
+        cls: (GIT_STATE.tab === "working_tree" ? "active" : ""),
+        text: "⚠️ Working Tree (" + (git.clean ? "Clean" : git.modified_count) + ")",
+        style: (!git.clean ? "color: var(--warn); font-weight: 600;" : ""),
+        on: { click: function () { GIT_STATE.tab = "working_tree"; render(); } }
+      }),
+      el("button", {
+        cls: (GIT_STATE.tab === "branches" ? "active" : ""),
+        text: "⎇ Branches & Remotes (" + ((git.branches || []).length) + ")",
+        on: { click: function () { GIT_STATE.tab = "branches"; render(); } }
+      })
+    ]);
+
+    var rightToolbar = [];
+    if (GIT_STATE.tab === "graph") {
+      var authors = {};
+      allCommits.forEach(function (c) { if (c.author) authors[c.author] = (authors[c.author] || 0) + 1; });
+
+      var authorSel = el("select", {
+        "aria-label": "Filter by Author",
+        on: { change: function () { GIT_STATE.author = authorSel.value; renderCommitList(); } }
+      }, [
+        el("option", { value: "", text: "All authors" })
+      ].concat(Object.keys(authors).sort().map(function (a) {
+        var opt = el("option", { value: a, text: a + " (" + authors[a] + ")" });
+        if (GIT_STATE.author === a) opt.selected = true;
+        return opt;
+      })));
+
+      var modeSel = el("select", {
+        "aria-label": "Commit filter mode",
+        on: { change: function () { GIT_STATE.mode = modeSel.value; renderCommitList(); } }
+      }, [
+        el("option", { value: "all", text: "All commits (" + allCommits.length + ")" }),
+        el("option", { value: "linked", text: "Linked to work items (" + stats.linked + ")" }),
+        el("option", { value: "untracked", text: "Untracked commits (" + stats.untracked + ")" })
       ]);
-      var ut = el("table");
-      ut.appendChild(el("tr", null, [el("th", { text: "Status", style: "width: 70px;" }), el("th", { text: "File" })]));
-      git.modified_files.forEach(function (f) {
-        ut.appendChild(el("tr", null, [
-          el("td", null, [el("code", { text: f.status })]),
-          el("td", null, [el("code", { text: f.path })])
-        ]));
+      modeSel.value = GIT_STATE.mode;
+
+      var viewStyleSel = el("select", {
+        "aria-label": "Graph view style",
+        on: { change: function () { GIT_STATE.viewStyle = viewStyleSel.value; renderCommitList(); } }
+      }, [
+        el("option", { value: "graph", text: "Visual Git Graph (GitLens)" }),
+        el("option", { value: "table", text: "Compact Table View" })
+      ]);
+      viewStyleSel.value = GIT_STATE.viewStyle;
+
+      var qInput = el("input", {
+        type: "search",
+        placeholder: "Filter commits, authors, SHAs…",
+        value: GIT_STATE.query,
+        style: "flex: 1 1 200px; max-width: 260px;",
+        on: { input: function () { GIT_STATE.query = qInput.value; renderCommitList(); } }
       });
-      det.appendChild(ut);
-      main.appendChild(det);
+
+      rightToolbar = [viewStyleSel, modeSel, authorSel, qInput];
     }
 
-    var allCommits = git.commits || [];
-    main.appendChild(h(2, "Commit Graph & Traceability (" + allCommits.length + ")"));
+    main.appendChild(el("div", { cls: "sub-toolbar" }, [
+      el("div", { cls: "sub-toolbar-left" }, [viewSwitcher]),
+      el("div", { cls: "sub-toolbar-right" }, rightToolbar)
+    ]));
 
-    var qInput = el("input", {
-      type: "search",
-      placeholder: "Filter commits, authors, SHAs, or IDs…",
-      value: GIT_FILTER.query,
-      style: "flex: 1 1 240px; max-width: 320px;",
-      on: { input: function () { GIT_FILTER.query = qInput.value; renderCommitList(); } }
-    });
+    var contentContainer = el("div");
+    main.appendChild(contentContainer);
 
-    var modeSel = el("select", {
-      "aria-label": "Commit filter mode",
-      on: { change: function () { GIT_FILTER.mode = modeSel.value; renderCommitList(); } }
-    }, [
-      el("option", { value: "all", text: "All commits (" + allCommits.length + ")" }),
-      el("option", { value: "linked", text: "Linked to work items (" + stats.linked + ")" }),
-      el("option", { value: "untracked", text: "Untracked commits (" + stats.untracked + ")" })
-    ]);
-    modeSel.value = GIT_FILTER.mode;
+    if (GIT_STATE.tab === "working_tree") {
+      contentContainer.appendChild(h(2, "Working Tree & Local Modifications"));
+      if (git.clean || !git.modified_files || !git.modified_files.length) {
+        var cleanBox = el("div", { cls: "banner", style: "border-color: var(--accent); background: var(--okbg);" }, [
+          el("strong", { style: "color: var(--accent);", text: "✓ Working tree is clean." }),
+          el("p", { cls: "muted", style: "margin: 4px 0 0; font-size: 13px;", text: "All tracked and local files match the current HEAD commit." })
+        ]);
+        contentContainer.appendChild(cleanBox);
+      } else {
+        var warnBox = el("div", { cls: "banner", style: "border-left: 4px solid var(--warn); margin-bottom: 12px;" }, [
+          el("strong", { text: git.modified_files.length + " uncommitted file" + (git.modified_files.length > 1 ? "s" : "") + " detected in working tree." }),
+          el("span", { cls: "muted", style: "font-size: 12px; margin-left: 6px;", text: "Ensure changes are tested with verify and referenced with a work item ID when committed." })
+        ]);
+        contentContainer.appendChild(warnBox);
 
-    var viewSel = el("select", {
-      "aria-label": "Graph view style",
-      on: { change: function () { GIT_FILTER.view = viewSel.value; renderCommitList(); } }
-    }, [
-      el("option", { value: "graph", text: "Visual Git Graph (GitLens)" }),
-      el("option", { value: "table", text: "Compact Table View" })
-    ]);
-    viewSel.value = GIT_FILTER.view;
+        var wt = el("table");
+        wt.appendChild(el("tr", null, [
+          el("th", { text: "Status", style: "width: 80px;" }),
+          el("th", { text: "Path" }),
+          el("th", { text: "Detected Item", style: "width: 140px;" })
+        ]));
 
-    var filterRow = el("div", { cls: "filters" }, [modeSel, viewSel, qInput]);
-    main.appendChild(filterRow);
+        git.modified_files.forEach(function (f) {
+          var matchedId = null;
+          var m = f.path.match(/([A-Z][A-Z0-9]+-[0-9]+)/);
+          if (m && ITEMS[m[1]]) matchedId = m[1];
 
-    var listContainer = el("div");
-    main.appendChild(listContainer);
+          var statusBadge = el("span", {
+            cls: "chip",
+            style: "font-weight: 700; font-family: monospace; " +
+              (f.status.indexOf("M") >= 0 ? "background: rgba(191,135,0,0.15); color: #bf8700;" :
+               (f.status.indexOf("A") >= 0 || f.status.indexOf("?") >= 0 ? "background: var(--okbg); color: var(--accent);" : "background: var(--badbg); color: var(--bad);")),
+            text: f.status
+          });
 
+          wt.appendChild(el("tr", null, [
+            el("td", null, [statusBadge]),
+            el("td", null, [el("code", { text: f.path })]),
+            el("td", null, [matchedId ? itemLink(matchedId) : el("span", { cls: "muted", text: "—" })])
+          ]));
+        });
+        contentContainer.appendChild(el("div", { cls: "wrap" }, [wt]));
+      }
+      return;
+    }
+
+    if (GIT_STATE.tab === "branches") {
+      contentContainer.appendChild(h(2, "Local Branches (" + (git.branches || []).length + ")"));
+      if (!git.branches || !git.branches.length) {
+        contentContainer.appendChild(el("p", { cls: "muted", text: "No local branch information available." }));
+      } else {
+        var bt = el("table", null, [el("tr", null, ["Branch", "Linked Work Items", "Last Commit Date", "Last Commit Subject"].map(function (x) {
+          return el("th", { text: x });
+        }))]);
+        git.branches.forEach(function (b) {
+          var nameCell = el("td");
+          if (b.current) {
+            nameCell.appendChild(el("span", { cls: "chip", text: "HEAD", style: "background: var(--okbg); color: var(--accent); font-weight: 700; margin-right: 6px;" }));
+            nameCell.appendChild(el("strong", { text: b.name }));
+          } else {
+            nameCell.appendChild(document.createTextNode(b.name));
+          }
+          var itemsCell = el("td");
+          if (b.items && b.items.length) {
+            b.items.forEach(function (id) {
+              itemsCell.appendChild(itemLink(id));
+              itemsCell.appendChild(document.createTextNode(" "));
+            });
+          } else {
+            itemsCell.appendChild(el("span", { cls: "muted", text: "—" }));
+          }
+          bt.appendChild(el("tr", null, [
+            nameCell,
+            itemsCell,
+            el("td", { text: b.date || "" }),
+            el("td", null, [inline(b.subject || "")])
+          ]));
+        });
+        contentContainer.appendChild(el("div", { cls: "wrap" }, [bt]));
+      }
+      return;
+    }
+
+    // Tab: graph
     var shownCommits = 75;
     function renderCommitList() {
-      listContainer.textContent = "";
-      var needle = (GIT_FILTER.query || "").trim().toLowerCase();
+      contentContainer.textContent = "";
+      var needle = (GIT_STATE.query || "").trim().toLowerCase();
       var filtered = allCommits.filter(function (c) {
-        if (GIT_FILTER.mode === "linked" && (!c.items || !c.items.length)) return false;
-        if (GIT_FILTER.mode === "untracked" && c.items && c.items.length) return false;
+        if (GIT_STATE.mode === "linked" && (!c.items || !c.items.length)) return false;
+        if (GIT_STATE.mode === "untracked" && c.items && c.items.length) return false;
+        if (GIT_STATE.author && c.author !== GIT_STATE.author) return false;
         if (!needle) return true;
         if (c.sha.toLowerCase().indexOf(needle) >= 0) return true;
         if ((c.subject || "").toLowerCase().indexOf(needle) >= 0) return true;
@@ -3181,14 +3593,14 @@
       });
 
       if (!filtered.length) {
-        listContainer.appendChild(el("p", { cls: "muted", text: "No commits match the filter." }));
+        contentContainer.appendChild(el("p", { cls: "muted", text: "No commits match the filter." }));
         return;
       }
 
       var commitsToDisplay = filtered.slice(0, shownCommits);
       var graphData = computeGitGraph(commitsToDisplay);
 
-      var tableHeaders = GIT_FILTER.view === "graph"
+      var tableHeaders = GIT_STATE.viewStyle === "graph"
         ? ["Graph", "Commit / Subject", "Author", "Date", "SHA"]
         : ["SHA", "Date", "Author", "Subject", "Linked Items"];
 
@@ -3208,7 +3620,7 @@
           } }
         });
 
-        if (GIT_FILTER.view === "graph") {
+        if (GIT_STATE.viewStyle === "graph") {
           var graphCell = el("td", { cls: "git-graph-cell" }, [drawGraphCell(r, graphData.maxLanes)]);
           tr.appendChild(graphCell);
 
@@ -3279,7 +3691,7 @@
         ct.appendChild(tr);
       });
 
-      listContainer.appendChild(el("div", { cls: "wrap" }, [ct]));
+      contentContainer.appendChild(el("div", { cls: "wrap" }, [ct]));
 
       if (filtered.length > shownCommits) {
         var moreBtn = el("button", {
@@ -3287,43 +3699,11 @@
           style: "margin-top: 10px;",
           on: { click: function () { shownCommits += 50; renderCommitList(); } }
         });
-        listContainer.appendChild(moreBtn);
+        contentContainer.appendChild(moreBtn);
       }
     }
 
     renderCommitList();
-
-    if (git.branches && git.branches.length) {
-      main.appendChild(h(2, "Local branches (" + git.branches.length + ")"));
-      var bt = el("table", null, [el("tr", null, ["Branch", "Linked Work Items", "Last Commit Date", "Last Commit Subject"].map(function (x) {
-        return el("th", { text: x });
-      }))]);
-      git.branches.forEach(function (b) {
-        var nameCell = el("td");
-        if (b.current) {
-          nameCell.appendChild(el("span", { cls: "chip", text: "HEAD", style: "background: var(--okbg); color: var(--accent); font-weight: 700; margin-right: 6px;" }));
-          nameCell.appendChild(el("strong", { text: b.name }));
-        } else {
-          nameCell.appendChild(document.createTextNode(b.name));
-        }
-        var itemsCell = el("td");
-        if (b.items && b.items.length) {
-          b.items.forEach(function (id) {
-            itemsCell.appendChild(itemLink(id));
-            itemsCell.appendChild(document.createTextNode(" "));
-          });
-        } else {
-          itemsCell.appendChild(el("span", { cls: "muted", text: "—" }));
-        }
-        bt.appendChild(el("tr", null, [
-          nameCell,
-          itemsCell,
-          el("td", { text: b.date || "" }),
-          el("td", null, [inline(b.subject || "")])
-        ]));
-      });
-      main.appendChild(el("div", { cls: "wrap", style: "margin-top: 8px;" }, [bt]));
-    }
   }
 
   // ---------------------------------------------------------------- item
@@ -3404,18 +3784,351 @@
   }
 
   // ---------------------------------------------------------------- documents
+  var DOCS_STATE = {
+    view: "split",
+    selectedPath: "",
+    query: "",
+    status: "all"
+  };
+
   function viewDocs() {
     tab("docs");
     crumbs([[M.project || "Project", "map"], ["Documents"]]);
     main.appendChild(h(1, "Documents"));
-    var t = el("table", null, [el("tr", null, ["Document", "Kind", "Status", "Owner", "Last reviewed", "Days"].map(function (x) { return el("th", { text: x }); }))]);
-    DOCS.forEach(function (d, n) {
-      var age = daysSince(d.meta["last-reviewed"]);
-      t.appendChild(el("tr", null, [el("td", null, [link(d.path, docRoute(n))]), el("td", { text: d.kind }),
-        el("td", { text: d.meta.status || "" }), el("td", { text: d.meta.owner || "" }),
-        el("td", { text: d.meta["last-reviewed"] || "" }), el("td", { text: age === null ? "" : String(age) })]));
+
+    // Sub-toolbar with view switchers and filters
+    var tb = el("div", { cls: "sub-toolbar" });
+    var left = el("div", { cls: "sub-toolbar-left" });
+    var right = el("div", { cls: "sub-toolbar-right" });
+
+    // View mode toggle
+    var seg = el("div", { cls: "view-segmented" });
+    var btnSplit = el("button", { text: "🗂️ Split Explorer & Quick View", cls: DOCS_STATE.view === "split" ? "active" : "" });
+    btnSplit.onclick = function () { DOCS_STATE.view = "split"; viewDocs(); };
+    var btnTable = el("button", { text: "📋 All Documents Table", cls: DOCS_STATE.view === "table" ? "active" : "" });
+    btnTable.onclick = function () { DOCS_STATE.view = "table"; viewDocs(); };
+    seg.appendChild(btnSplit);
+    seg.appendChild(btnTable);
+    left.appendChild(seg);
+
+    // Search filter input
+    var searchInp = el("input", {
+      type: "search",
+      placeholder: "Filter documents by name, path, owner...",
+      value: DOCS_STATE.query || ""
     });
-    main.appendChild(el("div", { cls: "wrap" }, [t]));
+    searchInp.style.fontSize = "12.5px";
+    searchInp.style.padding = "5px 10px";
+    searchInp.style.borderRadius = "6px";
+    searchInp.style.border = "1px solid var(--line)";
+    searchInp.style.background = "var(--panel)";
+    searchInp.style.color = "var(--text)";
+    searchInp.style.minWidth = "220px";
+    searchInp.oninput = function () {
+      DOCS_STATE.query = searchInp.value;
+      renderDocsContent();
+    };
+    left.appendChild(searchInp);
+
+    // Status filter
+    var allStatuses = [];
+    DOCS.forEach(function (d) {
+      var s = (d.meta && d.meta.status) ? String(d.meta.status).trim() : "";
+      if (s && allStatuses.indexOf(s) < 0) allStatuses.push(s);
+    });
+    allStatuses.sort();
+
+    var statusSel = el("select", null, [el("option", { value: "all", text: "All Statuses" })]);
+    allStatuses.forEach(function (s) {
+      var opt = el("option", { value: s, text: "Status: " + s });
+      if (DOCS_STATE.status === s) opt.selected = true;
+      statusSel.appendChild(opt);
+    });
+    statusSel.style.fontSize = "12px";
+    statusSel.style.padding = "5px 8px";
+    statusSel.style.borderRadius = "6px";
+    statusSel.style.border = "1px solid var(--line)";
+    statusSel.style.background = "var(--panel)";
+    statusSel.style.color = "var(--text)";
+    statusSel.onchange = function () {
+      DOCS_STATE.status = statusSel.value;
+      renderDocsContent();
+    };
+    left.appendChild(statusSel);
+
+    var countBadge = el("span", { cls: "chip", text: DOCS.length + " docs" });
+    right.appendChild(countBadge);
+
+    tb.appendChild(left);
+    tb.appendChild(right);
+    main.appendChild(tb);
+
+    var contentContainer = el("div", { id: "docs-content-container" });
+    main.appendChild(contentContainer);
+
+    function getFilteredDocs() {
+      var q = (DOCS_STATE.query || "").toLowerCase().trim();
+      var st = DOCS_STATE.status || "all";
+      return DOCS.filter(function (d) {
+        if (st !== "all") {
+          var s = (d.meta && d.meta.status) ? String(d.meta.status).toLowerCase().trim() : "";
+          if (s !== st.toLowerCase()) return false;
+        }
+        if (q) {
+          var match = (d.path || "").toLowerCase().indexOf(q) >= 0 ||
+                      (d.title || "").toLowerCase().indexOf(q) >= 0 ||
+                      (d.kind || "").toLowerCase().indexOf(q) >= 0 ||
+                      (d.meta && d.meta.owner && String(d.meta.owner).toLowerCase().indexOf(q) >= 0);
+          if (!match) return false;
+        }
+        return true;
+      });
+    }
+
+    function renderDocsContent() {
+      contentContainer.innerHTML = "";
+      var filtered = getFilteredDocs();
+      countBadge.textContent = filtered.length + " / " + DOCS.length + " docs";
+
+      if (DOCS_STATE.view === "table") {
+        renderTableView(filtered);
+      } else {
+        renderSplitView(filtered);
+      }
+    }
+
+    function renderTableView(filtered) {
+      if (!filtered.length) {
+        contentContainer.appendChild(el("p", { cls: "muted", text: "No documents match the current search or status filter." }));
+        return;
+      }
+      var t = el("table", { cls: "board-table" });
+      var ths = ["Document", "Directory / Kind", "Status", "Owner", "Last Reviewed", "Days Ago", "Actions"];
+      t.appendChild(el("tr", null, ths.map(function (x) { return el("th", { text: x }); })));
+
+      filtered.forEach(function (d) {
+        var n = DOC_BY_PATH[d.path];
+        var age = daysSince(d.meta ? d.meta["last-reviewed"] : null);
+        var dirName = d.path.indexOf("/") >= 0 ? d.path.slice(0, d.path.lastIndexOf("/")) : "root";
+        var fileName = d.path.slice(d.path.lastIndexOf("/") + 1);
+
+        var tdDoc = el("td", null, [
+          link(fileName, docRoute(n)),
+          el("div", { cls: "muted", text: d.title && d.title !== fileName ? d.title : d.path, style: "font-size: 11px; margin-top: 2px;" })
+        ]);
+
+        var tdKind = el("td", null, [
+          el("code", { text: dirName, style: "font-size: 11px; color: var(--muted);" }),
+          d.kind ? el("span", { cls: "chip", text: d.kind, style: "margin-left: 6px; font-size: 10.5px;" }) : ""
+        ]);
+
+        var tdStatus = el("td", null, [
+          d.meta && d.meta.status ? el("span", { cls: "chip status " + d.meta.status, text: d.meta.status }) : el("span", { cls: "muted", text: "—" })
+        ]);
+
+        var tdOwner = el("td", null, [
+          d.meta && d.meta.owner ? el("span", { text: "@" + d.meta.owner, style: "font-weight: 500;" }) : el("span", { cls: "muted", text: "—" })
+        ]);
+
+        var tdReviewed = el("td", { text: (d.meta && d.meta["last-reviewed"]) || "—" });
+        var tdAge = el("td", { text: age === null ? "—" : String(age) + "d" });
+        if (age !== null && age > 90) tdAge.style.color = "var(--c-blocked)";
+
+        var tdActions = el("td", null, [
+          el("button", {
+            text: "👁️ Preview",
+            cls: "btn",
+            style: "padding: 3px 8px; font-size: 11.5px; margin-right: 6px;",
+            onclick: function () {
+              DOCS_STATE.view = "split";
+              DOCS_STATE.selectedPath = d.path;
+              viewDocs();
+            }
+          }),
+          link("↗ Full View", docRoute(n))
+        ]);
+
+        t.appendChild(el("tr", null, [tdDoc, tdKind, tdStatus, tdOwner, tdReviewed, tdAge, tdActions]));
+      });
+
+      contentContainer.appendChild(el("div", { cls: "wrap", style: "margin-top: 10px;" }, [t]));
+    }
+
+    function renderSplitView(filtered) {
+      if (!filtered.length) {
+        contentContainer.appendChild(el("p", { cls: "muted", text: "No documents match the current search or status filter." }));
+        return;
+      }
+
+      // Ensure valid selectedPath
+      var curSelected = null;
+      if (DOCS_STATE.selectedPath) {
+        curSelected = filtered.filter(function (d) { return d.path === DOCS_STATE.selectedPath; })[0];
+      }
+      if (!curSelected && filtered.length > 0) {
+        curSelected = filtered[0];
+        DOCS_STATE.selectedPath = curSelected.path;
+      }
+
+      var split = el("div", { cls: "docs-split" });
+      var treePane = el("div", { cls: "docs-tree-pane" });
+      var previewPane = el("div", { cls: "docs-preview-pane" });
+
+      // Group filtered docs by folder
+      var groups = {};
+      var groupOrder = [];
+      filtered.forEach(function (d) {
+        var dir = d.path.indexOf("/") >= 0 ? d.path.slice(0, d.path.lastIndexOf("/")) : "Root";
+        if (!groups[dir]) {
+          groups[dir] = [];
+          groupOrder.push(dir);
+        }
+        groups[dir].push(d);
+      });
+
+      // Render Tree Folders
+      groupOrder.forEach(function (dir) {
+        var folderBox = el("div", { cls: "tree-folder" });
+        var folderHdr = el("div", { cls: "tree-folder-title" });
+        folderHdr.innerHTML = "<span>📁</span> <span>" + dir + "</span> <span class='chip' style='margin-left:auto; font-size:10px;'>" + groups[dir].length + "</span>";
+
+        var folderItems = el("div", { cls: "tree-folder-items" });
+
+        groups[dir].forEach(function (d) {
+          var isSelected = curSelected && curSelected.path === d.path;
+          var fileName = d.path.slice(d.path.lastIndexOf("/") + 1);
+          var itemRow = el("div", { cls: "tree-doc-item" + (isSelected ? " active" : "") });
+
+          var leftPart = el("div", { style: "display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" });
+          leftPart.appendChild(el("span", { text: "📄", style: "font-size: 13px;" }));
+          var titleEl = el("span", { text: fileName, style: "font-weight:" + (isSelected ? "600" : "400") + "; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" });
+          titleEl.title = d.path + (d.title ? " (" + d.title + ")" : "");
+          leftPart.appendChild(titleEl);
+          itemRow.appendChild(leftPart);
+
+          var rightPart = el("div", { style: "display:flex; align-items:center; gap:4px; margin-left:8px; flex-shrink:0;" });
+          if (d.meta && d.meta.status) {
+            rightPart.appendChild(el("span", { cls: "chip status " + d.meta.status, text: d.meta.status, style: "font-size:10px; padding:1px 5px;" }));
+          }
+          var age = daysSince(d.meta ? d.meta["last-reviewed"] : null);
+          if (age !== null) {
+            var ageChip = el("span", { cls: "muted", text: age + "d", style: "font-size:10px;" });
+            if (age > 90) ageChip.style.color = "var(--c-blocked)";
+            rightPart.appendChild(ageChip);
+          }
+          itemRow.appendChild(rightPart);
+
+          itemRow.onclick = function () {
+            DOCS_STATE.selectedPath = d.path;
+            var allItems = treePane.querySelectorAll(".tree-doc-item");
+            for (var i = 0; i < allItems.length; i++) allItems[i].classList.remove("active");
+            itemRow.classList.add("active");
+            renderPreview(d);
+          };
+
+          folderItems.appendChild(itemRow);
+        });
+
+        folderBox.appendChild(folderHdr);
+        folderBox.appendChild(folderItems);
+        treePane.appendChild(folderBox);
+      });
+
+      // Preview Renderer
+      function renderPreview(doc) {
+        previewPane.innerHTML = "";
+        if (!doc) {
+          previewPane.appendChild(el("p", { cls: "muted", text: "Select a document from the explorer on the left to preview it." }));
+          return;
+        }
+
+        var n = DOC_BY_PATH[doc.path];
+        var hdr = el("div", { cls: "docs-preview-hdr" });
+
+        var hdrLeft = el("div", null);
+        var docTitle = doc.title || doc.path.slice(doc.path.lastIndexOf("/") + 1);
+        hdrLeft.appendChild(h(2, "📄 " + docTitle));
+
+        var metaBar = el("div", { style: "display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:6px; font-size:12px;" });
+        metaBar.appendChild(el("code", { text: doc.path, style: "color:var(--text); background:var(--chip); padding:2px 6px; border-radius:4px;" }));
+        if (doc.kind) metaBar.appendChild(el("span", { cls: "chip", text: "kind: " + doc.kind }));
+        if (doc.meta && doc.meta.status) metaBar.appendChild(el("span", { cls: "chip status " + doc.meta.status, text: "status: " + doc.meta.status }));
+        if (doc.meta && doc.meta.owner) metaBar.appendChild(el("span", { cls: "chip", text: "owner: @" + doc.meta.owner }));
+        if (doc.meta && doc.meta["last-reviewed"]) {
+          var age = daysSince(doc.meta["last-reviewed"]);
+          metaBar.appendChild(el("span", { cls: "muted", text: "Reviewed: " + doc.meta["last-reviewed"] + (age !== null ? " (" + age + "d ago)" : "") }));
+        }
+        hdrLeft.appendChild(metaBar);
+
+        var hdrRight = el("div", { style: "display:flex; align-items:center; gap:8px;" });
+        var openFullBtn = el("a", {
+          href: "#/" + docRoute(n),
+          cls: "btn primary",
+          text: "↗ Open Full View",
+          style: "font-weight:600; text-decoration:none; padding:6px 12px; font-size:12.5px;"
+        });
+        hdrRight.appendChild(openFullBtn);
+
+        hdr.appendChild(hdrLeft);
+        hdr.appendChild(hdrRight);
+        previewPane.appendChild(hdr);
+
+        // Linked Items / mentions
+        if (doc.mentions && doc.mentions.length) {
+          var mentionsBox = el("div", { style: "margin-bottom:14px; padding:8px 12px; background:var(--panel); border:1px solid var(--line); border-radius:6px; font-size:12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;" });
+          mentionsBox.appendChild(el("strong", { text: "🔗 Linked Work Items:" }));
+          doc.mentions.forEach(function (id) {
+            mentionsBox.appendChild(itemLink(id));
+          });
+          previewPane.appendChild(mentionsBox);
+        }
+
+        // Quick table of contents outline if headings exist
+        if (doc.headings && doc.headings.length > 1) {
+          var tocBox = el("div", { style: "margin-bottom:16px; padding:10px 12px; background:var(--panel); border-radius:6px; border-left:3px solid var(--link); font-size:12px;" });
+          tocBox.appendChild(el("div", { text: "📑 Outline & Sections", style: "font-weight:600; margin-bottom:6px; color:var(--muted); text-transform:uppercase; font-size:11px; letter-spacing:0.04em;" }));
+          var tocList = el("div", { style: "display:flex; flex-wrap:wrap; gap:6px;" });
+          doc.headings.forEach(function (hd) {
+            var jumpLink = el("a", {
+              href: "#/" + docRoute(n, hd.line),
+              text: hd.text,
+              style: "background:var(--bg); border:1px solid var(--line); padding:2px 8px; border-radius:4px; color:var(--link); text-decoration:none; font-size:11.5px;"
+            });
+            jumpLink.onclick = function (e) {
+              var target = previewPane.querySelector("#L" + hd.line);
+              if (target) {
+                e.preventDefault();
+                target.scrollIntoView({ behavior: "smooth" });
+                target.classList.add("flash");
+              }
+            };
+            tocList.appendChild(jumpLink);
+          });
+          tocBox.appendChild(tocList);
+          previewPane.appendChild(tocBox);
+        }
+
+        // Render Markdown body
+        var baseDir = doc.path.indexOf("/") >= 0 ? doc.path.slice(0, doc.path.lastIndexOf("/")) : "";
+        var body = renderMd(doc.text, baseDir);
+        if (doc.truncated) {
+          var truncBox = el("p", { cls: "banner", text: "This document is truncated in preview mode. Click 'Open Full View' to view the full file." });
+          truncBox.style.marginTop = "12px";
+          body.appendChild(truncBox);
+        }
+        previewPane.appendChild(body);
+      }
+
+      if (curSelected) {
+        renderPreview(curSelected);
+      }
+
+      split.appendChild(treePane);
+      split.appendChild(previewPane);
+      contentContainer.appendChild(split);
+    }
+
+    renderDocsContent();
   }
   var currentDocScrollSpy = null;
   function viewDoc(path, line) {
