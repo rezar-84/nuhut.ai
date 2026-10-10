@@ -251,6 +251,24 @@
   .git-avatar { width: 20px; height: 20px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.3); flex-shrink: 0; }
   .git-sha-code { font-family: monospace; font-size: 11px; padding: 2px 5px; border-radius: 4px; background: var(--chip); border: 1px solid var(--line); color: var(--text); }
   .git-sha-code:hover { background: var(--panel); border-color: var(--link); color: var(--link); }
+  /* Dependencies & Blockages Flow */
+  .dep-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin: 16px 0; align-items: start; }
+  .dep-col { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .dep-col-hdr { font-size: 14px; font-weight: 700; margin: 0 0 4px; display: flex; justify-content: space-between; align-items: center; }
+  .dep-col-desc { font-size: 12px; color: var(--muted); margin: 0 0 12px; line-height: 1.4; }
+  .dep-card { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin-bottom: 10px; transition: border-color .15s ease, box-shadow .15s ease; cursor: pointer; }
+  .dep-card:hover { border-color: var(--link); box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  .dep-card.is-blocker { border-left: 4px solid var(--warn); }
+  .dep-card.is-blocked { border-left: 4px solid var(--bad); }
+  .dep-card.is-parked { border-left: 4px solid var(--c-Parked); }
+  .dep-blast-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: var(--warnbg); color: var(--warn); margin: 4px 0; }
+  .dep-blocked-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: var(--badbg); color: var(--bad); margin: 4px 0; }
+  .dep-chip-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .dep-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); background: var(--chip); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+  .dep-chip.done { background: var(--okbg); border-color: var(--accent); color: var(--accent); }
+  .dep-chip.active { background: var(--warnbg); border-color: var(--warn); color: var(--warn); }
+  .dep-chip.missing { background: var(--badbg); border-color: var(--bad); color: var(--bad); }
+  .matrix-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin: 12px 0 20px; }
   @media (max-width: 720px) {
     .docgrid { grid-template-columns: 1fr; }
     .outline { position: static; max-height: none; border-right: none; }
@@ -262,7 +280,7 @@
   <div class="brand"><i></i><span id="pname">Nuhut</span></div>
   <nav class="tabs" id="tabs">
     <a data-r="map">Map</a><a data-r="board">Board</a><a data-r="activity">Activity</a>
-    <a data-r="waiting">Waiting on you</a><a data-r="git">Git</a><a data-r="docs">Documents</a>
+    <a data-r="waiting">Blockages & Waiting</a><a data-r="git">Git</a><a data-r="docs">Documents</a>
   </nav>
   <input id="q" type="search" placeholder="Search or ⌘K…" aria-label="Search">
   <div class="meta" id="meta"></div>
@@ -624,7 +642,7 @@
       return {
         key: customKey || ("i:" + id),
         id: id,
-        label: id + "  " + clip(it.title, 50),
+        label: id + "  " + clip(it.title, 24),
         full: id + " " + (it.title || ""),
         route: "item/" + id,
         col: it.column,
@@ -660,84 +678,61 @@
     var byDoc = Object.keys(kinds).map(function (k) {
       return { key: "k:" + k, label: kindNames[k] || k, children: kinds[k].map(function (n) {
         var d = DOCS[n];
-        return { key: "d:" + d.path, label: clip(d.path.split("/").pop(), 40), full: d.path,
+        return { key: "d:" + d.path, label: clip(d.path.split("/").pop(), 24), full: d.path,
           route: docRoute(n), children: d.headings.filter(function (x) { return x.level === 2; })
-            .map(function (x) { return { key: "h:" + d.path + x.line, label: clip(x.text, 40), full: x.text,
+            .map(function (x) { return { key: "h:" + d.path + x.line, label: clip(x.text, 24), full: x.text,
               route: docRoute(n, x.line) }; }) };
       }) };
     });
 
     var depsData = computeDependencies();
-    var blockerNodes = depsData.blockers.map(function (b) {
-      var it = ITEMS[b.id];
-      var node = itemNode(b.id, "blk:" + b.id);
-      node.label = b.id + " (blocks " + b.count + ") " + clip(it.title, 40);
-      node.isBlocker = true;
-      node.blocksCount = b.count;
-      node.children = b.dependents.map(function (depId) {
-        var depIt = ITEMS[depId];
-        var dNode = itemNode(depId, "blk:" + b.id + ":" + depId);
-        if (depIt) dNode.label = depId + " (" + depIt.column + ") " + clip(depIt.title, 36);
-        return dNode;
-      });
-      return node;
-    });
-
-    var blockedWorkNodes = depsData.blockedItems.map(function (b) {
-      var it = ITEMS[b.id];
-      var node = itemNode(b.id, "wait:" + b.id);
-      node.label = b.id + " (waits on " + b.count + ") " + clip(it.title, 40);
-      node.children = b.dependencies.map(function (depId) {
-        var depIt = ITEMS[depId];
-        if (depIt) {
-          var dNode = itemNode(depId, "wait:" + b.id + ":" + depId);
-          dNode.label = depId + " (" + depIt.column + (depIt.owner ? " · " + depIt.owner : "") + ") " + clip(depIt.title, 34);
-          return dNode;
-        }
-        return {
-          key: "wait:" + b.id + ":missing:" + depId,
-          id: depId,
-          label: depId + " (missing in backlog!)",
-          full: depId,
-          col: "Blocked",
-          blocked: true
-        };
-      });
-      return node;
-    });
-
-    var readyNodes = depsData.readyItems.map(function (id) {
-      return itemNode(id, "rdy:" + id);
-    });
-
     var depGroups = [];
-    if (blockerNodes.length) {
+    if (depsData.blockers.length) {
       depGroups.push({
         key: "g:blk",
-        label: "Bottlenecks / Root blockers (" + blockerNodes.length + ")",
-        children: blockerNodes
+        label: "Active bottlenecks (" + depsData.blockers.length + ")",
+        route: "waiting",
+        children: depsData.blockers.map(function (b) {
+          var it = ITEMS[b.id];
+          return {
+            key: "blk:" + b.id,
+            id: b.id,
+            label: b.id + " (blocks " + b.count + ")",
+            full: b.id + " blocks " + b.count + " downstream: " + (it ? it.title : ""),
+            route: "item/" + b.id,
+            isBlocker: true,
+            blocksCount: b.count,
+            col: it ? it.column : ""
+          };
+        })
       });
     }
-    if (blockedWorkNodes.length) {
+    if (depsData.blockedItems.length) {
       depGroups.push({
         key: "g:wait",
-        label: "Blocked work items (" + blockedWorkNodes.length + ")",
-        children: blockedWorkNodes
-      });
-    }
-    if (readyNodes.length) {
-      depGroups.push({
-        key: "g:rdy",
-        label: "Ready to work (0 blockers) (" + readyNodes.length + ")",
-        children: readyNodes
+        label: "Blocked items (" + depsData.blockedItems.length + ")",
+        route: "waiting",
+        children: depsData.blockedItems.map(function (b) {
+          var it = ITEMS[b.id];
+          return {
+            key: "wait:" + b.id,
+            id: b.id,
+            label: b.id + " (waits on " + b.count + ")",
+            full: b.id + " waits on " + b.count + " prerequisites: " + (it ? it.title : ""),
+            route: "item/" + b.id,
+            blocked: true,
+            col: it ? it.column : ""
+          };
+        })
       });
     }
 
     var depBranch = {
       key: "g:deps",
-      label: "Dependency map & blockages (" + (blockerNodes.length + blockedWorkNodes.length) + ")",
+      label: "Dependencies & Blockages (" + (depsData.blockers.length + depsData.blockedItems.length) + ")",
+      route: "waiting",
       children: depGroups.length ? depGroups : [
-        { key: "g:nodeps", label: "No active blockages or dependencies", children: [] }
+        { key: "g:nodeps", label: "No active blockages", children: [] }
       ]
     };
 
@@ -785,7 +780,7 @@
   function buildSvgExport(opts) {
     opts = opts || {};
     var isInteractive = !!opts.interactive;
-    var root = mapTree(), ROW = 24, COLW = 230, rows = 0, maxDepth = 0, nodes = [], links = [];
+    var root = mapTree(), ROW = 26, COLW = 280, rows = 0, maxDepth = 0, nodes = [], links = [];
     (function place(n, depth) {
       n.depth = depth;
       maxDepth = Math.max(maxDepth, depth);
@@ -1330,7 +1325,7 @@
         { label: "Go to Project Map", hint: "Tab 1", run: function () { go("map"); } },
         { label: "Go to Kanban Board", hint: "Tab 2", run: function () { go("board"); } },
         { label: "Go to Activity Log", hint: "Tab 3", run: function () { go("activity"); } },
-        { label: "Go to Waiting Queue", hint: "Tab 4", run: function () { go("waiting"); } },
+        { label: "Go to Dependencies & Blockages Flow", hint: "Tab 4", run: function () { go("waiting"); } },
         { label: "Go to Git Traceability", hint: "Tab 5", run: function () { go("git"); } },
         { label: "Go to Documents", hint: "Tab 6", run: function () { go("docs"); } },
         { label: "View Dependencies & Blockages Map", hint: "Map Focus", run: function () { go("map"); setTimeout(function () { var b = document.querySelector('[data-p="blockages"]'); if (b) b.click(); }, 60); } },
@@ -1534,7 +1529,7 @@
   var currentMatchBadge = null;
 
   function computeMapLayout() {
-    var root = mapTree(), ROW = 26, COLW = 240, rows = 0, maxDepth = 0;
+    var root = mapTree(), ROW = 26, COLW = 280, rows = 0, maxDepth = 0;
     var nodes = [], links = [];
 
     var needle = (MAP_STATE.query || "").trim().toLowerCase();
@@ -1726,13 +1721,14 @@
       }
 
       var isBlocker = n.isBlocker || (n.blocksCount && n.blocksCount > 0);
+      var tagOffset = n.x + 14 + n.label.length * 7.2 + (kids.length && !open ? 24 : 0);
       if (n.blocked) {
-        var warnTag = s("text", { x: n.x + 16 + n.label.length * 7.2 + (kids.length && !open ? 24 : 0), y: n.y + 4, fill: "var(--bad)", "font-weight": "700" });
-        warnTag.textContent = "⚠ blocked";
+        var warnTag = s("text", { x: tagOffset, y: n.y + 4, fill: "var(--bad)", "font-weight": "700", "font-size": "11px" });
+        warnTag.textContent = (kids.length && open) ? "⚠" : "⚠ blocked";
         gNode.appendChild(warnTag);
       } else if (isBlocker) {
-        var blkTag = s("text", { x: n.x + 16 + n.label.length * 7.2 + (kids.length && !open ? 24 : 0), y: n.y + 4, fill: "#bf8700", "font-weight": "700" });
-        blkTag.textContent = "⛔ blocks " + n.blocksCount;
+        var blkTag = s("text", { x: tagOffset, y: n.y + 4, fill: "#bf8700", "font-weight": "700", "font-size": "11px" });
+        blkTag.textContent = (kids.length && open) ? ("⛔ " + n.blocksCount) : ("⛔ blocks " + n.blocksCount);
         gNode.appendChild(blkTag);
       }
 
@@ -1963,6 +1959,12 @@
     main.appendChild(el("div", { cls: "mapbar" }, [
       el("div", { cls: "map-filter" }, [filterInput, clearFilterBtn]),
       matchBadge,
+      el("button", {
+        text: "⚡ Blockages & Flow ↗",
+        title: "Open dedicated Dependencies & Blockages command center",
+        style: "font-weight: 600; color: var(--warn); border-color: var(--warn);",
+        on: { click: function () { go("waiting"); } }
+      }),
       el("button", {
         text: "Export SVG (Interactive)",
         title: "Download formatted SVG with pan, zoom, and theme support",
@@ -2337,28 +2339,385 @@
     more();
   }
 
-  // ---------------------------------------------------------------- waiting
+  // ---------------------------------------------------------------- waiting & blockages
+  var BLOCKAGE_STATE = { view: "flow", query: "" };
+
   function viewWaiting() {
     tab("waiting");
-    crumbs([[M.project || "Project", "map"], ["Waiting on you"]]);
-    main.appendChild(h(1, "Waiting on a human"));
-    main.appendChild(el("p", { cls: "muted", text: "Parked items are finished as far as an agent can take them. Blocked items cannot start. Oldest first." }));
-    var ids = M.order.filter(function (id) { return ["Parked", "Blocked"].indexOf(ITEMS[id].column) >= 0; });
-    ids.sort(function (a, b) {
+    crumbs([[M.project || "Project", "map"], ["Dependencies & Blockages"]]);
+    main.appendChild(h(1, "Dependencies & Blockages"));
+    main.appendChild(el("p", {
+      cls: "muted",
+      text: "Track critical root bottlenecks, technical task prerequisites, and parked items waiting on human decisions."
+    }));
+
+    var depsData = computeDependencies();
+    var blockers = depsData.blockers || [];
+    var blockedItems = depsData.blockedItems || [];
+    var readyItems = depsData.readyItems || [];
+
+    var parkedHumanIds = M.order.filter(function (id) {
+      return ["Parked", "Blocked"].indexOf(ITEMS[id].column) >= 0;
+    });
+    parkedHumanIds.sort(function (a, b) {
       return (daysSince(ITEMS[b].extra.Since) || 0) - (daysSince(ITEMS[a].extra.Since) || 0);
     });
-    if (!ids.length) { main.appendChild(el("p", { text: "Nothing is waiting on anyone." })); return; }
-    var t = el("table", null, [el("tr", null, ["Item", "State", "Waiting on", "For what", "Since", "Days"].map(function (x) {
-      return el("th", { text: x }); }))]);
-    ids.forEach(function (id) {
-      var it = ITEMS[id], x = it.extra, d = daysSince(x.Since);
-      t.appendChild(el("tr", null, [
-        el("td", null, [itemLink(id), " " + clip(it.title, 80)]), el("td", null, [colChip(it.column)]),
-        el("td", { text: x["Waiting on whom"] || x["Who can unblock"] || "" }),
-        el("td", { text: x["For what decision"] || x["For what"] || "" }),
-        el("td", { text: x.Since || "" }), el("td", { text: d === null ? "" : String(d) })]));
+
+    var strip = el("div", { cls: "strip" });
+
+    var sBlk = el("div", { cls: "stat" }, [
+      el("b", { text: String(blockers.length) }),
+      el("span", { text: "Root Bottlenecks" })
+    ]);
+    sBlk.style.borderTop = "3px solid " + (blockers.length ? "var(--warn)" : "var(--accent)");
+    strip.appendChild(sBlk);
+
+    var sWait = el("div", { cls: "stat" }, [
+      el("b", { text: String(blockedItems.length) }),
+      el("span", { text: "Blocked Work Items" })
+    ]);
+    sWait.style.borderTop = "3px solid " + (blockedItems.length ? "var(--bad)" : "var(--accent)");
+    strip.appendChild(sWait);
+
+    if (blockers.length) {
+      var topBlk = blockers[0];
+      var sBlast = el("div", { cls: "stat" }, [
+        el("b", { text: topBlk.id + " (blocks " + topBlk.count + ")" }),
+        el("span", { text: "Top Blast Radius" })
+      ]);
+      sBlast.style.borderTop = "3px solid var(--warn)";
+      strip.appendChild(sBlast);
+    }
+
+    var sHuman = el("div", { cls: "stat" }, [
+      el("b", { text: String(parkedHumanIds.length) }),
+      el("span", { text: "Waiting on Human" })
+    ]);
+    sHuman.style.borderTop = "3px solid var(--c-Parked)";
+    strip.appendChild(sHuman);
+
+    var sReady = el("div", { cls: "stat" }, [
+      el("b", { text: String(readyItems.length) }),
+      el("span", { text: "Ready to Start (0 blockers)" })
+    ]);
+    sReady.style.borderTop = "3px solid var(--accent)";
+    strip.appendChild(sReady);
+
+    main.appendChild(strip);
+
+    var viewSel = el("select", {
+      "aria-label": "Blockages view style",
+      on: { change: function () { BLOCKAGE_STATE.view = viewSel.value; renderBlockageContent(); } }
+    }, [
+      el("option", { value: "flow", text: "Directed Flow Board (3 Columns)" }),
+      el("option", { value: "matrix", text: "Bottleneck Matrix (Blast Radius)" }),
+      el("option", { value: "human", text: "Waiting on Human (" + parkedHumanIds.length + ")" }),
+      el("option", { value: "table", text: "Comprehensive Table View" })
+    ]);
+    viewSel.value = BLOCKAGE_STATE.view;
+
+    var qInput = el("input", {
+      type: "search",
+      placeholder: "Filter items, titles, owners…",
+      value: BLOCKAGE_STATE.query,
+      style: "flex: 1 1 240px; max-width: 300px;",
+      on: { input: function () { BLOCKAGE_STATE.query = qInput.value; renderBlockageContent(); } }
     });
-    main.appendChild(el("div", { cls: "wrap" }, [t]));
+
+    var filterBar = el("div", { cls: "filters" }, [viewSel, qInput]);
+    main.appendChild(filterBar);
+
+    var contentContainer = el("div");
+    main.appendChild(contentContainer);
+
+    function itemMatches(id, needle) {
+      if (!needle) return true;
+      var it = ITEMS[id];
+      if (!it) return id.toLowerCase().indexOf(needle) >= 0;
+      if (id.toLowerCase().indexOf(needle) >= 0) return true;
+      if ((it.title || "").toLowerCase().indexOf(needle) >= 0) return true;
+      if ((it.owner || "").toLowerCase().indexOf(needle) >= 0) return true;
+      return false;
+    }
+
+    function renderBlockageContent() {
+      contentContainer.textContent = "";
+      var needle = (BLOCKAGE_STATE.query || "").trim().toLowerCase();
+
+      var fBlockers = blockers.filter(function (b) {
+        if (itemMatches(b.id, needle)) return true;
+        return (b.dependents || []).some(function (depId) { return itemMatches(depId, needle); });
+      });
+
+      var fBlocked = blockedItems.filter(function (b) {
+        if (itemMatches(b.id, needle)) return true;
+        return (b.dependencies || []).some(function (depId) { return itemMatches(depId, needle); });
+      });
+
+      var fHuman = parkedHumanIds.filter(function (id) {
+        if (itemMatches(id, needle)) return true;
+        var it = ITEMS[id], x = it.extra || {};
+        var desc = (x["Waiting on whom"] || "") + " " + (x["For what decision"] || "") + " " + (x["For what"] || "");
+        return desc.toLowerCase().indexOf(needle) >= 0;
+      });
+
+      if (BLOCKAGE_STATE.view === "flow") {
+        var flow = el("div", { cls: "dep-flow" });
+
+        // Col 1: Bottlenecks / Root Blockers
+        var col1 = el("div", { cls: "dep-col" });
+        col1.appendChild(el("div", { cls: "dep-col-hdr" }, [
+          el("span", { text: "🛑 Root Blockers (Prerequisites)" }),
+          el("span", { cls: "chip", text: String(fBlockers.length) })
+        ]));
+        col1.appendChild(el("p", { cls: "dep-col-desc", text: "Active tasks that other items are waiting on. Complete these to unblock downstream work." }));
+
+        if (!fBlockers.length) {
+          col1.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "No active root bottlenecks matching filter." }));
+        } else {
+          fBlockers.forEach(function (b) {
+            var it = ITEMS[b.id] || {};
+            var card = el("div", {
+              cls: "dep-card is-blocker",
+              on: { click: function () { openItemDrawer(b.id); } }
+            });
+            var topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;" }, [
+              el("span", null, [itemLink(b.id), " ", colChip(it.column)]),
+              it.owner ? el("span", { cls: "chip", text: it.owner }) : null
+            ]);
+            var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || b.id });
+            var badge = el("div", { cls: "dep-blast-badge", text: "⛔ Blocks " + b.count + " downstream item" + (b.count > 1 ? "s" : "") });
+
+            var chips = el("div", { cls: "dep-chip-list" });
+            chips.appendChild(el("span", { cls: "muted", style: "font-size: 11px; align-self: center; margin-right: 2px;", text: "↳ Blocks:" }));
+            (b.dependents || []).forEach(function (depId) {
+              var depIt = ITEMS[depId];
+              var c = el("a", {
+                cls: "dep-chip" + (depIt && depIt.column === "Done" ? " done" : " active"),
+                href: "#/item/" + depId,
+                title: depIt ? (depId + ": " + depIt.title + " (" + depIt.column + ")") : depId,
+                on: { click: function (e) { e.stopPropagation(); openItemDrawer(depId); } }
+              }, [
+                el("strong", { text: depId }),
+                depIt ? el("span", { cls: "muted", text: "· " + depIt.column }) : null
+              ]);
+              chips.appendChild(c);
+            });
+
+            card.appendChild(topRow);
+            card.appendChild(title);
+            card.appendChild(badge);
+            card.appendChild(chips);
+            col1.appendChild(card);
+          });
+        }
+        flow.appendChild(col1);
+
+        // Col 2: Blocked Work Items
+        var col2 = el("div", { cls: "dep-col" });
+        col2.appendChild(el("div", { cls: "dep-col-hdr" }, [
+          el("span", { text: "⏳ Blocked Tasks" }),
+          el("span", { cls: "chip", text: String(fBlocked.length) })
+        ]));
+        col2.appendChild(el("p", { cls: "dep-col-desc", text: "Tasks that cannot proceed because technical prerequisites are incomplete." }));
+
+        if (!fBlocked.length) {
+          col2.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "No blocked work items matching filter." }));
+        } else {
+          fBlocked.forEach(function (b) {
+            var it = ITEMS[b.id] || {};
+            var card = el("div", {
+              cls: "dep-card is-blocked",
+              on: { click: function () { openItemDrawer(b.id); } }
+            });
+            var topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;" }, [
+              el("span", null, [itemLink(b.id), " ", colChip(it.column)]),
+              it.owner ? el("span", { cls: "chip", text: it.owner }) : null
+            ]);
+            var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || b.id });
+            var badge = el("div", { cls: "dep-blocked-badge", text: "⚠ Waits on " + b.count + " prerequisite" + (b.count > 1 ? "s" : "") });
+
+            var chips = el("div", { cls: "dep-chip-list" });
+            chips.appendChild(el("span", { cls: "muted", style: "font-size: 11px; align-self: center; margin-right: 2px;", text: "Prerequisites:" }));
+            (b.dependencies || []).forEach(function (depId) {
+              var depIt = ITEMS[depId];
+              var statusClass = !depIt ? " missing" : (depIt.column === "Done" ? " done" : " active");
+              var statusLabel = !depIt ? "missing in backlog" : (depIt.column + (depIt.owner ? " · " + depIt.owner : ""));
+              var c = el("a", {
+                cls: "dep-chip" + statusClass,
+                href: "#/item/" + depId,
+                title: depIt ? (depId + ": " + depIt.title + " (" + statusLabel + ")") : (depId + " (missing in backlog!)"),
+                on: { click: function (e) { e.stopPropagation(); openItemDrawer(depId); } }
+              }, [
+                el("strong", { text: depId }),
+                el("span", { cls: "muted", text: "· " + statusLabel })
+              ]);
+              chips.appendChild(c);
+            });
+
+            card.appendChild(topRow);
+            card.appendChild(title);
+            card.appendChild(badge);
+            card.appendChild(chips);
+            col2.appendChild(card);
+          });
+        }
+        flow.appendChild(col2);
+
+        // Col 3: Waiting on Human
+        var col3 = el("div", { cls: "dep-col" });
+        col3.appendChild(el("div", { cls: "dep-col-hdr" }, [
+          el("span", { text: "👤 Waiting on Human" }),
+          el("span", { cls: "chip", text: String(fHuman.length) })
+        ]));
+        col3.appendChild(el("p", { cls: "dep-col-desc", text: "Parked items waiting for human input, API keys, credentials, or architectural review." }));
+
+        if (!fHuman.length) {
+          col3.appendChild(el("p", { cls: "muted", style: "font-size: 13px;", text: "Nothing is waiting on a human." }));
+        } else {
+          fHuman.forEach(function (id) {
+            var it = ITEMS[id] || {}, x = it.extra || {}, d = daysSince(x.Since);
+            var card = el("div", {
+              cls: "dep-card is-parked",
+              on: { click: function () { openItemDrawer(id); } }
+            });
+            var topRow = el("div", { style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;" }, [
+              el("span", null, [itemLink(id), " ", colChip(it.column)]),
+              d !== null ? el("span", { cls: "chip", style: "background: var(--warnbg); color: var(--warn); font-weight: 600;", text: d + "d waiting" }) : null
+            ]);
+            var title = el("div", { style: "font-weight: 600; font-size: 13px; margin: 3px 0 6px;", text: it.title || id });
+
+            var details = el("div", { style: "font-size: 12px; line-height: 1.4; color: var(--text);" }, [
+              (x["Waiting on whom"] || x["Who can unblock"]) ? el("div", null, [
+                el("span", { cls: "muted", text: "Waiting on: " }),
+                el("strong", { text: x["Waiting on whom"] || x["Who can unblock"] })
+              ]) : null,
+              (x["For what decision"] || x["For what"]) ? el("div", null, [
+                el("span", { cls: "muted", text: "For what: " }),
+                el("span", { text: x["For what decision"] || x["For what"] })
+              ]) : null,
+              x.Since ? el("div", { cls: "muted", style: "font-size: 11px; margin-top: 3px;", text: "Since: " + x.Since }) : null
+            ]);
+
+            card.appendChild(topRow);
+            card.appendChild(title);
+            card.appendChild(details);
+            col3.appendChild(card);
+          });
+        }
+        flow.appendChild(col3);
+
+        contentContainer.appendChild(flow);
+
+      } else if (BLOCKAGE_STATE.view === "matrix") {
+        contentContainer.appendChild(h(2, "Critical Bottleneck Impact Matrix (" + fBlockers.length + ")"));
+        if (!fBlockers.length) {
+          contentContainer.appendChild(el("p", { cls: "muted", text: "No active bottlenecks matching filter." }));
+        } else {
+          var mGrid = el("div", { cls: "matrix-grid" });
+          fBlockers.forEach(function (b) {
+            var it = ITEMS[b.id] || {};
+            var card = el("div", { cls: "dep-card is-blocker", on: { click: function () { openItemDrawer(b.id); } } });
+            card.appendChild(el("div", { style: "display: flex; justify-content: space-between; align-items: center;" }, [
+              el("span", null, [itemLink(b.id), " ", colChip(it.column)]),
+              el("span", { cls: "chip", style: "background: var(--warnbg); color: var(--warn); font-weight: 700;", text: "BLAST RADIUS: " + b.count })
+            ]));
+            card.appendChild(el("div", { style: "font-weight: 600; font-size: 14px; margin: 6px 0;", text: it.title || b.id }));
+            if (it.owner) card.appendChild(el("div", { cls: "muted", style: "font-size: 12px; margin-bottom: 6px;", text: "Assigned owner: " + it.owner }));
+            card.appendChild(el("div", { cls: "muted", style: "font-size: 12px; margin-bottom: 4px;", text: "Downstream items blocked by this task:" }));
+            var dList = el("div", { cls: "dep-chip-list" });
+            (b.dependents || []).forEach(function (depId) {
+              var depIt = ITEMS[depId];
+              dList.appendChild(el("a", {
+                cls: "dep-chip" + (depIt && depIt.column === "Done" ? " done" : " active"),
+                href: "#/item/" + depId,
+                on: { click: function (e) { e.stopPropagation(); openItemDrawer(depId); } }
+              }, [
+                el("strong", { text: depId }),
+                depIt ? el("span", { cls: "muted", text: "· " + clip(depIt.title, 20) }) : null
+              ]));
+            });
+            card.appendChild(dList);
+            mGrid.appendChild(card);
+          });
+          contentContainer.appendChild(mGrid);
+        }
+
+      } else if (BLOCKAGE_STATE.view === "human") {
+        contentContainer.appendChild(h(2, "Waiting on Human Decisions (" + fHuman.length + ")"));
+        if (!fHuman.length) {
+          contentContainer.appendChild(el("p", { cls: "muted", text: "Nothing is waiting on anyone." }));
+        } else {
+          var ht = el("table", null, [el("tr", null, ["Item", "State", "Waiting on", "For what", "Since", "Days"].map(function (x) {
+            return el("th", { text: x });
+          }))]);
+          fHuman.forEach(function (id) {
+            var it = ITEMS[id], x = it.extra || {}, d = daysSince(x.Since);
+            ht.appendChild(el("tr", null, [
+              el("td", null, [itemLink(id), " " + clip(it.title, 80)]),
+              el("td", null, [colChip(it.column)]),
+              el("td", { text: x["Waiting on whom"] || x["Who can unblock"] || "" }),
+              el("td", { text: x["For what decision"] || x["For what"] || "" }),
+              el("td", { text: x.Since || "" }),
+              el("td", { text: d === null ? "" : String(d) })
+            ]));
+          });
+          contentContainer.appendChild(el("div", { cls: "wrap" }, [ht]));
+        }
+
+      } else {
+        contentContainer.appendChild(h(2, "Complete Dependencies & Blockages Table"));
+        var allIds = [];
+        var seen = {};
+        fBlockers.forEach(function (b) { if (!seen[b.id]) { seen[b.id] = true; allIds.push(b.id); } });
+        fBlocked.forEach(function (b) { if (!seen[b.id]) { seen[b.id] = true; allIds.push(b.id); } });
+        fHuman.forEach(function (id) { if (!seen[id]) { seen[id] = true; allIds.push(id); } });
+
+        if (!allIds.length) {
+          contentContainer.appendChild(el("p", { cls: "muted", text: "No items match the filter." }));
+        } else {
+          var tt = el("table", null, [el("tr", null, ["Item", "State", "Owner", "Role in Dependencies", "Prerequisites / Downstream", "Waiting on (Human)", "Since"].map(function (x) {
+            return el("th", { text: x });
+          }))]);
+          allIds.forEach(function (id) {
+            var it = ITEMS[id] || {}, x = it.extra || {};
+            var blk = blockers.find(function (b) { return b.id === id; });
+            var dep = blockedItems.find(function (b) { return b.id === id; });
+            var isHuman = parkedHumanIds.indexOf(id) >= 0;
+
+            var roleChips = el("td");
+            if (blk) roleChips.appendChild(el("span", { cls: "chip", style: "background: var(--warnbg); color: var(--warn); font-weight: 600; margin-right: 4px;", text: "Blocks " + blk.count }));
+            if (dep) roleChips.appendChild(el("span", { cls: "chip", style: "background: var(--badbg); color: var(--bad); font-weight: 600; margin-right: 4px;", text: "Waits on " + dep.count }));
+            if (isHuman) roleChips.appendChild(el("span", { cls: "chip", style: "background: var(--chip);", text: "Human" }));
+
+            var linksCell = el("td");
+            if (blk && blk.dependents && blk.dependents.length) {
+              var blkSpan = el("div", null, [el("span", { cls: "muted", text: "Blocks: " })]);
+              blk.dependents.forEach(function (k) { blkSpan.appendChild(itemLink(k)); blkSpan.appendChild(document.createTextNode(" ")); });
+              linksCell.appendChild(blkSpan);
+            }
+            if (dep && dep.dependencies && dep.dependencies.length) {
+              var depSpan = el("div", null, [el("span", { cls: "muted", text: "Waits on: " })]);
+              dep.dependencies.forEach(function (k) { depSpan.appendChild(itemLink(k)); depSpan.appendChild(document.createTextNode(" ")); });
+              linksCell.appendChild(depSpan);
+            }
+
+            tt.appendChild(el("tr", null, [
+              el("td", null, [itemLink(id), " " + clip(it.title, 50)]),
+              el("td", null, [colChip(it.column)]),
+              el("td", { text: it.owner || "—" }),
+              roleChips,
+              linksCell,
+              el("td", { text: x["Waiting on whom"] || x["Who can unblock"] || (isHuman ? (x["For what decision"] || "") : "—") }),
+              el("td", { text: x.Since || "—" })
+            ]));
+          });
+          contentContainer.appendChild(el("div", { cls: "wrap" }, [tt]));
+        }
+      }
+    }
+
+    renderBlockageContent();
   }
 
   // ---------------------------------------------------------------- git
@@ -2755,8 +3114,8 @@
     main.appendChild(strip);
 
     if (!git.clean && git.modified_files && git.modified_files.length) {
-      var det = el("details", { cls: "banner", style: "margin-bottom: 16px;" }, [
-        el("summary", { text: "Uncommitted changes in working tree (" + git.modified_files.length + " files)" })
+      var det = el("details", { cls: "banner", style: "margin-bottom: 14px; border-left: 4px solid var(--warn);" }, [
+        el("summary", { style: "cursor: pointer; font-weight: 600;", text: "⚠️ Uncommitted changes in working tree (" + git.modified_files.length + " files) — click to inspect" })
       ]);
       var ut = el("table");
       ut.appendChild(el("tr", null, [el("th", { text: "Status", style: "width: 70px;" }), el("th", { text: "File" })]));
@@ -2770,40 +3129,8 @@
       main.appendChild(det);
     }
 
-    if (git.branches && git.branches.length) {
-      main.appendChild(h(2, "Local branches (" + git.branches.length + ")"));
-      var bt = el("table", null, [el("tr", null, ["Branch", "Linked Work Items", "Last Commit Date", "Last Commit Subject"].map(function (x) {
-        return el("th", { text: x });
-      }))]);
-      git.branches.forEach(function (b) {
-        var nameCell = el("td");
-        if (b.current) {
-          nameCell.appendChild(el("span", { cls: "chip", text: "HEAD", style: "background: var(--okbg); color: var(--accent); font-weight: 700; margin-right: 6px;" }));
-          nameCell.appendChild(el("strong", { text: b.name }));
-        } else {
-          nameCell.appendChild(document.createTextNode(b.name));
-        }
-        var itemsCell = el("td");
-        if (b.items && b.items.length) {
-          b.items.forEach(function (id) {
-            itemsCell.appendChild(itemLink(id));
-            itemsCell.appendChild(document.createTextNode(" "));
-          });
-        } else {
-          itemsCell.appendChild(el("span", { cls: "muted", text: "—" }));
-        }
-        bt.appendChild(el("tr", null, [
-          nameCell,
-          itemsCell,
-          el("td", { text: b.date || "" }),
-          el("td", null, [inline(b.subject || "")])
-        ]));
-      });
-      main.appendChild(el("div", { cls: "wrap" }, [bt]));
-    }
-
     var allCommits = git.commits || [];
-    main.appendChild(h(2, "Git Tree & Traceability (" + allCommits.length + ")"));
+    main.appendChild(h(2, "Commit Graph & Traceability (" + allCommits.length + ")"));
 
     var qInput = el("input", {
       type: "search",
@@ -2965,6 +3292,38 @@
     }
 
     renderCommitList();
+
+    if (git.branches && git.branches.length) {
+      main.appendChild(h(2, "Local branches (" + git.branches.length + ")"));
+      var bt = el("table", null, [el("tr", null, ["Branch", "Linked Work Items", "Last Commit Date", "Last Commit Subject"].map(function (x) {
+        return el("th", { text: x });
+      }))]);
+      git.branches.forEach(function (b) {
+        var nameCell = el("td");
+        if (b.current) {
+          nameCell.appendChild(el("span", { cls: "chip", text: "HEAD", style: "background: var(--okbg); color: var(--accent); font-weight: 700; margin-right: 6px;" }));
+          nameCell.appendChild(el("strong", { text: b.name }));
+        } else {
+          nameCell.appendChild(document.createTextNode(b.name));
+        }
+        var itemsCell = el("td");
+        if (b.items && b.items.length) {
+          b.items.forEach(function (id) {
+            itemsCell.appendChild(itemLink(id));
+            itemsCell.appendChild(document.createTextNode(" "));
+          });
+        } else {
+          itemsCell.appendChild(el("span", { cls: "muted", text: "—" }));
+        }
+        bt.appendChild(el("tr", null, [
+          nameCell,
+          itemsCell,
+          el("td", { text: b.date || "" }),
+          el("td", null, [inline(b.subject || "")])
+        ]));
+      });
+      main.appendChild(el("div", { cls: "wrap", style: "margin-top: 8px;" }, [bt]));
+    }
   }
 
   // ---------------------------------------------------------------- item
@@ -3173,7 +3532,7 @@
     }
     if (route === "board") viewBoard();
     else if (route === "activity") viewActivity();
-    else if (route === "waiting") viewWaiting();
+    else if (route === "waiting" || route === "blockages") viewWaiting();
     else if (route === "git") viewGit();
     else if (route === "docs") viewDocs();
     else if (route === "item") viewItem(decodeURIComponent(parts[1] || ""));
