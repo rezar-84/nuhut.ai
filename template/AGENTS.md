@@ -82,6 +82,17 @@ accessibility, data integrity, evidence language, traceability, rollback, and hu
 approval. Documentation profile (`full` / `compact`) changes what is installed; it does
 not change the mode or any obligation.
 
+### Decision style — who decides, and how much the agent says
+
+Resolve it at FRAME like effort mode: the request → the work item → the charter's
+**Decision style** → `Guide`. **Ask** puts every material choice to the person with
+options and trade-offs. **Guide** recommends one option in plain language and asks.
+**Autopilot** takes the recommended option and logs it `(auto)` for review. No style lifts a
+Tier 1 approval, a gated command, or the ADR an expensive-to-reverse choice needs, and no
+style thins a record. A stack or version choice is verified from the official source and
+dated, never recalled. Rules: `{{DOCS_DIR}}/process/14-decision-style.md`,
+`{{DOCS_DIR}}/process/13-stack-evaluation.md`.
+
 ### Development method — one item at a time, or an epic
 
 Resolve it at FRAME like effort mode: the request → the work item → the charter's
@@ -126,6 +137,9 @@ enough, and say in the worklog that you did:
 | `{{DOCS_DIR}}/process/09-probabilistic-and-data-systems.md` | a prompt, model, index, dataset, pipeline, or evaluation. Nothing in it applies to deterministic code. |
 | `{{DOCS_DIR}}/process/10-multi-agent.md` | more than one agent working this repository, or fanning reviews out to subagents |
 | `{{DOCS_DIR}}/process/11-epics.md` | the development method is `Epic`: planning, running, or resuming one |
+| `{{DOCS_DIR}}/process/13-stack-evaluation.md` | choosing a stack, or adding or moving a runtime, database, framework, language, host, or base image across a major version |
+| `{{DOCS_DIR}}/process/14-decision-style.md` | a choice the request did not settle, a non-specialist to ask, or the charter's **Decision style** is not `Guide` |
+| `{{DOCS_DIR}}/process/12-sensitive-data-in-records.md` | a person pastes something that looks like a secret or personal data, a record is about to quote a user, or a guard reports a sensitive value |
 
 The card is a summary and never an amendment: **where the card and the full document
 disagree, the document wins**, and the card is the defect.
@@ -223,7 +237,9 @@ contract. Full rules: `{{DOCS_DIR}}/process/02-role-reviews.md`.
 - **Never** commit secrets, credentials, tokens, `.env` contents, customer data, or
   large binaries, and never paste them into a record (the worklog, a review, a plan, a
   postmortem): the records are committed too. Name the secret or the person; do not quote
-  the value. Never force-push a shared branch. Never edit a production datastore by
+  the value, and summarise a person's answer rather than pasting it. If a person pastes
+  a secret into the chat, do not repeat it, say what kind it looks like, and tell them
+  to rotate it. Never force-push a shared branch. Never edit a production datastore by
   hand — use a reviewed, reversible migration.
 - **Material decisions get an ADR** in `{{DOCS_DIR}}/project/adr/` — anything expensive to
   reverse, or that a future reader would otherwise have to reverse-engineer. Supersede

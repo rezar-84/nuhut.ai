@@ -1,6 +1,6 @@
 # Hooks — the rules that are not persuasion
 
-Everything else in this kit asks an agent to follow a rule. These make five of them
+Everything else in this kit asks an agent to follow a rule. These make six of them
 mechanical, by running before the tool call rather than after the fact. A skill or a
 process document is advisory, since it makes the violation rare. A hook is what makes it
 close to impossible, so any rule that must hold without exception belongs here as well.
@@ -17,9 +17,10 @@ call and that is not something to acquire without deciding to.
 | `protected-paths.sh` | `Write` / `Edit` | Denies an edit to a path listed in `.ai-sdlc/protected.txt` — the charter's platform-owned files, generated files, or anything else single-writer. Does nothing until that file has entries. |
 | `test-lock.sh` | `Write` / `Edit` | Denies an edit to a reproducing test listed in `.ai-sdlc/test-lock.txt` while its defect is fixed, and an edit to that list itself. `process/05-change-control.md`, "Fixing a defect": the agent appends the lock from the shell after committing the failing test, and a human removes it. |
 | `secret-guard.sh` | `git commit` | Denies a commit whose staged additions contain a provider-shaped credential (private-key header, AWS, GitHub, GitLab, Slack, Stripe live, Anthropic, OpenAI, Google keys). Names the kind and never the value. A line containing `EXAMPLE` is skipped, for deliberate fixtures. |
+| `doc-leak-guard.sh` | `Write` / `Edit` / `MultiEdit` | Denies a write whose content holds a credential shape (the `secret-guard.sh` set, plus a URL with an embedded password), in any file. Warns, and does not deny, when a prose record (`.md`, `.txt`, `.rst`, `.ai-sdlc/`) gains an email address, card-number shape or `NNN-NN-NNNN`. Names the kind and never the value. A line containing `EXAMPLE`, and example.com/.org/.net addresses, are skipped. `process/12-sensitive-data-in-records.md`. |
 | `approval-gate.sh` | `Bash`, and `Write` / `Edit` of its list | Denies a command matching a glob in `.ai-sdlc/gates.txt` (production deploys, `terraform apply`, production migrations: whatever `AGENTS.md` §9 says needs a human), and tells the agent to hand the exact command to a human. It passes when the session was started with `AI_SDLC_APPROVAL=<ticket or ID>`, which the agent cannot set from inside the session. |
 
-All five are **deterministic**. None asks a model whether the rule was followed. The three
+All six are **deterministic**. None asks a model whether the rule was followed. The three
 list files are seeded with comments only, so until the project adds a line, the hooks that
 read them do nothing.
 

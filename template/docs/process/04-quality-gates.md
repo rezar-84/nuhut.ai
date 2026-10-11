@@ -28,10 +28,21 @@ answer (`06-evidence-and-claims.md`), not a gap to apologise for.
 
 | # | Stage | Purpose | Charter key | Applies when |
 | --- | --- | --- | --- | --- |
+| 3b | Complexity & duplication | Mechanical limits on function length, complexity, nesting and duplicated blocks. The only deterministic signal for the clean-code findings the architect role otherwise raises by eye. | `checks.complexity` | The charter states thresholds. No thresholds, no stage: *Absent* |
+| 4a | Mutation | Break the code on purpose and see whether a test notices. Evidence that the tests assert something, which line coverage cannot give. | `checks.mutation` | A Tier 1 surface, Beast mode, or modules whose failure is costly |
 | 3a | Infrastructure | Plan/diff the change to real infrastructure and scan it against policy, before it is applied. | `checks.infra` | This repository provisions infrastructure |
 | 5a | Data quality | Schema, freshness, volume, integrity, and business invariants over the data this project produces or consumes. Order and meaning: `09-probabilistic-and-data-systems.md` §7. | `checks.data` | There are datasets or pipelines |
 | 6a | Evaluation | Score the model, prompt, retrieval, or ranker against the versioned golden set. Never a pass/fail on its own — see below. | `checks.eval` | There is a probabilistic output |
 | 10a | Performance | Benchmark or load the paths that carry a budget. | `checks.perf` | A latency, throughput, or cost budget exists |
+
+**Complexity and mutation stages need a stated bar.** The charter records the thresholds
+(and the modules mutation covers) before the stage runs, with the method that produces the
+number. A tool that prints a score with no stated threshold is a reading, not a gate:
+report it *Measured* and treat the missing threshold as the finding. Never loosen a
+threshold to let a change pass (`Rules`, below); change it as its own tracked item. A new
+or changed function that crosses the bar is a finding on that function, not a reason to
+exempt it. Existing code above the bar is a backlog item, not a blocker for an unrelated
+change. The thresholds are the project's, and the process documents name no tool.
 
 **Evaluation and performance stages report *Measured*, not passed.** A number is
 compared against the budget or threshold the charter records, and against the baseline

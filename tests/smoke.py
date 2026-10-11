@@ -532,7 +532,7 @@ def test_hooks():
     check("existing settings survive the merge",
           settings.get("permissions", {}).get("allow") == ["Bash(npm *)"], str(settings))
     entries = settings.get("hooks", {}).get("PreToolUse", [])
-    check("all five hooks are registered", len(entries) == 5, str(entries))
+    check("all six hooks are registered", len(entries) == 6, str(entries))
     check("the commit hook is filtered to git commit",
           any(h.get("if") == "Bash(git commit*)"
               for e in entries for h in e.get("hooks", [])), str(entries))
@@ -639,6 +639,37 @@ def test_hooks():
         subprocess.call(git + ["add", "cfg.py"], cwd=d)
         out = fire("secret-guard.sh", {"tool_input": {"command": 'git commit -m "HKT-1 x"'}})
         check("a marked fixture is allowed", "deny" not in out, out)
+
+        # doc-leak-guard: the write-time half. Values are assembled at run time so this
+        # file never holds a credential-shaped string itself.
+        def write_payload(path, text):
+            return {"tool_input": {"file_path": path, "content": text}}
+        aws = "AKIA" + "ABCDEFGHIJKLMNOP"
+        out = fire("doc-leak-guard.sh", write_payload("docs/project/backlog.md", "key " + aws))
+        check("a credential written to a record is denied", '"permissionDecision":"deny"' in out, out)
+        check("the write denial never echoes the value", "ABCDEFGHIJKLMNOP" not in out, out)
+        out = fire("doc-leak-guard.sh", write_payload("src/app.py", "KEY = '" + aws + "'"))
+        check("a credential written to code is denied too", '"permissionDecision":"deny"' in out, out)
+        out = fire("doc-leak-guard.sh", write_payload("docs/a.md", "key AKIAIOSFODNN7EXAMPLE"))
+        check("a marked fixture write is allowed", out.strip() == "", out)
+        out = fire("doc-leak-guard.sh", write_payload(
+            "docs/a.md", "use postgres://app:" + "s3cretPw" + "@prod.db.internal/app"))
+        check("a URL with an embedded password is denied", '"permissionDecision":"deny"' in out, out)
+        out = fire("doc-leak-guard.sh", write_payload(
+            "docs/a.md", "use postgres://user:PASSWORD@db.example.com/app"))
+        check("a placeholder connection string is allowed, with no warning", out.strip() == "", out)
+        out = fire("doc-leak-guard.sh", write_payload("docs/project/backlog.md",
+                                                       "ask jane.doe@acme-corp.io"))
+        check("an email in a record warns and does not deny",
+              "personal data" in out and "deny" not in out, out)
+        check("the warning never echoes the address", "acme-corp" not in out, out)
+        out = fire("doc-leak-guard.sh", write_payload("src/app.py", "ask jane.doe@acme-corp.io"))
+        check("an email in code is left alone", out.strip() == "", out)
+        out = fire("doc-leak-guard.sh", write_payload("docs/a.md", "ask me@example.com"))
+        check("an example address is left alone", out.strip() == "", out)
+        out = fire("doc-leak-guard.sh", {"tool_input": {"file_path": "docs/a.md", "edits": [
+            {"old_string": "x", "new_string": "card 4111 1111 1111 1111"}]}})
+        check("a MultiEdit is scanned", "personal data" in out, out)
     else:
         check("jq present for hook behaviour tests", True, "skipped: jq not installed")
 
@@ -651,7 +682,7 @@ def test_hooks():
           kept.get("facts", {}).get("marker_from_setup") is True, out[-300:])
     settings = json.loads(read(d, ".claude/settings.json"))
     check("re-running does not duplicate the hooks",
-          len(settings.get("hooks", {}).get("PreToolUse", [])) == 5, str(settings))
+          len(settings.get("hooks", {}).get("PreToolUse", [])) == 6, str(settings))
 
     # An older install registered relative commands; both routes repair them in place.
     legacy = read(d, ".claude/settings.json").replace('sh \\"$CLAUDE_PROJECT_DIR\\"/', "sh ")
@@ -661,7 +692,7 @@ def test_hooks():
     settings = json.loads(read(d, ".claude/settings.json"))
     commands = [h["command"] for e in settings["hooks"]["PreToolUse"] for h in e["hooks"]]
     check("--hooks rewrites legacy commands without duplicating them",
-          len(commands) == 5 and all("$CLAUDE_PROJECT_DIR" in c for c in commands), str(commands))
+          len(commands) == 6 and all("$CLAUDE_PROJECT_DIR" in c for c in commands), str(commands))
     write(d, ".claude/settings.json", legacy)
     code, out = run([d, "HKT", "--upgrade"])
     settings = json.loads(read(d, ".claude/settings.json"))
@@ -700,6 +731,21 @@ def test_runtime():
     check("doctor exits 0 by default", code == 0, out)
     code, out = sdlc("doctor", "--strict")
     check("a fresh install has warnings, not failures", code == 0, out)
+    check("a fresh install has no sensitive-data finding", "sensitive" not in out, out)
+
+    # A value pasted into a record is reported by kind and place, never by value.
+    leak = "AKIA" + "ABCDEFGHIJKLMNOP"
+    write(d, "docs/project/decisions-leak.md",
+          "Owner said use key " + leak + "\nask jane.doe@acme-corp.io\nfixture AKIAIOSFODNN7EXAMPLE\n")
+    code, out = sdlc("doctor", "--strict")
+    check("doctor fails on a credential in a record", "sensitive" in out and "AWS access key" in out
+          and code == 1, out)
+    check("doctor names the file and line", "decisions-leak.md:1" in out, out)
+    check("doctor warns on personal data in a record", "email address" in out
+          and "decisions-leak.md:2" in out, out)
+    check("doctor never echoes the value", "ABCDEFGHIJKLMNOP" not in out and "acme-corp" not in out, out)
+    check("doctor skips a marked fixture", "decisions-leak.md:3" not in out, out)
+    os.remove(os.path.join(d, "docs", "project", "decisions-leak.md"))
 
     charter = os.path.join(d, "docs", "project", "charter.md")
     text = read(d, "docs/project/charter.md")
@@ -1728,6 +1774,71 @@ def test_epics():
     check("an unknown method is refused", code != 0 and "item or epic" in out, out[-200:])
 
 
+def test_decision_and_stack():
+    print("decision style and stack evaluation")
+    d = tempfile.mkdtemp(prefix="sdlc-decision-")
+    code, out = run([d, "DEC", "-y"])
+    check("default install exits 0", code == 0, out[-300:])
+    check("the style defaults to guide in the profile",
+          json.loads(read(d, ".ai-sdlc/profile.json")).get("decision_style") == "guide")
+    check("the charter row is left at its documented default",
+          "| **Decision style** | `Ask` · `Guide` · `Autopilot`" in read(d, "docs/project/charter.md"))
+    check("the stack and decision documents are installed",
+          all(os.path.isfile(os.path.join(d, "docs", "process", f)) for f in (
+              "13-stack-evaluation.md", "14-decision-style.md")))
+    check("the ADR template carries version facts",
+          "## Version facts" in read(d, "docs/templates/adr.md"))
+
+    d2 = tempfile.mkdtemp(prefix="sdlc-decision-auto-")
+    code, out = run([d2, "DEC", "-y", "--decision-style", "autopilot"])
+    check("--decision-style autopilot exits 0", code == 0, out[-300:])
+    check("the charter records Autopilot", "| **Decision style** | `Autopilot`" in read(
+        d2, "docs/project/charter.md") or "| **Decision style** | Autopilot" in read(
+        d2, "docs/project/charter.md"), read(d2, "docs/project/charter.md")[:0])
+    check("the profile records autopilot",
+          json.loads(read(d2, ".ai-sdlc/profile.json")).get("decision_style") == "autopilot")
+
+    script = os.path.join(d2, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.Popen([sys.executable, script] + list(args), cwd=d2,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        o, _ = p.communicate()
+        return p.returncode, o.decode("utf-8", "replace")
+
+    code, out = sdlc("doctor")
+    check("a fresh install raises no stack finding", "stack" not in out.split("finding(s)")[0]
+          .replace("checks.", ""), out)
+
+    # An older profile without the field upgrades cleanly and defaults to guide.
+    profile = json.loads(read(d2, ".ai-sdlc/profile.json"))
+    del profile["decision_style"]
+    write(d2, ".ai-sdlc/profile.json", json.dumps(profile))
+    code, out = run([d2, "DEC", "-y", "--upgrade"])
+    check("a pre-decision-style project upgrades", code == 0, out[-300:])
+    check("the upgrade adds the field", "decision_style" in json.loads(
+        read(d2, ".ai-sdlc/profile.json")))
+
+    # Version facts: missing date, stale date, passed support end.
+    adr = ("# ADR 0001 - Database\n\n## Version facts\n\n- **Chosen:** x\n"
+           "- **Support ends:** 2000-01-01\n- **Verified on:** 2000-01-01\n\n"
+           "## Alternatives considered\n")
+    write(d2, "docs/project/adr/0001-db.md", adr)
+    code, out = sdlc("doctor")
+    check("doctor warns on a stale verified-on date", "version facts verified" in out, out)
+    check("doctor warns on a passed support end", "support ended" in out, out)
+    write(d2, "docs/project/adr/0001-db.md", adr.replace("2000-01-01", "YYYY-MM-DD", 1)
+          .replace("- **Verified on:** 2000-01-01", "- **Verified on:** YYYY-MM-DD"))
+    code, out = sdlc("doctor")
+    check("doctor warns when version facts were never dated", "no verified-on date" in out, out)
+
+    code, out = run([tempfile.gettempdir() + "/sdlc-decision-bad", "DEC", "-y",
+                     "--decision-style", "yolo"])
+    check("an unknown style is refused", code != 0 and "ask, guide, or autopilot" in out, out[-200:])
+    for path in (d, d2):
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def main():
     for test in (test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -1742,7 +1853,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics):
+                 test_epics, test_decision_and_stack):
         test()
     print("")
     if failures:

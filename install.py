@@ -109,6 +109,8 @@ EN = {
     "q.c_data": "checks.data",
     "q.c_eval": "checks.eval",
     "q.c_perf": "checks.perf",
+    "q.c_complexity": "checks.complexity",
+    "q.c_mutation": "checks.mutation",
     "q.shape": "How is it deployed?",
     "h.shape": "Goes into architecture.md as the Shape section. Detection can list the parts, not how they run.",
     "q.critical": "What must never go down, or never lose data?",
@@ -133,6 +135,8 @@ EN = {
     "q.acquisition": "Acquisition profile (s = Standard, a = Advanced)",
     "q.devmethod": "Development method (i = Item by item, e = Epic)",
     "h.devmethod": "Item runs one work item at a time and stops at each one's approvals. Epic plans several items together, gets one approval for the plan, and stops at the checkpoints it chooses. Checks, reviews and tier approvals never change.",
+    "q.decision": "Decision style (a = Ask, g = Guide, p = Autopilot)",
+    "h.decision": "How much the agent decides for you. Ask puts every material choice to you with options and trade-offs. Guide recommends in plain language and asks. Autopilot takes the recommended option and logs it for review. Tier 1 surfaces and gated commands always stop for a named human, in every style.",
     "h.acquisition": "Advanced enables more extraction techniques on authorized targets. It never grants permission to bypass access controls.",
     "q.approval": "Human approval required for",
     "q.forbidden": "Forbidden in this project",
@@ -172,6 +176,7 @@ EN = {
     "l.effort": "Default effort mode",
     "l.acquisition": "Acquisition profile",
     "l.devmethod": "Development method",
+    "l.decision": "Decision style",
     "l.approval": "Human approval for",
     "l.forbidden": "Forbidden here",
     "l.platform": "Managed platform",
@@ -304,7 +309,8 @@ USAGE = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --scaffold-ci <provider>
                      create CI for github or gitlab from detected quality commands
   --hooks            install the opt-in Claude Code hooks: deny a commit with no work
-                     item ID or with a credential in it, an edit to a path in
+                     item ID or with a credential in it, a file write that holds a
+                     credential (and a warning for personal data in a record), an edit to a path in
                      .ai-sdlc/protected.txt or to a test locked in
                      .ai-sdlc/test-lock.txt, and a command matching
                      .ai-sdlc/gates.txt. Merged into .claude/settings.json without
@@ -323,6 +329,10 @@ USAGE = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      project default: item (default) or epic. Epic plans several
                      work items together and stops at chosen checkpoints; every
                      item keeps its checks, reviews and tier approvals.
+  --decision-style <name>
+                     project default: ask, guide (default) or autopilot. How much the
+                     agent decides for the person: it never lifts a Tier 1 stop or a
+                     gated command, in any style (process/14-decision-style.md).
   --acquisition-profile <name>
                      standard (default) or advanced. Advanced enables additional data
                      acquisition techniques on authorized targets; it does not grant
@@ -380,6 +390,8 @@ class Options(object):
         self.effort_given = False
         self.dev_method = "item"
         self.dev_method_given = False
+        self.decision_style = "guide"
+        self.decision_given = False
         self.acquisition_given = False
         self.hooks = False
         self.lang = "en"
@@ -443,6 +455,12 @@ def parse_args(argv):
                 sys.stderr.write("--dev-method requires item or epic\n")
                 usage()
             o.dev_method, o.dev_method_given = argv[i + 1], True
+            i += 1
+        elif arg == "--decision-style":
+            if i + 1 >= len(argv) or argv[i + 1] not in ("ask", "guide", "autopilot"):
+                sys.stderr.write("--decision-style requires ask, guide, or autopilot\n")
+                usage()
+            o.decision_style, o.decision_given = argv[i + 1], True
             i += 1
         elif arg == "--acquisition-profile":
             if i + 1 >= len(argv) or argv[i + 1] not in ("standard", "advanced"):
@@ -2024,6 +2042,8 @@ class Wizard(object):
             return ACQUISITION_KEYS.get(value, "Standard")
         if step.sid == "devmethod":
             return DEV_METHOD_KEYS.get(value, "Item")
+        if step.sid == "decision":
+            return DECISION_KEYS.get(value, "Guide")
         if isinstance(value, bool):
             return "yes" if value else "no"
         if isinstance(value, list):
@@ -2042,7 +2062,7 @@ class Wizard(object):
             section = None
             for i in self.visible_indexes():
                 step = self.steps[i]
-                if ((step.kind == "key" and step.sid not in ("effort", "acquisition", "devmethod"))
+                if ((step.kind == "key" and step.sid not in ("effort", "acquisition", "devmethod", "decision"))
                         or step.sid.startswith("skill:")):
                     continue
                 if step.section != section:
@@ -2088,11 +2108,14 @@ CMD_FIELDS = (("c_install", "q.c_install", "install"), ("c_run", "q.c_run", "run
               ("c_a11y", "q.c_a11y", "a11y"),
               ("c_e2e", "q.c_e2e", "e2e"),
               ("c_infra", "q.c_infra", "infra"), ("c_data", "q.c_data", "data"),
-              ("c_eval", "q.c_eval", "eval"), ("c_perf", "q.c_perf", "perf"))
+              ("c_eval", "q.c_eval", "eval"), ("c_perf", "q.c_perf", "perf"),
+              ("c_complexity", "q.c_complexity", "complexity"),
+              ("c_mutation", "q.c_mutation", "mutation"))
 
 EFFORT_KEYS = {"l": "Lean", "n": "Normal", "x": "Beast"}
 ACQUISITION_KEYS = {"s": "Standard", "a": "Advanced"}
 DEV_METHOD_KEYS = {"i": "Item", "e": "Epic"}
+DECISION_KEYS = {"a": "Ask", "g": "Guide", "p": "Autopilot"}
 
 
 def selected_effort(w):
@@ -2104,6 +2127,12 @@ def selected_effort(w):
 def selected_dev_method(w):
     raw = w.a.get("devmethod") or {"item": "i", "epic": "e"}.get(w.o.dev_method, "i")
     return DEV_METHOD_KEYS.get(raw, "Item")
+
+
+def selected_decision(w):
+    raw = w.a.get("decision") or {"ask": "a", "guide": "g", "autopilot": "p"}.get(
+        w.o.decision_style, "g")
+    return DECISION_KEYS.get(raw, "Guide")
 
 
 def selected_acquisition(w):
@@ -2387,6 +2416,9 @@ def build_steps(w):
         Step("devmethod", "sec.process", "key", "q.devmethod", help="h.devmethod",
              options="ie", default=lambda w: {"item": "i", "epic": "e"}[w.o.dev_method],
              label="l.devmethod"),
+        Step("decision", "sec.process", "key", "q.decision", help="h.decision",
+             options="agp", default=lambda w: {"ask": "a", "guide": "g", "autopilot": "p"}[
+                 w.o.decision_style], label="l.decision"),
         Step("acquisition", "sec.process", "key", "q.acquisition", help="h.acquisition",
              options="sa", default=lambda w: {"standard": "s", "advanced": "a"}[
                  w.o.acquisition_profile], label="l.acquisition", when=lambda w: w.fact("acquire")),
@@ -3012,6 +3044,8 @@ class Installer(object):
          "Checking the path is not a locked reproducing test"),
         ("secret-guard.sh", "PreToolUse", "Bash", "Bash(git commit*)",
          "Checking the commit adds no credential"),
+        ("doc-leak-guard.sh", "PreToolUse", "Write|Edit|MultiEdit", None,
+         "Checking the write holds no credential"),
         ("approval-gate.sh", "PreToolUse", "Bash|Write|Edit", None,
          "Checking the command needs no human approval"),
     )
@@ -3204,6 +3238,7 @@ class Installer(object):
             "effort_mode": "Normal",
             "acquisition_profile": "Standard",
             "dev_method": "Item",
+            "decision_style": "Guide",
             "wired": sorted(self.wired),
             "staleness_days": 90,
             "roles": [], "commands": [], "items": [], "artifacts": [], "budgets": [],
@@ -3218,7 +3253,8 @@ class Installer(object):
         for field, key, allowed, fallback in (
                 ("Default effort mode", "effort_mode", ("Lean", "Normal", "Beast"), "Normal"),
                 ("Acquisition profile", "acquisition_profile", ("Standard", "Advanced"), "Standard"),
-                ("Development method", "dev_method", ("Item", "Epic"), "Item")):
+                ("Development method", "dev_method", ("Item", "Epic"), "Item"),
+                ("Decision style", "decision_style", ("Ask", "Guide", "Autopilot"), "Guide")):
             m = re.search(r"^\| \*\*%s\*\* \| ([^|]*)\|" % re.escape(field), charter, re.M)
             if m:
                 cell = plain_text(m.group(1)).strip()
@@ -3376,6 +3412,7 @@ class Installer(object):
             "effort_mode": selected_effort(w).lower(),
             "acquisition_profile": selected_acquisition(w).lower(),
             "dev_method": selected_dev_method(w).lower(),
+            "decision_style": selected_decision(w).lower(),
             "harnesses": sorted(self.wired),
             "platform": w.a.get("platform", "") if w.a.get("platform", "none") != "none" else "",
             "deploy_platforms": installed_platforms(self.target, self.docs, self.platforms),
@@ -3575,6 +3612,8 @@ class Installer(object):
             text = fill_row(text, "**Acquisition profile**", selected_acquisition(self.w))
         if self.o.dev_method_given:
             text = fill_row(text, "**Development method**", selected_dev_method(self.w))
+        if self.o.decision_given:
+            text = fill_row(text, "**Decision style**", selected_decision(self.w))
         return text
 
     def platform_row(self, text):
@@ -3619,6 +3658,7 @@ class Installer(object):
         text = fill_row(text, "**Default effort mode**", selected_effort(w))
         text = fill_row(text, "**Acquisition profile**", selected_acquisition(w))
         text = fill_row(text, "**Development method**", selected_dev_method(w))
+        text = fill_row(text, "**Decision style**", selected_decision(w))
         if a.get("access_model"):
             text = fill_row(text, "**Access level model**", a.get("access_model"))
         if a.get("mfa_policy"):
@@ -3779,6 +3819,9 @@ def refresh_profile(target):
         changed = True
     if "dev_method" not in data:
         data["dev_method"] = "item"
+        changed = True
+    if "decision_style" not in data:
+        data["decision_style"] = "guide"
         changed = True
     if "deploy_platforms" not in data:
         data["deploy_platforms"] = installed_platforms(target, data.get("docs_dir") or "docs")

@@ -32,10 +32,24 @@ _(What we are doing. Present tense, active: "We store X in Y." One paragraph.)_
 **Follow-ups:**
 - _({{PREFIX}}-### — work this decision creates.)_
 
+## Version facts
+
+_(For a stack, runtime, database, framework, language, hosting, or base-image choice. Read
+from the official release and support pages, never recalled; see
+`../process/13-stack-evaluation.md`. A fact that could not be checked is written
+`Unknown — not verified`. Delete this section for a decision that picks no version.)_
+
+- **Chosen:**
+- **Latest stable:**
+- **Support ends:** YYYY-MM-DD
+- **Verified on:** YYYY-MM-DD
+- **Source:**
+- **If not the latest stable, why:**
+
 ## Alternatives considered
 
 ### <Option>
-_(What it was, and the actual reason it lost. "Not a good fit" is not a reason. "Requires
+_(Compared on the criteria in `../process/13-stack-evaluation.md` where this is a stack choice. What it was, and the actual reason it lost. "Not a good fit" is not a reason. "Requires
 an operational capability the team does not have and cannot acquire this quarter" is.)_
 
 ## Reversibility

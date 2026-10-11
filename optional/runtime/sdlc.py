@@ -32,13 +32,14 @@ import time
 
 # The order /sdlc-verify runs stages in (04-quality-gates.md), not the installer's
 # question order.
-STAGES = ("format", "lint", "typecheck", "infra", "unit", "integration", "data", "contract",
-          "eval", "build", "scan", "a11y", "e2e", "perf")
+STAGES = ("format", "lint", "typecheck", "complexity", "infra", "unit", "mutation",
+          "integration", "data", "contract", "eval", "build", "scan", "a11y", "e2e", "perf")
 POINTER_FILES = ("CLAUDE.md", "GEMINI.md", "AGENT.md", "CONVENTIONS.md",
                  ".github/copilot-instructions.md", ".windsurfrules", ".clinerules")
 EFFORT = ("Lean", "Normal", "Beast")
 ACQUISITION = ("Standard", "Advanced")
 DEV_METHOD = ("Item", "Epic")
+DECISION_STYLE = ("Ask", "Guide", "Autopilot")
 WORKLOG_ROTATE_LINES = 1000
 DEFAULT_STALENESS_DAYS = 90
 KNOWN_MISTAKES_LINES = 30
@@ -54,6 +55,15 @@ SECRET_PATTERNS = (
     ("OpenAI API key", r"sk-(proj-)?[A-Za-z0-9_-]{40,}"),
     ("Google API key", r"AIza[0-9A-Za-z_-]{35}"),
 )
+# A URL that embeds a password, with placeholder passwords and example hosts excluded.
+URL_PASSWORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://([^/\s:@]+):([^/\s@<>{}$]{4,})@([^/\s]*)")
+URL_PASSWORD_PLACEHOLDER = re.compile(
+    r"^(password|passwd|pass|secret|changeme|x{4,}|\*+)$", re.IGNORECASE)
+EXAMPLE_HOST = re.compile(r"(^|\.)(example\.(com|org|net)|invalid)$", re.IGNORECASE)
+# Personal-data shapes: lower confidence than credentials, so `doctor` warns.
+EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})")
+CARD_SHAPE = re.compile(r"(?<![0-9])[0-9]{4}(?:[ -][0-9]{4}){3}(?![0-9])")
+NATIONAL_ID_SHAPE = re.compile(r"(?<![0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?![0-9])")
 PLACEHOLDER = re.compile(r"[{][{][A-Z][A-Z0-9_]*[}][}]")
 UNFILLED = re.compile(r"_\([^)]*\)_")
 
@@ -365,6 +375,11 @@ def check_charter(project, out):
     if cell is not None and choice(cell, DEV_METHOD)[1] in ("invalid", "blank"):
         out.add("fail", "charter", "%s Development method" % where,
                 "must be exactly one of %s" % ", ".join(DEV_METHOD))
+    # Added in 3.5 with decision style; same tolerance as the development method.
+    cell = labelled(text, "Decision style")
+    if cell is not None and choice(cell, DECISION_STYLE)[1] in ("invalid", "blank"):
+        out.add("fail", "charter", "%s Decision style" % where,
+                "must be exactly one of %s" % ", ".join(DECISION_STYLE))
     active = dict((name, on) for name, on, _ in roles(text))
     undecided = [name for name, on, reason in roles(text) if not on and unfilled(reason)]
     if undecided:
@@ -381,6 +396,41 @@ def check_charter(project, out):
             .split("\n## ", 1)[0], re.M):
         out.add("warn", "charter", "%s Budgets" % where,
                 "performance-engineer is active and no budget is recorded")
+
+
+def check_stack_versions(project, out, today):
+    """ADR "Version facts" (process/13-stack-evaluation.md): a version fact is only as
+    good as the day it was read, so warn when the verified-on date is missing or older
+    than the staleness threshold, and when a recorded support-end date has passed."""
+    cell = labelled(project.charter, "Staleness threshold") or ""
+    found = re.search(r"[0-9]+", UNFILLED.sub("", cell))
+    window = int(found.group(0)) if found else DEFAULT_STALENESS_DAYS
+    folder = project.path(os.path.join(project.docs, "project", "adr"))
+    if not os.path.isdir(folder):
+        return
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith(".md") or name.lower() == "readme.md":
+            continue
+        text = read(os.path.join(folder, name))
+        if "## Version facts" not in text:
+            continue
+        block = text.split("## Version facts", 1)[1].split("\n## ", 1)[0]
+        rel = os.path.join(project.docs, "project", "adr", name)
+
+        def field(label):
+            m = re.search(r"\*\*%s:\*\*[ \t]*([^\n]*)" % re.escape(label), block)
+            return m.group(1).strip() if m else ""
+        verified = age_days(field("Verified on"), today)
+        if verified is None:
+            out.add("warn", "stack", rel, "Version facts has no verified-on date: the "
+                    "versions were recalled, or nobody wrote down when they were read")
+        elif verified > window:
+            out.add("warn", "stack", rel, "version facts verified %d days ago; the "
+                    "window is %d" % (verified, window))
+        ends = age_days(field("Support ends"), today)
+        if ends is not None and ends > 0:
+            out.add("warn", "stack", rel, "the chosen version's support ended %d days ago"
+                    % ends)
 
 
 def check_staleness(project, out, today):
@@ -489,6 +539,56 @@ def redact(text):
     return text, count
 
 
+def sensitive_kinds(line):
+    """(credential kinds, personal-data kinds) in one line. Kinds only, never values.
+    A line containing EXAMPLE is a deliberate fixture."""
+    if "EXAMPLE" in line:
+        return [], []
+    secrets = [kind for kind, pattern in SECRET_PATTERNS if re.search(pattern, line)]
+    for _user, password, host in URL_PASSWORD.findall(line):
+        if not URL_PASSWORD_PLACEHOLDER.match(password) and not EXAMPLE_HOST.search(host):
+            secrets.append("URL with embedded password")
+            break
+    personal = []
+    for match in EMAIL.finditer(line):
+        local, domain = match.group(0).split("@", 1)[0], match.group(1)
+        if (EXAMPLE_HOST.search(domain) or domain.lower() == "users.noreply.github.com"
+                or local.lower() in ("noreply", "no-reply")):
+            continue
+        personal.append("email address")
+        break
+    if CARD_SHAPE.search(line):
+        personal.append("card-number shape")
+    if NATIONAL_ID_SHAPE.search(line):
+        personal.append("national-ID shape")
+    return secrets, personal
+
+
+def check_sensitive(project, out):
+    """Credentials and personal data already written into the project's records. The
+    records are committed, so a value here is a leak whether or not anything has pushed
+    it yet (process/12-sensitive-data-in-records.md). Reports kind and place, never the
+    value: a finding that quoted it would be a second copy."""
+    top = project.path(os.path.join(project.docs, "project"))
+    for folder, dirs, names in os.walk(top):
+        dirs[:] = [d for d in dirs if d not in ("node_modules", ".git")]
+        for name in sorted(names):
+            if not name.endswith((".md", ".txt", ".json", ".csv")):
+                continue
+            path = os.path.join(folder, name)
+            rel = os.path.relpath(path, project.root)
+            for number, line in enumerate(read(path).splitlines(), 1):
+                secrets, personal = sensitive_kinds(line)
+                if secrets:
+                    out.add("fail", "sensitive", "%s:%d" % (rel, number),
+                            "looks like a credential (%s). Deleting the line does not undo "
+                            "it: rotate it, then remove it" % ", ".join(secrets))
+                if personal:
+                    out.add("warn", "sensitive", "%s:%d" % (rel, number),
+                            "looks like personal data (%s). Records hold the decision and "
+                            "the reason, not a person's details" % ", ".join(personal))
+
+
 def check_worklog_size(project, out):
     lines = len(project.records("worklog.md").splitlines())
     if lines > WORKLOG_ROTATE_LINES:
@@ -519,9 +619,10 @@ def check_profile(project, out):
                                                        project.charter_prefix))
     for key, label, options in (("effort_mode", "Default effort mode", EFFORT),
                                 ("acquisition_profile", "Acquisition profile", ACQUISITION),
-                                ("dev_method", "Development method", DEV_METHOD)):
+                                ("dev_method", "Development method", DEV_METHOD),
+                                ("decision_style", "Decision style", DECISION_STYLE)):
         value, state = choice(labelled(project.charter, label), options)
-        if key == "dev_method" and key not in profile:
+        if key in ("dev_method", "decision_style") and key not in profile:
             continue  # a profile written before 3.5; --upgrade adds it
         if state == "decided" and str(profile.get(key, "")).lower() != value.lower():
             out.add("fail", "profile", "%s %s" % (where, key),
@@ -617,6 +718,7 @@ def doctor(project, today=None):
     check_pointer(project, out)
     check_charter(project, out)
     check_staleness(project, out, today)
+    check_stack_versions(project, out, today)
     check_traceability(project, out)
     check_epics(project, out)
     check_dependencies(project, out)
@@ -624,6 +726,7 @@ def doctor(project, today=None):
     check_known_mistakes(project, out)
     check_rollback(project, out, today)
     check_profile(project, out)
+    check_sensitive(project, out)
     return out.items
 
 
@@ -1031,6 +1134,16 @@ def selftest():
     assert glob_regex("src/api").match("src/api/x.py")
     assert not glob_regex("src/api").match("src/apiary.py")
     assert glob_regex("**/test_*.py").match("test_a.py")
+    aws = "AKIA" + "ABCDEFGHIJKLMNOP"
+    assert sensitive_kinds("key " + aws) == (["AWS access key"], [])
+    assert sensitive_kinds("key AKIAIOSFODNN7EXAMPLE") == ([], [])
+    assert sensitive_kinds("db postgres://app:" + "s3cretPw" + "@prod.db.internal/app")[0] == \
+        ["URL with embedded password"]
+    assert sensitive_kinds("db postgres://user:PASSWORD@db.example.com/app") == ([], [])
+    assert sensitive_kinds("ask jane.doe@acme-corp.io") == ([], ["email address"])
+    assert sensitive_kinds("ask me@eu.example.org or noreply@acme.io") == ([], [])
+    assert sensitive_kinds("card 4111 1111 1111 1111")[1] == ["card-number shape"]
+    assert sensitive_kinds("plain prose, ACME-12, 2026-01-01") == ([], [])
     print("sdlc runtime self-test passed")
 
 

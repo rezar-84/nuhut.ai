@@ -34,11 +34,12 @@ is missing or `python3` is not available.
 
 2. **Run each stage in order**, per the table in `04-quality-gates.md`:
 
-   format → lint → typecheck → `checks.infra` → unit → integration → `checks.data` →
+   format → lint → typecheck → `checks.complexity` → `checks.infra` → unit →
+   `checks.mutation` → integration → `checks.data` →
    contract → `checks.eval` → build → dependency/secret scan → accessibility →
    end-to-end → `checks.perf`
 
-   The four conditional stages exist only where the project has that surface; where the
+   The six conditional stages exist only where the project has that surface; where the
    charter has no command for one, it is **Absent**, which is a complete answer.
 
 3. **Report each stage** in the vocabulary of `{{DOCS_DIR}}/process/06-evidence-and-claims.md`,

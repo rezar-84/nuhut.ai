@@ -26,6 +26,10 @@ last-reviewed: YYYY-MM-DD
 
 ---
 
+Name the test that proves each Given / When / Then once it exists (a test name or path is
+enough). Which framework runs it is the project's choice; the criterion is only done when
+a test names it.
+
 ## Example — the level of specificity expected
 
 **{{PREFIX}}-042** — As an account owner, I want to remove a team member, so that

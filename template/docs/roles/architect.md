@@ -105,6 +105,10 @@ work handed to a queue, a broker, a scheduler, another service, or a workflow en
 - [ ] `project/architecture.md` and `project/data-model-api.md` reflect what now exists.
 - [ ] New dependencies are pinned, licensed compatibly, and noted in the worklog with
       the reason.
+- [ ] A chosen runtime, database, framework or base-image version was **read from the
+      official source and dated**, not recalled, is still inside its security-support
+      window, and its ADR says why if it is not the latest stable
+      (`process/13-stack-evaluation.md`).
 
 **Clean code — reviewable, not a matter of taste.** Each of these is a finding with a
 location and a consequence, or it is not raised:
@@ -124,6 +128,16 @@ location and a consequence, or it is not raised:
       cannot state what it does in a sentence, that is the finding.
 - [ ] Conditional depth and special-case count are not growing without a reason. The
       fifth flag on a function is a design problem being paid in `if` statements.
+- [ ] A design pattern (factory, strategy, observer, repository, and the like) is used for
+      a named force: the specific variation or constraint it handles today. "It is the
+      standard way" is not a force. A pattern whose force is missing is speculative
+      abstraction under another name.
+- [ ] No class, module or function that has become the place everything goes (a god
+      object), no change that must be repeated in many places (shotgun surgery), and no
+      method that mostly manipulates another object's data (feature envy). Each is a
+      finding with a location and a consequence, or it is not raised.
+- [ ] Domain meaning is not carried in bare primitives that can be confused (two string
+      IDs of different things, an amount with no currency) where a mix-up would be silent.
 - [ ] A bug is fixed at the shared cause after callers were inspected, rather than with
       repeated guards on only the reported path.
 
@@ -145,8 +159,12 @@ location and a consequence, or it is not raised:
 | Duplicated logic that must now be changed in two places to stay correct | S3 |
 | An abstraction with one implementation, added for a second that does not exist | S3 |
 | Dead code, a commented-out block, or a stub that pretends to work | S3 |
+| A design pattern added with no named force | S3 |
+| A god object or shotgun-surgery shape that the change makes worse | S3, S2 if it already blocks the next requirement on the roadmap |
 | A dependency cycle, or a boundary violation that will spread once merged | S2 |
 | Business logic made untestable by where it was placed | S2 |
+| A stack or version chosen from recall, with no source or verified-on date | S3 |
+| A new build on a runtime, database or framework version already out of security support, with no written acceptance | S2 |
 | A material decision made with no ADR, where a later reader could not reconstruct why | S3 |
 
 "Material" means: expensive to reverse, or a future reader would otherwise have to

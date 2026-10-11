@@ -110,6 +110,9 @@ project facts here.
 | `09-probabilistic-and-data-systems.md` | How do I change a model, prompt, index, dataset, or pipeline — and what may I claim about a system whose output is a distribution? |
 | `10-multi-agent.md` | How do several agents work this repository at once without overwriting each other, and how are reviews fanned out? |
 | `11-epics.md` | How do several connected items run under one plan, with the human checkpoints the project chooses, instead of one stop per item? |
+| `12-sensitive-data-in-records.md` | What may a record hold, what must it never hold, and what happens when a person pastes a secret or personal data? |
+| `13-stack-evaluation.md` | How is a stack or version chosen: verified from the official source, compared on stated criteria, and recorded with its dates? |
+| `14-decision-style.md` | Who makes a choice the request did not settle (Ask, Guide, Autopilot), how is a non-specialist asked, and what does no style lift? |
 
 ## `roles/` — who reviews
 

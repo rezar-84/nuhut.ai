@@ -50,6 +50,11 @@ the running system.
 - [ ] Each acceptance criterion has a test that would fail if the behaviour regressed.
       Coverage percentage is not evidence; a test that passes with the feature deleted
       is worse than none.
+- [ ] Each acceptance criterion written as Given / When / Then maps to at least one named
+      test, so the criterion and its evidence can be found from each other
+      (`../process/07-traceability.md`). A criterion no test names is untested until one does.
+- [ ] Where `checks.mutation` exists, the surviving mutants in the changed modules were
+      read, and each is either killed by a new test or explained.
 - [ ] New tests actually assert something. Check that they fail when you break the code
       — at least once, for the important ones.
 - [ ] The failure paths are tested: invalid input, missing input, oversized input,

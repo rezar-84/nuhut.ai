@@ -4,6 +4,52 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Engineering-practice controls (optional, stack-neutral):**
+  - Two conditional stages, `checks.complexity` and `checks.mutation`, follow the
+    `checks.perf` pattern: absent unless the charter states a bar. A score with no stated
+    threshold is a reading, not a gate. The installer asks for both commands; `sdlc.py
+    verify` runs them in order (complexity after typecheck, mutation after unit).
+  - The architect checklist gains three items: a design pattern needs a named force, no
+    god object or shotgun surgery or feature envy, and no confusable bare primitives; with
+    S3 severity rows. There is no pattern catalogue and no tool is named.
+  - QA checklist: each Given / When / Then criterion maps to a named test, and surviving
+    mutants in changed modules are read. `user-stories.md` says to name the test.
+
+- **Stack evaluation and decision style:**
+  - Added `process/13-stack-evaluation.md`: foundational choices (stack, runtime,
+    database, framework, host, base image) are verified from the official source and
+    dated rather than recalled, compared on stated criteria, and recorded in an ADR. The
+    default is the newest stable supported version unless a written reason says
+    otherwise; existing projects are never upgraded by this rule. Facts that cannot be
+    checked are recorded `Unknown — not verified`.
+  - The ADR template gains an optional **Version facts** block. The architect checklist
+    gains a verified-version item and severity rows (S3 for a version chosen from recall,
+    S2 for a new build on an out-of-support version).
+  - Added `process/14-decision-style.md` and a charter **Decision style** row (`Ask`,
+    `Guide` default, `Autopilot`). It sets who decides a choice the request left open and
+    how much the agent says in chat. No style lifts a Tier 1 approval, a gated command or
+    the ADR an expensive-to-reverse choice needs, and none thins a record. Autopilot logs
+    each decision `(auto)` and ends with the decisions to review. `AGENTS.md` and
+    `CARD.md` gain a short rule and routing rows.
+  - The installer gains `--decision-style ask|guide|autopilot` and a setup question;
+    `--upgrade` adds the profile field. `sdlc.py doctor` fails when the charter and
+    profile disagree, and warns when an ADR's version facts have no verified-on date, are
+    older than the staleness threshold, or name a support end that has passed.
+
+- **Sensitive data in records:**
+  - Added `process/12-sensitive-data-in-records.md`: record the decision and the reason,
+    never the value or a person's raw words; what each record may hold; what to do when a
+    person pastes a secret into the chat and when a value has reached a file.
+  - New opt-in hook `doc-leak-guard.sh` (`--hooks`): denies a write that holds a
+    credential shape in any file, and warns when a prose record gains an email address,
+    card-number shape or `NNN-NN-NNNN`. It names the kind and never the value.
+  - `secret-guard.sh` and the new hook share one detector in `lib.sh`, which also
+    recognises a URL with an embedded password.
+  - `sdlc.py doctor` reports credentials (fail) and personal data (warn) already in
+    `project/` records, by kind and file:line, never value.
+  - `AGENTS.md` section 6 adds: summarise a person's answer, never paste it; if a secret
+    is pasted into the chat, do not repeat it, name its kind, and say to rotate it.
+
 - **Gitignore options for runtime tooling (`--gitignore-tools`, `--git-exclude`):**
   - `--gitignore-tools`: appends `.ai-sdlc/` to the project's root `.gitignore` so kit
     runtime binaries, manifests, and local viewer caches are not committed to git.

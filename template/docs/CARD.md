@@ -209,6 +209,9 @@ Tier 3 → one line there.
 | Fetching third-party data | `roles/privacy-legal.md`, `roles/data-engineer.md` |
 | More than one agent is working this repository | `process/10-multi-agent.md` |
 | The development method is `Epic` | `process/11-epics.md`, `templates/epic.md` |
+| A stack, runtime, database, framework or host is chosen or moved across a major version | `process/13-stack-evaluation.md`, `templates/adr.md` |
+| A choice the request did not settle, or a non-specialist is being asked | `process/14-decision-style.md` |
+| A person pastes a secret or personal data, or a record is about to quote one | `process/12-sensitive-data-in-records.md` |
 
 This table is the routing that Claude Code gets from skill descriptions. On any other
 agent tool, it is the routing.

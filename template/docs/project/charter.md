@@ -45,7 +45,9 @@ table, so it cannot drift.
 | Test tooling | |
 
 The reasoning lives in the ADRs; the shape lives in `architecture.md`. This table is for
-lookup.
+lookup. A choice made here carries its version, support-end date, and verified-on date in
+its ADR (`process/13-stack-evaluation.md`), not in this table, so the dates cannot go
+stale in two places.
 
 ## Constraints
 
@@ -82,6 +84,8 @@ links here rather than repeating them.
 | `checks.scan` | |
 | `checks.a11y` | |
 | `checks.e2e` | |
+| `checks.complexity` | _(optional — cyclomatic or cognitive complexity, function length, duplication, against thresholds this charter states; see `../process/04-quality-gates.md`)_ |
+| `checks.mutation` | _(optional — mutation or equivalent fault-injection check on the modules that carry the risk; Beast mode or a Tier 1 surface)_ |
 | `checks.infra` | _(if this repository provisions infrastructure — plan/diff plus policy scan)_ |
 | `checks.data` | _(if this project produces or consumes datasets — see `../process/09-probabilistic-and-data-systems.md` §7)_ |
 | `checks.eval` | _(if any output is probabilistic — scores against the versioned golden set)_ |
@@ -241,6 +245,7 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | --- | --- |
 | **Default effort mode** | `Lean` · `Normal` · `Beast` _(default: Normal; changes breadth above the risk-tier floor, never the floor itself)_ |
 | **Development method** | `Item` · `Epic` _(default: Item. Epic plans several items together and stops at the checkpoints its plan chooses; it never removes a tier's checks or approvals. See `process/11-epics.md`)_ |
+| **Decision style** | `Ask` · `Guide` · `Autopilot` _(default: Guide. How much the agent decides for the person and how much it says in chat; it never lifts a Tier 1 stop or a gated command, and never thins a record. See `process/14-decision-style.md`)_ |
 | **Acquisition profile** | `Standard` · `Advanced` _(advanced tools require an owned or explicitly authorised target and never grant permission)_ |
 | **Always Tier 1 here** | _(the surfaces that are high-risk in this project specifically)_ |
 | **Never Tier 1 here** | _(surfaces from the `AGENTS.md` Tier 1 list that genuinely do not apply — e.g. "no PII: this project holds no personal data, see Data categories held". Without this, "when in doubt, tier up" makes almost everything Tier 1.)_ |
