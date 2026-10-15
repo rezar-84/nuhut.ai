@@ -1,0 +1,46 @@
+#!/bin/sh
+# Nuhut git hook: refuse a commit whose message carries no work item ID.
+# AGENTS.md section 6: every branch, commit, review and worklog entry carries the same
+# ID, and the commit is the one a machine can check. Harness-independent: git runs it
+# for every agent and every human. Needs no jq.
+#
+# $1 is the file holding the message. Installed by `install.sh --git-hooks`; called from
+# the project's own hook or husky file, never replacing it. Bypass is --no-verify.
+set -u
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" || exit 0
+msg_file=${1:-}
+[ -n "$msg_file" ] && [ -f "$msg_file" ] || exit 0
+
+# Comment lines are not part of the message. Merge and revert commits carry git's own
+# subject and are not the agent's to name.
+msg=$(grep -v '^#' "$msg_file")
+printf '%s' "$msg" | grep -Eq '^(Merge |Revert |fixup! |squash! )' && exit 0
+
+# A prefix nobody configured cannot be enforced.
+prefix=""
+if [ -f .ai-sdlc/profile.json ]; then
+  prefix=$(sed -n 's/.*"prefix"[[:space:]]*:[[:space:]]*"\([A-Za-z]*\)".*/\1/p' .ai-sdlc/profile.json | head -1)
+fi
+[ -n "$prefix" ] || exit 0
+
+if printf '%s' "$msg" | grep -Eiq "(^|[^A-Za-z0-9])(${prefix}-[0-9]+|#[0-9]+|GH-[0-9]+)([^A-Za-z0-9]|$)"; then
+  exit 0
+fi
+# A legacy hierarchical ID (P1.2, A12) looks like `v2` or `utf8`, so it counts only when
+# the backlog actually holds it.
+backlog="{{DOCS_DIR}}/project/backlog.md"
+if [ -f "$backlog" ]; then
+  for tok in $(printf '%s' "$msg" | tr -c 'A-Za-z0-9.' '\n' | sed 's/\.*$//' \
+               | grep -Ex '[A-Za-z][0-9]+(\.[0-9]+)*'); do
+    tok_re=$(printf '%s' "$tok" | sed 's/\./\\./g')
+    grep -Eq "^\|[[:space:]]*${tok_re}[[:space:]]*\|" "$backlog" && exit 0
+  done
+fi
+
+cat >&2 <<MSG
+nuhut: commit refused. The message carries no work item ID. AGENTS.md section 6 requires
+${prefix}-### in the branch, the commit and the worklog entry: that string is the only join
+key between the code and the record of why it changed. Add it to the message, or create
+the backlog item first ({{DOCS_DIR}}/process/07-traceability.md). (--no-verify bypasses this hook.)
+MSG
+exit 1

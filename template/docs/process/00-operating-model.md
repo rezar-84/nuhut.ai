@@ -122,7 +122,9 @@ narrative into the backlog.
 
 - Backlog status updated to one of the eight values in `07-traceability.md` — with a
   pointer to the worklog entry or the blocker, never a bare status change.
-- New items created for everything discovered and not fixed.
+- New items created for everything discovered and not fixed. They enter as `Parked`,
+  waiting on a human for the intake decision, never as `Ready` ("Work you discovered"
+  below).
 - `assumptions-and-risks.md` updated: resolved entries closed, new unknowns added.
 - Docs the change falsified are updated or marked `stale` (`07-traceability.md`).
 - State completion plainly: what is done, what is verified, what is open.
@@ -156,6 +158,16 @@ When you reach one:
 A later session resumes by reading the Parked table first: if the decision has been
 recorded, continue from where the entry says the work stopped; if not, do not restart the
 work, and do not re-ask if the question is already logged.
+
+### Work you discovered
+
+A review, an audit or a fix turns up things nobody asked for: a second defect, a
+refactor that would have made this one easier, an idea. File each one with an ID, a
+tier and a one-line task, as intake requires. Then set it **`Parked`**, not `Ready`: who
+is waited on is the human who owns the backlog, the decision is *accept into Next, defer,
+or drop*, and Since is today. Whether a thing you noticed is the next priority is not an
+agent's call, and a backlog that agents fill unasked stops being read. Do not claim a
+Parked item you filed yourself; it becomes claimable when a human moves it to `Ready`.
 
 ### Interrupted mid-loop
 

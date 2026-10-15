@@ -435,9 +435,21 @@ def test_harness_wiring():
     check("existing CLAUDE.md is pointed at AGENTS.md", "AGENTS.md" in text, text)
     check("its original content survives", "Run npm test." in text, text)
     check("the append is announced", "CLAUDE.md" in out, out[-400:])
+    check("claude alone installs no shared skills", not os.path.exists(os.path.join(d, ".agents")))
     code, out = run([d, "HRN", "-y"])
     check("re-running adds no second pointer", text.count("AGENTS.md") ==
           read(d, "CLAUDE.md").count("AGENTS.md"), read(d, "CLAUDE.md"))
+    shutil.rmtree(d, ignore_errors=True)
+
+    # Any other tool reads skills from .agents/skills/, the Agent Skills convention.
+    d = tempfile.mkdtemp(prefix="sdlc-harness-shared-")
+    code, out = run([d, "HRN", "-y", "--harness", "cursor,codex"])
+    check("naming another tool installs the skills under .agents/skills/ too",
+          os.path.isfile(os.path.join(d, ".agents", "skills", "sdlc-intake", "SKILL.md"))
+          and os.path.isfile(os.path.join(d, ".claude", "skills", "sdlc-intake", "SKILL.md")), out[-300:])
+    check("the shared copy is substituted and kit-managed",
+          "{{" not in read(d, ".agents/skills/sdlc-intake/SKILL.md")
+          and ".agents/skills/sdlc-intake/SKILL.md" in json.loads(read(d, ".ai-sdlc/manifest.json")).get("files", {}))
     shutil.rmtree(d, ignore_errors=True)
 
     # A fresh project gets only the harnesses that were asked for.
@@ -708,10 +720,147 @@ def test_hooks():
           code == 0 and all("$CLAUDE_PROJECT_DIR" in c for c in commands), out[-400:])
     shutil.rmtree(d, ignore_errors=True)
 
+    # The same rules under Gemini CLI and Cursor, through the adapter.
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-hooks-harness-"))
+    write(d, ".cursor/hooks.json", '{"version":1,"hooks":{"afterFileEdit":[{"command":"./fmt.sh"}]}}')
+    code, out = run([d, "HKT", "-y", "--hooks", "--harness", "claude,gemini,cursor"])
+    check("exit 0 with other harnesses", code == 0, out[-300:])
+    gem = json.loads(read(d, ".gemini/settings.json") or "{}")
+    before = gem.get("hooks", {}).get("BeforeTool", [])
+    check("gemini gets all six rules as BeforeTool hooks through the adapter",
+          len(before) == 6 and all('adapter.sh gemini' in h["command"] and "$GEMINI_PROJECT_DIR" in h["command"]
+                                   for e in before for h in e["hooks"]), str(before)[:300])
+    check("gemini matchers name its tools",
+          any(e["matcher"] == "run_shell_command" for e in before)
+          and any(e["matcher"] == "write_file|replace" for e in before), str(before)[:300])
+    cur = json.loads(read(d, ".cursor/hooks.json") or "{}")
+    shell = cur.get("hooks", {}).get("beforeShellExecution", [])
+    check("cursor gets the three shell rules and keeps its own hooks",
+          len(shell) == 3 and cur["hooks"].get("afterFileEdit") == [{"command": "./fmt.sh"}]
+          and cur.get("version") == 1, str(cur)[:300])
+    run([d, "HKT", "-y", "--hooks", "--harness", "claude,gemini,cursor"])
+    check("re-running does not duplicate harness hooks",
+          len(json.loads(read(d, ".gemini/settings.json"))["hooks"]["BeforeTool"]) == 6
+          and len(json.loads(read(d, ".cursor/hooks.json"))["hooks"]["beforeShellExecution"]) == 3)
+    check("the adapter is installed and kit-managed",
+          ".claude/hooks/adapter.sh" in json.loads(read(d, ".ai-sdlc/manifest.json")).get("files", {}))
+
+    def adapt(harness, hook, payload):
+        p = subprocess.Popen(["sh", os.path.join(d, ".claude", "hooks", "adapter.sh"), harness, hook],
+                             cwd=d, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             env=dict(os.environ, CLAUDE_PROJECT_DIR=d))
+        out = p.communicate(json.dumps(payload).encode("utf-8"))[0].decode("utf-8", "replace")
+        try:
+            return json.loads(out)
+        except ValueError:
+            return {"raw": out}
+    v = adapt("cursor", "work-item-id.sh", {"command": "git commit -m 'no id'", "cwd": d})
+    check("cursor: a commit with no ID is denied in Cursor's shape",
+          v.get("permission") == "deny" and "work item ID" in v.get("agent_message", ""), str(v)[:200])
+    v = adapt("cursor", "work-item-id.sh", {"command": "git commit -m 'HKT-3 ok'"})
+    check("cursor: an allowed call is always valid JSON", v == {"permission": "allow"}, str(v))
+    v = adapt("gemini", "work-item-id.sh", {"tool_name": "run_shell_command",
+                                            "tool_input": {"command": "git commit -m 'no id'"}})
+    check("gemini: a commit with no ID is denied in Gemini's shape",
+          v.get("decision") == "deny" and "work item ID" in v.get("reason", ""), str(v)[:200])
+    v = adapt("gemini", "doc-leak-guard.sh", {"tool_name": "write_file",
+                                              "tool_input": {"file_path": "notes.md", "content": "AKIA" + "B" * 16}})
+    check("gemini: a write holding a credential is denied, by kind only",
+          v.get("decision") == "deny" and "AWS access key" in v.get("reason", "") and "B" * 16 not in v.get("reason", ""), str(v)[:200])
+    v = adapt("gemini", "doc-leak-guard.sh", {"tool_name": "write_file", "tool_input": {"file_path": "notes.md", "content": "fine"}})
+    check("gemini: an allowed write prints an empty object", v == {}, str(v))
+    v = adapt("cursor", "missing.sh", {"command": "x"})
+    check("a missing hook fails open in the harness's shape", v == {"permission": "allow"}, str(v))
+    shutil.rmtree(d, ignore_errors=True)
+
     d = tempfile.mkdtemp(prefix="sdlc-nohooks-")
     run([d, "HKT", "-y"])
     check("hooks are never installed without the flag",
           not os.path.exists(os.path.join(d, ".claude", "hooks")))
+    check("git hooks are never installed without the flag",
+          not os.path.exists(os.path.join(d, ".ai-sdlc", "git-hooks")))
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_git_hooks():
+    print("opt-in git hooks, for every harness")
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+
+    def commit(d, message, *extra):
+        p = subprocess.Popen(git + ["commit", "-q", "-m", message] + list(extra), cwd=d,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out = p.communicate()[0].decode("utf-8", "replace")
+        return p.returncode, out
+
+    # A plain repository with a hook somebody already wrote: chained, not replaced.
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-githooks-"))
+    subprocess.call(["git", "init", "-q", d])
+    write(d, ".git/hooks/pre-commit", "#!/bin/sh\necho existing-hook\n")
+    os.chmod(os.path.join(d, ".git/hooks/pre-commit"), 0o755)
+    code, out = run([d, "GHT", "-y", "--git-hooks"])
+    check("exit 0", code == 0, out[-300:])
+    pre = read(d, ".git/hooks/pre-commit")
+    check("the existing pre-commit keeps its content", "echo existing-hook" in pre, pre)
+    check("and gains one call to the kit hook", pre.count("sh .ai-sdlc/git-hooks/pre-commit") == 1, pre)
+    check("commit-msg is created with a shebang",
+          read(d, ".git/hooks/commit-msg").startswith("#!/bin/sh\nsh .ai-sdlc/git-hooks/commit-msg"),
+          read(d, ".git/hooks/commit-msg"))
+    check("the scripts and the library are kit-managed",
+          all(os.path.isfile(os.path.join(d, ".ai-sdlc", "git-hooks", n)) for n in ("pre-commit", "commit-msg", "lib.sh")))
+    manifest = json.loads(read(d, ".ai-sdlc/manifest.json") or "{}")
+    check("git hooks are in the manifest", ".ai-sdlc/git-hooks/pre-commit" in manifest.get("files", {}), str(manifest)[:200])
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    code, out = commit(d, "no id here")
+    check("a commit with no work item ID is refused by git itself", code != 0 and "no work item ID" in out, out)
+    check("the existing hook still ran first", "existing-hook" in out, out)
+    code, out = commit(d, "GHT-1 first")
+    check("a commit with the ID passes", code == 0, out)
+    code, out = commit(d, "Merge branch 'x'", "--allow-empty")
+    check("a merge commit needs no ID", code == 0, out)
+    write(d, "leak.txt", "key AKIA" + "B" * 16 + "\n")
+    subprocess.call(git + ["add", "leak.txt"], cwd=d, stdout=subprocess.DEVNULL)
+    code, out = commit(d, "GHT-2 leak")
+    check("a staged credential is refused, named by kind, never by value",
+          code != 0 and "AWS access key" in out and "B" * 16 not in out, out)
+    code, out = commit(d, "GHT-2 leak", "--no-verify")
+    check("--no-verify is the visible bypass", code == 0, out)
+    code, out = run([d, "GHT", "-y", "--git-hooks"])
+    check("re-running does not duplicate the calls",
+          read(d, ".git/hooks/pre-commit").count("git-hooks/pre-commit") == 1
+          and read(d, ".git/hooks/commit-msg").count("git-hooks/commit-msg") == 1, out[-300:])
+    shutil.rmtree(d, ignore_errors=True)
+
+    # husky owns the hooks: its file gets the line; `secrets` installs only pre-commit.
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-githooks-husky-"))
+    subprocess.call(["git", "init", "-q", d])
+    write(d, ".husky/pre-commit", "npm test\n")
+    code, out = run([d, "GHT", "-y", "--git-hooks", "secrets"])
+    husky = read(d, ".husky/pre-commit")
+    check("husky's pre-commit keeps npm test and gains the call",
+          husky.startswith("npm test\n") and "sh .ai-sdlc/git-hooks/pre-commit" in husky, husky)
+    check("secrets installs no commit-msg hook",
+          not os.path.exists(os.path.join(d, ".husky", "commit-msg"))
+          and not os.path.exists(os.path.join(d, ".ai-sdlc", "git-hooks", "commit-msg")))
+    shutil.rmtree(d, ignore_errors=True)
+
+    # pre-commit.com owns the hooks: nothing is edited, the entry is printed.
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-githooks-pc-"))
+    subprocess.call(["git", "init", "-q", d])
+    write(d, ".pre-commit-config.yaml", "repos: []\n")
+    code, out = run([d, "GHT", "-y", "--git-hooks"])
+    check("pre-commit.com config is left alone and the entry is printed",
+          read(d, ".pre-commit-config.yaml") == "repos: []\n" and "repo: local" in out
+          and "stages: [commit-msg]" in out, out[-600:])
+    check("no git hook file was written behind pre-commit.com",
+          not os.path.exists(os.path.join(d, ".git", "hooks", "commit-msg")))
+    shutil.rmtree(d, ignore_errors=True)
+
+    # Dry run writes nothing.
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-githooks-dry-"))
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "GHT", "-y", "--git-hooks", "--dry-run"])
+    check("--dry-run announces and writes no git hook",
+          "would add" in out and not os.path.exists(os.path.join(d, ".git", "hooks", "commit-msg")), out[-300:])
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -826,6 +975,39 @@ def test_runtime():
           and code == 1, out)
     check("profile drift is reported by doctor", "profile.json commands" in out, out)
 
+    # Doctor: rows that have sat past the staleness window, and an In progress claim
+    # with no trace of activity. The dates for Blocked and Parked come from the row; the
+    # others from git, so the backlog is committed with an old date.
+    backlog = read(d, "docs/project/backlog.md")
+    backlog = backlog.replace(
+        "| --- | --- | --- | --- | --- | --- |\n\n_(No rows",
+        "| --- | --- | --- | --- | --- | --- |\n| RTX-11 | Old claim | 2 | qa | | In progress |\n\n_(No rows", 1)
+    backlog = backlog.replace(
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n\n## Parked",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n| RTX-12 | Stuck | 2 | qa | | Blocked | ops | 2020-01-01 |\n\n## Parked", 1)
+    backlog = backlog.replace(
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| RTX-13 | Waiting | 2 | qa | | Parked | lead | intake | 2020-02-01 |\n", 1)
+    backlog = backlog.replace(
+        "| ID | Task | Tier | Owner role | Depends on | Status |\n| --- | --- | --- | --- | --- | --- |\n\n## Blocked",
+        "| ID | Task | Tier | Owner role | Depends on | Status |\n| --- | --- | --- | --- | --- | --- |\n| RTX-14 | Never picked | 2 | qa | | Ready |\n\n## Blocked", 1)
+    write(d, "docs/project/backlog.md", backlog)
+    old_git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    old_env = dict(os.environ, GIT_AUTHOR_DATE="2020-03-01T00:00:00", GIT_COMMITTER_DATE="2020-03-01T00:00:00")
+    subprocess.call(old_git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    subprocess.call(old_git + ["commit", "-qm", "RTX-11 start"], cwd=d, env=old_env, stdout=subprocess.DEVNULL)
+    code, out = sdlc("doctor")
+    check("an In progress item nobody has touched is a zombie", "RTX-11" in out and "nothing has named it" in out, out)
+    check("a Blocked row past its Since date is reported", "RTX-12" in out and "Blocked for" in out, out)
+    check("a Parked decision past the window is reported", "RTX-13" in out and "Parked for" in out, out)
+    check("a Ready row nobody picked up is reported", "RTX-14" in out and "Ready for" in out, out)
+    check("backlog age is a warning, not a failure", all(
+        line.startswith("warn") for line in out.splitlines() if "backlog       " in line), out)
+    write(d, "docs/project/backlog.md", backlog.replace("| RTX-11 | Old claim | 2 | qa | | In progress |\n", "")
+          .replace("| RTX-12 | Stuck | 2 | qa | | Blocked | ops | 2020-01-01 |\n", "")
+          .replace("| RTX-13 | Waiting | 2 | qa | | Parked | lead | intake | 2020-02-01 |\n", "")
+          .replace("| RTX-14 | Never picked | 2 | qa | | Ready |\n", ""))
+
     # plan-check: the plan's file list against the branch's diff.
     git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
     subprocess.call(git + ["add", "-A"], cwd=d)
@@ -899,8 +1081,23 @@ def test_view():
     write(d, "docs/project/plans/VWX-2.md", "# Plan — VWX-2\n\n## Approach\n\nSee VWX-1.\n")
     write(d, "docs/project/reviews/VWX-1-ship.md", "# Review\n\nPass.\n")
     git = ["git", "-c", "user.email=t@t", "-c", "user.name=tester"]
+    # An earlier day where VWX-1 was still Ready, so the flow chart has two points.
+    write(d, "docs/project/backlog.md", backlog.replace(
+        "| VWX-1 | Sign-in | 1 | security | | Done | 2026-01-02 |", "| VWX-1 | Sign-in | 1 | security | | Ready |"))
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    subprocess.call(git + ["commit", "-qm", "VWX-1 planned"], cwd=d, stdout=subprocess.DEVNULL,
+                    env=dict(os.environ, GIT_AUTHOR_DATE="2025-12-20T00:00:00", GIT_COMMITTER_DATE="2025-12-20T00:00:00"))
+    write(d, "docs/project/backlog.md", backlog)
     subprocess.call(git + ["add", "-A"], cwd=d)
     subprocess.call(git + ["commit", "-qm", "VWX-1 initial setup"], cwd=d)
+    # Two verify runs, as sdlc.py verify would leave them.
+    for folder, lint in (("20260101T000000Z", "Verified: fail"), ("20260102T000000Z", "Verified: pass")):
+        write(d, ".ai-sdlc/evidence/%s/summary.json" % folder, json.dumps({
+            "generated": folder[:4] + "-" + folder[4:6] + "-" + folder[6:8] + "T00:00:00Z", "git_head": "abc",
+            "dirty": folder.startswith("20260101"),
+            "stages": [{"stage": "lint", "result": lint, "exit_code": 0, "seconds": 1.5},
+                       {"stage": "unit", "result": "Verified: pass", "exit_code": 0, "seconds": 2.0},
+                       {"stage": "perf", "result": "Absent (declared)"}]}))
     script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
     p = subprocess.Popen([sys.executable, script, "view", "--json"], cwd=d,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -915,8 +1112,22 @@ def test_view():
           any(c.get("author") == "tester" and "VWX-1" in c.get("items", []) for c in model["git"].get("commits", [])),
           str(model["git"].get("commits")))
     check("git traceability rate computed",
-          model["git"].get("stats", {}).get("total") == 1 and model["git"].get("stats", {}).get("linked") == 1
+          model["git"].get("stats", {}).get("total") == 2 and model["git"].get("stats", {}).get("linked") == 2
           and model["git"].get("stats", {}).get("rate") == 100.0, str(model["git"].get("stats")))
+    flow = model.get("flow", {})
+    # The second commit is today, so it folds into the working-tree point: two points.
+    check("flow has a point per committed day, today folded into the working tree",
+          len(flow.get("dates", [])) == 2 and flow["dates"][0] == "2025-12-20", str(flow)[:300])
+    check("flow counts come from each day's backlog snapshot",
+          flow.get("series", {}).get("Done") == [0, 1] and flow["series"].get("Next") == [1, 0], str(flow)[:300])
+    evidence = model.get("evidence", [])
+    check("evidence runs are carried oldest first, reduced to stage results",
+          [r["folder"] for r in evidence] == ["20260101T000000Z", "20260102T000000Z"]
+          and evidence[0]["dirty"] is True and evidence[0]["stages"][0]["result"] == "Verified: fail"
+          and "exit_code" not in evidence[0]["stages"][0], str(evidence)[:300])
+    check("the pass rate still comes out of the same runs",
+          any(m["name"] == "Verify pass rate" and m["value"].startswith("1 of 2") for m in model.get("metrics", [])),
+          str(model.get("metrics"))[:300])
     check("backlog rows land in their board columns",
           items.get("VWX-2", {}).get("column") == "Now" and items.get("VWX-4", {}).get("column") == "Parked"
           and items.get("VWX-1", {}).get("column") == "Done", out[:400])
@@ -944,6 +1155,7 @@ def test_view():
     check("the page is written with the model inside", "VWX-2" in page and "/*NUHUT_MODEL*/" not in page)
     check("record text cannot close the script tag", "<script>x</script>" not in page, page[-200:])
     check("git view tab present in page", 'data-r="git"' in page and "viewGit" in page)
+    check("the flow chart and verify grid are in the page", "drawFlowChart" in page and "drawVerifyGrid" in page)
     svg_map = read(d, ".ai-sdlc/view/map.svg")
     check("formatted SVG map is written", "<svg" in svg_map and "</svg>" in svg_map and "viewBox" in svg_map)
     check("the page is git-ignored", read(d, ".ai-sdlc/view/.gitignore").strip() == "*")
@@ -1296,6 +1508,8 @@ def test_scaffolding():
     check("GitHub CI uses detected commands",
           "actions/checkout@v4" in workflow and "npm run build" in workflow and
           "workflow_dispatch" in workflow and "  pull_request:" not in workflow)
+    check("GitHub CI runs the doctor strictly before the quality commands",
+          workflow.index("sdlc.py doctor --strict") < workflow.index("npm run build"), workflow)
     code, out = run([d, "APP", "-y", "--scaffold-ci", "gitlab"])
     check("GitLab CI adapter generated",
           code == 0 and "npm run build" in read(d, ".gitlab-ci.yml") and
@@ -1850,6 +2064,7 @@ def main():
     for test in (test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
+                 test_git_hooks,
                  test_runtime, test_view, test_kit_value_benchmark,
                  test_dashboard,
                  test_domain_detection,

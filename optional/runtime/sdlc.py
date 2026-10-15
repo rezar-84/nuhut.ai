@@ -493,6 +493,84 @@ def check_traceability(project, out):
                 "worklog" % item)
 
 
+def backlog_history(project):
+    """What git remembers about each work item: the date a line naming it was last added
+    to the backlog, the worklog or a commit subject, and the date each (item, status) row
+    was last written to the backlog. Uncommitted edits are not history yet, so a row
+    that has never been committed has no dates here."""
+    prefix = project.prefix
+    legacy = getattr(project, "legacy_prefixes", None)
+    docs = os.path.join(project.docs, "project")
+    touched, since = {}, {}
+
+    def touch(item, date):
+        if item not in touched:
+            touched[item] = date
+
+    # git log is newest first, so the first sighting is the latest one.
+    date = None
+    for line in project.git("log", "-p", "--no-color", "--format=%x01%cs", "--",
+                            os.path.join(docs, "backlog.md"),
+                            os.path.join(docs, "worklog.md")).splitlines():
+        if line.startswith("\x01"):
+            date = line[1:]
+        elif date and line.startswith("+") and not line.startswith("+++"):
+            cells = split_row(line[1:])
+            if cells and len(cells) >= 6 and is_valid_work_item_id(cells[0], prefix, legacy):
+                since.setdefault((cells[0], cells[5].strip("`* ")), date)
+            for item in ids_in(line, prefix):
+                touch(item, date)
+    for line in project.git("log", "-2000", "--format=%cs%x01%s").splitlines():
+        date, _, subject = line.partition("\x01")
+        for item in ids_in(subject, prefix):
+            touch(item, date)
+    return touched, since
+
+
+def check_backlog_age(project, out, today):
+    """A backlog that is never pruned stops being read. In progress or In review with no
+    trace of activity for longer than the staleness window is a zombie claim, usually a
+    session that died. Blocked, Parked and Ready rows older than the window need a
+    decision, not another day in the queue. The window is the charter's staleness
+    threshold, the same one the records use."""
+    if not project.prefix:
+        return
+    cell = labelled(project.charter, "Staleness threshold") or ""
+    found = re.search(r"[0-9]+", UNFILLED.sub("", cell))
+    window = int(found.group(0)) if found else DEFAULT_STALENESS_DAYS
+    rows = backlog_rows(project.records("backlog.md"), project.prefix,
+                        getattr(project, "legacy_prefixes", None))
+    if not rows:
+        return
+    touched, since = backlog_history(project)
+    where = os.path.join(project.docs, "project", "backlog.md")
+    for item, status, cells in rows:
+        if status in ("In progress", "In review"):
+            days = age_days(touched.get(item, ""), today)
+            if days is not None and days > window:
+                out.add("warn", "backlog", "%s %s" % (where, item),
+                        "%s, but nothing has named it for %d days (backlog, worklog or "
+                        "commit subject); the window is %d. Finish it, park it with a "
+                        "named human, or return it to Ready" % (status, days, window))
+            continue
+        if status in ("Blocked", "Parked", "Ready"):
+            column = {"Blocked": 7, "Parked": 8}.get(status)
+            recorded = cells[column] if column and len(cells) > column else ""
+            days = age_days(UNFILLED.sub("", recorded).strip(), today)
+            if days is None:
+                days = age_days(since.get((item, status), ""), today)
+            if days is not None and days > window:
+                advice = {
+                    "Blocked": "name who can unblock it and ask, or defer or drop it",
+                    "Parked": "the decision has waited longer than the window; "
+                              "chase the named human or drop the item",
+                    "Ready": "still the next priority? If not, defer it with a "
+                             "condition or drop it with a reason",
+                }[status]
+                out.add("warn", "backlog", "%s %s" % (where, item),
+                        "%s for %d days; the window is %d: %s" % (status, days, window, advice))
+
+
 def check_known_mistakes(project, out):
     """The lessons list in AGENTS.md section 9 must stay short enough to be read."""
     text = read(project.path("AGENTS.md"))
@@ -721,6 +799,7 @@ def doctor(project, today=None):
     check_staleness(project, out, today)
     check_stack_versions(project, out, today)
     check_traceability(project, out)
+    check_backlog_age(project, out, today)
     check_epics(project, out)
     check_dependencies(project, out)
     check_worklog_size(project, out)

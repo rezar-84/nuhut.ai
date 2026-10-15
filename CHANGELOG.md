@@ -4,6 +4,51 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **The tool-call hooks under Gemini CLI and Cursor.** `optional/hooks/adapter.sh`
+  runs any kit hook behind another harness, translating the payload and the verdict.
+  `--hooks` with `--harness gemini` merges all six rules into `.gemini/settings.json`
+  (`BeforeTool`, matchers on `run_shell_command`, `write_file|replace`); with
+  `--harness cursor` the three shell rules into `.cursor/hooks.json`
+  (`beforeShellExecution`). Idempotent, existing entries kept, kit-managed.
+
+- **Git hooks for every harness (`--git-hooks [all|secrets]`).** The two commit-time
+  rules, work-item ID and secret guard, as `commit-msg` and `pre-commit` hooks under
+  `.ai-sdlc/git-hooks/`, run by git for every agent and every human. Opt-in and never
+  implied. The project's existing `.git/hooks` file, husky file or `core.hooksPath`
+  directory gets one appended call, never a replacement; with pre-commit.com or lefthook
+  the entry to add is printed. Kit-managed, so `--upgrade` keeps them current. The
+  scripts share `lib.sh` and need no `jq`.
+- **Skills in the cross-tool location.** Naming any tool other than claude in
+  `--harness` (including Codex and the other `AGENTS.md`-native tools) also installs the
+  chosen skills under `.agents/skills/`, the Agent Skills convention, beside the Claude
+  Code copy. Kit-managed and upgraded like the Claude copy. The README no longer claims
+  only Claude Code loads skills.
+- **CI scaffolds run the doctor first.** `--scaffold-ci` for GitHub and GitLab puts
+  `sdlc.py doctor --strict` before the quality commands: the enforcement layer every
+  harness shares.
+
+- **Two charts in the viewer, inline SVG, no libraries.** The Board opens with a
+  cumulative-flow chart: backlog column counts at each committed day the backlog
+  changed (a snapshot of that commit's `backlog.md`, so a moved row counts once) plus
+  today's working tree, on a time-proportional axis. The home page shows a verify grid:
+  one column per run under `.ai-sdlc/evidence/`, one row per stage that ever ran, pass,
+  fail, timed-out and not-run as colours, a dot for runs on a dirty tree. The model
+  gains `flow` and `evidence`; the pass-rate metric now reads `evidence` instead of the
+  files. Both re-theme with the `t` key. A lowercase `--c-blocked` variable that never
+  resolved is corrected.
+
+- **Backlog ageing in `sdlc.py doctor`.** A backlog nobody prunes stops being read, so
+  the doctor now ages rows against the charter's staleness window. An `In progress` or
+  `In review` row that nothing has named since the window passed (backlog or worklog
+  line, or a commit subject, from git history) is reported as a zombie claim. A
+  `Blocked` or `Parked` row is aged from its own Since cell, a `Ready` row from the
+  commit that last wrote it; past the window each is reported with the decision it
+  needs. Warnings, never failures, and silent for rows that have not been committed yet.
+- **Discovered work enters `Parked`, not `Ready`.** `00-operating-model.md` gains "Work
+  you discovered": an item an agent files unasked during a task waits on the backlog's
+  human for the intake decision (accept, defer, drop) and is not claimable until a human
+  moves it to `Ready`. `07-traceability.md` and `CARD.md` say the same. No new status.
+
 ## 3.5.0 — 2026-10-14
 
 - **Engineering-practice controls (optional, stack-neutral):**

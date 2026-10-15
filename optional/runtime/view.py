@@ -430,7 +430,12 @@ def build(rt, project):
                 model["items"][dep].setdefault("dependents", []).append(it["id"])
         it["steps"] = lifecycle(it, model)
 
+    model["evidence"] = evidence_runs(project)
     model["metrics"] = metrics(rt, project, model)
+    try:
+        model["flow"] = flow(rt, project, model)
+    except Exception as exc:  # a chart is never a reason for the view not to open
+        model["flow"] = {"dates": [], "series": {}, "error": str(exc)}
 
     # The mechanical doctor findings are the home page's alerts.
     try:
@@ -481,6 +486,80 @@ def _median(values):
     return values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
 
 
+MAX_FLOW_POINTS = 180
+MAX_EVIDENCE_RUNS = 30
+
+
+def flow(rt, project, model, today=None):
+    """Backlog column counts at each committed day the backlog changed, oldest first,
+    plus today's working tree. Each point is a snapshot of that commit's backlog, so a
+    row that moved sections counts once, in its new column. Dropped is left out: it is a
+    record, not flow."""
+    today = today or datetime.date.today()
+    names = [name for name, _ in COLUMNS if name != "Dropped"]
+    backlog_rel = os.path.join(project.docs, "project", "backlog.md")
+    legacy = set(getattr(project, "legacy_prefixes", []) or [])
+    picked, seen = [], set()
+    for line in project.git("log", "--format=%H %cs", "--", backlog_rel).splitlines():
+        sha, _, date = line.partition(" ")
+        if date and date not in seen:  # newest first: the first sighting is the last of its day
+            seen.add(date)
+            picked.append((date, sha))
+        if len(picked) >= MAX_FLOW_POINTS:
+            break
+    picked.reverse()
+    dates, series = [], dict((name, []) for name in names)
+    for date, sha in picked:
+        text = project.git("show", "%s:%s" % (sha, backlog_rel.replace(os.sep, "/")))
+        if not text:
+            continue
+        counts = dict((name, 0) for name in names)
+        for _, status, _ in rt.backlog_rows(text, project.prefix, legacy or None):
+            col = column_of(status)
+            if col in counts:
+                counts[col] += 1
+        dates.append(date)
+        for name in names:
+            series[name].append(counts[name])
+    counts = dict((name, 0) for name in names)
+    for it in model["items"].values():
+        if it.get("column") in counts:
+            counts[it["column"]] += 1
+    label = today.isoformat()
+    if dates and dates[-1] == label:
+        dates.pop()
+        for name in names:
+            series[name].pop()
+    dates.append(label)
+    for name in names:
+        series[name].append(counts[name])
+    return {"dates": dates, "series": series}
+
+
+def evidence_runs(project):
+    """The last verify runs under .ai-sdlc/evidence/, oldest first, reduced to what a
+    trend needs: when, on what commit, and each stage's result."""
+    runs = []
+    folder = project.path(os.path.join(".ai-sdlc", "evidence"))
+    if not os.path.isdir(folder):
+        return runs
+    for name in sorted(os.listdir(folder))[-MAX_EVIDENCE_RUNS:]:
+        try:
+            with open(os.path.join(folder, name, "summary.json"), encoding="utf-8") as h:
+                data = json.load(h)
+        except (IOError, OSError, ValueError):
+            continue
+        runs.append({
+            "folder": name,
+            "generated": data.get("generated", ""),
+            "git_head": data.get("git_head", ""),
+            "dirty": bool(data.get("dirty")),
+            "stages": [{"stage": e.get("stage", ""), "result": e.get("result", ""),
+                        "seconds": e.get("seconds")} for e in data.get("stages", [])],
+        })
+    return runs
+
+
 def metrics(rt, project, model, today=None):
     """Process measures computed only from what the records and git already hold. Each is
     labelled leading (moves early) or lagging (confirms later), and says what it is from."""
@@ -509,15 +588,9 @@ def metrics(rt, project, model, today=None):
         len(waiting), "%d days" % max(waits) if waits else "unknown"),
         "Blocked and Parked rows, their Since cell")
 
-    runs = []
-    folder = project.path(os.path.join(".ai-sdlc", "evidence"))
-    if os.path.isdir(folder):
-        for name in sorted(os.listdir(folder)):
-            try:
-                with open(os.path.join(folder, name, "summary.json"), encoding="utf-8") as h:
-                    runs.append(json.load(h))
-            except (IOError, OSError, ValueError):
-                continue
+    runs = model.get("evidence")
+    if runs is None:
+        runs = model["evidence"] = evidence_runs(project)
     ran = [r for r in runs if any(e["result"].startswith("Verified") for e in r["stages"])]
     passed = [r for r in ran if not any(e["result"].startswith("Verified: fail")
                                         for e in r["stages"])]

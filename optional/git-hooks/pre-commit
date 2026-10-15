@@ -1,0 +1,30 @@
+#!/bin/sh
+# Nuhut git hook: refuse a commit whose staged changes add a credential.
+# Harness-independent: git runs it for every agent and every human. Same shapes as
+# .claude/hooks/secret-guard.sh (both use lib.sh), so a hit is almost never a false
+# alarm. A line containing EXAMPLE passes, for deliberate fixtures.
+#
+# Installed by `install.sh --git-hooks`; called from the project's own hook or husky
+# file, never replacing it. Bypass is `git commit --no-verify`, deliberately visible.
+set -u
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/lib.sh"
+
+cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" || exit 0
+
+# The index is exactly what the commit will contain, before and after the first commit.
+diff=$(git diff --cached --unified=0 2>/dev/null)
+[ -n "$diff" ] || exit 0
+added=$(printf '%s\n' "$diff" | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -v 'EXAMPLE')
+[ -n "$added" ] || exit 0
+
+found=$(hook_secret_kinds "$added")
+[ -n "$found" ] || exit 0
+
+cat >&2 <<MSG
+nuhut: commit refused. The staged changes add what looks like a credential ($found).
+Secrets never enter the repository: move it to the environment or the secret store the
+charter names, unstage it, and rotate it if it was ever pushed. A deliberate fake in a
+test fixture passes if its line contains EXAMPLE. (--no-verify bypasses this hook.)
+MSG
+exit 1

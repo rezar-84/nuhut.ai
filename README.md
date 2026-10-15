@@ -221,7 +221,7 @@ in this mode — without a terminal there is nobody to ask. Other flags: `--docs
 to install the docs under a different directory, `--harness <list>`, `--profile
 <full|compact>`, `--effort-mode <lean|normal|beast>`, `--dev-method <item|epic>`,
 `--decision-style <ask|guide|autopilot>`, `--acquisition-profile <standard|advanced>`,
-`--hooks`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
+`--hooks`, `--git-hooks [all|secrets]`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
 `--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`,
 and `--upgrade`.
 
@@ -274,9 +274,21 @@ exists, never overwriting, and never copying the contract itself.
 
 | Tool | Wiring |
 | --- | --- |
-| Codex, Jules, Zed, Factory, opencode, Antigravity | Nothing to do — they read `AGENTS.md` |
+| Codex, Jules, Zed, Factory, opencode, Antigravity | Nothing to do — they read `AGENTS.md`. Name them in `--harness` anyway to get the shared skills below. |
 | Claude Code | `CLAUDE.md`, plus slash commands, skills and optional hooks |
 | Gemini CLI · Amp · Copilot · Cursor · Windsurf · Cline · Roo Code · Aider | `--harness gemini,amp,copilot,cursor,windsurf,cline,roo,aider` (or `all`) |
+
+What each layer of the kit needs from the tool:
+
+| Layer | Claude Code | Any tool that reads `AGENTS.md` |
+| --- | --- | --- |
+| Contract, process, roles, templates, card | yes | yes |
+| Runtime (`doctor`, `verify`, `plan-check`, `view`, `metrics`) | yes | yes — it is a shell command |
+| Skills | `.claude/skills/` | `.agents/skills/`, the cross-client location of the [Agent Skills](https://agentskills.io) standard; installed when `--harness` names any tool other than claude |
+| Slash commands | `.claude/commands/` | no equivalent; the skills cover the same ground |
+| Tool-call hooks (`--hooks`) | yes | Gemini CLI: all six rules; Cursor: the three shell rules; both through `.claude/hooks/adapter.sh`. Other tools: no |
+| Git hooks (`--git-hooks`) | yes | yes — git runs them for every agent and every human |
+| CI (`--scaffold-ci`) | yes | yes — the doctor runs strictly before the quality commands |
 
 ```sh
 ./install.sh /path/to/project ACME -y --harness claude,cursor,copilot
@@ -286,8 +298,8 @@ exists, never overwriting, and never copying the contract itself.
 the repository looks wrong. The installer warns when it wires nothing, and
 `/sdlc-doctor` rates that the most severe finding it can report.
 
-Only Claude Code has model-invoked skills, so on every other tool the routing lives in
-the last table of `docs/CARD.md`: *when X is true, read Y*.
+Skills are the same `SKILL.md` files on every tool. For a tool that does not load
+skills, the routing lives in the last table of `docs/CARD.md`: *when X is true, read Y*.
 
 ## Reading cost, and small models
 
@@ -430,10 +442,10 @@ python3 .ai-sdlc/bin/sdlc.py metrics           # process measures, leading and l
 
 | Command | Key Flags | Description |
 | --- | --- | --- |
-| **`doctor`** | `--strict` | Audits project records, active roles, check commands, staleness windows, and validates the dependency graph (flags self-dependencies, non-existent backlog IDs, and circular dependency loops). |
+| **`doctor`** | `--strict` | Audits project records, active roles, check commands, staleness windows, and validates the dependency graph (flags self-dependencies, non-existent backlog IDs, and circular dependency loops). Ages the backlog against the same window: an `In progress` or `In review` row nothing has named since the window passed is a zombie claim; a `Ready`, `Blocked` or `Parked` row older than the window needs a decision. |
 | **`verify`** | `--parallel` (`-j`), `--stage`, `--timeout` | Runs the charter's check pipeline in order, writing immutable test evidence (`summary.md`, `summary.json`, and stage `.log` files) to `.ai-sdlc/evidence/<timestamp>/`. `--parallel` runs independent steps concurrently using a worker pool. |
 | **`plan-check <ID>`** | | Compares branch changes against the approved plan (`docs/project/plans/<ID>.md` or `.sdlc/specs/<ID>/spec.md`). Highlights unapproved file modifications and planned files left untouched with ANSI terminal colors. |
-| **`view`** | `--serve`, `--port`, `--interval`, `--export-html <file>`, `--svg`, `--no-open` | Generates the rich interactive developer dashboard. `--serve` runs a reactive local server on `127.0.0.1`. `--export-html` bundles an offline single-file report for CI/CD artifacts or PR previews. |
+| **`view`** | `--serve`, `--port`, `--interval`, `--export-html <file>`, `--svg`, `--no-open` | Generates the rich interactive developer dashboard. The Board opens with a cumulative-flow chart of backlog columns over time, rebuilt from the backlog's git history; the home page shows a pass/fail grid of the last verify runs per stage. `--serve` runs a reactive local server on `127.0.0.1`. `--export-html` bundles an offline single-file report for CI/CD artifacts or PR previews. |
 | **`metrics`** | `--json` | Calculates quantitative project health metrics: work-in-progress (WIP), verification pass rate, cycle time, lead time, time waiting on humans, and lifecycle record gaps. |
 
 `verify` exists so a "Verified" claim can cite a file the script wrote instead of the
@@ -517,7 +529,20 @@ The opt-in `--hooks` go one step further for Claude Code. They deny the tool cal
 - a command, such as a production deploy, that `.ai-sdlc/gates.txt` says a human must pass
 
 A skill makes a violation rare, and a hook makes it close to impossible. See
-`optional/hooks/README.md` for what each hook can and cannot see.
+`optional/hooks/README.md` for what each hook can and cannot see. With `--harness gemini`
+the same six rules are registered in `.gemini/settings.json`, and with `--harness cursor`
+the three shell rules in `.cursor/hooks.json`; `adapter.sh` translates the payload and
+the verdict, so each rule still lives in one script.
+
+The opt-in `--git-hooks` cover the two commit-time rules for **every** agent and every
+human, because git runs them, not the harness: a `pre-commit` that refuses staged
+credentials and a `commit-msg` that refuses a message with no work item ID
+(`--git-hooks secrets` installs only the first). The scripts live in
+`.ai-sdlc/git-hooks/`; the project's existing hook, husky file or `core.hooksPath`
+directory gets one line appended and is otherwise left alone, and with pre-commit.com
+or lefthook the entry to add is printed instead. `git commit --no-verify` bypasses them,
+deliberately and visibly. The enforcement nobody can skip is CI: `--scaffold-ci` puts
+`sdlc.py doctor --strict` before the quality commands.
 
 ## Installing into a managed platform (Lovable, Replit, Bolt, …)
 
@@ -578,6 +603,7 @@ template/
 .claude-plugin/              plugin + marketplace manifests (commands only, no skills)
 optional/
   hooks/                     opt-in Claude Code enforcement (--hooks)
+  git-hooks/                 opt-in git hooks, every harness (--git-hooks)
   claude-commands/           Claude Code slash commands that drive the loop
   skills/                    model-invoked skills, installed per project need
   platforms/                 deployment checklists, installed per platform used (--deploy)

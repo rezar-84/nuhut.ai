@@ -316,6 +316,19 @@ USAGE = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      .ai-sdlc/gates.txt. Merged into .claude/settings.json without
                      touching anything already there. Needs jq at runtime; without it
                      the hooks allow the call and say so. Never implied by another flag.
+                     With --harness gemini the same six rules are merged into
+                     .gemini/settings.json, and with --harness cursor the three
+                     shell rules into .cursor/hooks.json, through
+                     .claude/hooks/adapter.sh.
+  --git-hooks [all|secrets]
+                     install the opt-in git hooks, which every agent and every human
+                     inherit from git itself: a pre-commit that refuses staged
+                     credentials and a commit-msg that refuses a message with no work
+                     item ID (`secrets` installs only the first). Scripts live in
+                     .ai-sdlc/git-hooks/; the project's existing hook, husky file or
+                     core.hooksPath directory gets a one-line call appended, never
+                     replaced. With pre-commit.com or lefthook the entry to add is
+                     printed instead. Never implied by another flag.
   --profile <name>   full (default) or compact. compact installs the operating card,
                      roles, templates and project records but omits the numbered
                      process/ documents: the same rules from one source, about 8k of
@@ -347,7 +360,10 @@ USAGE = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --harness <list>   comma-separated agent tools to wire up (default: claude). One of
                      claude, gemini, amp, copilot, cursor, windsurf, cline, roo, aider,
                      or "all". Each gets a pointer file naming AGENTS.md; an instruction
-                     file that already exists is appended to, never overwritten. Codex,
+                     file that already exists is appended to, never overwritten. Naming
+                     any tool other than claude also installs the chosen skills under
+                     .agents/skills/, the cross-tool location of the Agent Skills
+                     standard, beside the Claude Code copy. Codex,
                      Jules, Zed, Factory, opencode and Antigravity read AGENTS.md
                      directly and need nothing.
   --adopt            with --upgrade: take over kit files an older version left
@@ -394,6 +410,8 @@ class Options(object):
         self.decision_given = False
         self.acquisition_given = False
         self.hooks = False
+        self.git_hooks = ""        # "", "all" or "secrets"
+        self.native_harnesses = []
         self.lang = "en"
 
 
@@ -438,6 +456,11 @@ def parse_args(argv):
             i += 1
         elif arg == "--hooks":
             o.hooks = True
+        elif arg == "--git-hooks":
+            o.git_hooks = "all"
+            if i + 1 < len(argv) and argv[i + 1] in ("all", "secrets"):
+                o.git_hooks = argv[i + 1]
+                i += 1
         elif arg == "--profile":
             if i + 1 >= len(argv) or argv[i + 1] not in ("full", "compact"):
                 sys.stderr.write("--profile requires full or compact\n")
@@ -497,6 +520,7 @@ def parse_args(argv):
                                  % (", ".join(unknown), ", ".join(sorted(HARNESS_ALIASES))))
                 usage()
             o.harnesses = [x for x in names if x in HARNESS_ALIASES]
+            o.native_harnesses = native
             i += 1
         elif arg == "--create":
             o.create = True
@@ -2599,20 +2623,31 @@ def managed_source_texts(target, docs, ctx, profile="full"):
             if (commands_root / src.name).is_file():
                 planned[(Path(".claude") / "commands" / src.name).as_posix()] = substitute(
                     src.read_text(encoding="utf-8"), ctx)
-    skills_root = Path(target) / ".claude" / "skills"
-    if skills_root.is_dir():
+    for skills_rel in (Path(".claude") / "skills", Path(".agents") / "skills"):
+        skills_root = Path(target) / skills_rel
+        if not skills_root.is_dir():
+            continue
         for base in sorted((SRC / "optional" / "skills").iterdir()):
             if not base.is_dir() or not (skills_root / base.name).is_dir():
                 continue
             for src in sorted(base.rglob("*")):
                 if src.is_file():
-                    rel = Path(".claude") / "skills" / base.name / src.relative_to(base)
+                    rel = skills_rel / base.name / src.relative_to(base)
                     planned[rel.as_posix()] = substitute(src.read_text(encoding="utf-8"), ctx)
+    git_hooks_root = Path(target) / ".ai-sdlc" / "git-hooks"
+    if git_hooks_root.is_dir():
+        for name in ("pre-commit", "commit-msg"):
+            if (git_hooks_root / name).is_file():
+                planned[".ai-sdlc/git-hooks/" + name] = substitute(
+                    (SRC / "optional" / "git-hooks" / name).read_text(encoding="utf-8"), ctx)
+        if (git_hooks_root / "lib.sh").is_file():
+            planned[".ai-sdlc/git-hooks/lib.sh"] = substitute(
+                (SRC / "optional" / "hooks" / "lib.sh").read_text(encoding="utf-8"), ctx)
     hooks_root = Path(target) / ".claude" / "hooks"
     if hooks_root.is_dir() and any(p.suffix == ".sh" for p in hooks_root.iterdir()):
         # The hooks this project chose, plus the library every current hook sources.
         for src in sorted((SRC / "optional" / "hooks").iterdir()):
-            if src.is_file() and ((hooks_root / src.name).is_file() or src.name == "lib.sh"):
+            if src.is_file() and ((hooks_root / src.name).is_file() or src.name in ("lib.sh", "adapter.sh")):
                 planned[(Path(".claude") / "hooks" / src.name).as_posix()] = substitute(
                     src.read_text(encoding="utf-8"), ctx)
     for name in RUNTIME_FILES:
@@ -2691,7 +2726,8 @@ def is_managed_rel(rel, docs):
         return False
     prefixes = ((str(docs), "process"), (str(docs), "roles"), (str(docs), "templates"),
                 (str(docs), "platforms"), (".claude", "skills"), (".claude", "commands"),
-                (".claude", "hooks"), (".ai-sdlc", "bin"))
+                (".claude", "hooks"), (".ai-sdlc", "bin"), (".ai-sdlc", "git-hooks"),
+                (".agents", "skills"))
     return path.parts in ((str(docs), "README.md"), (str(docs), "CARD.md"),
                           (str(docs), "dashboard.html")) or any(
         path.parts[:2] == prefix for prefix in prefixes)
@@ -2875,6 +2911,10 @@ class Installer(object):
             chosen = ["claude"] if w.o.harnesses is None else w.o.harnesses
         for name in chosen:
             self.harnesses.update(HARNESS_ALIASES.get(name, ()))
+        # Any tool besides Claude Code reads skills from .agents/skills/ (the Agent
+        # Skills cross-client convention), so the chosen skills go there too.
+        self.shared_skills = bool([n for n in chosen if n != "claude"]
+                                  or getattr(w.o, "native_harnesses", []))
         self.ctx = {
             "PROJECT_NAME": plain_text(w.a.get("name") or
                                        (w.target.name if w.target else "")),
@@ -2988,8 +3028,9 @@ class Installer(object):
                           for path in self.platform_sources())
         for name in w.chosen_skills():
             base = SRC / "optional" / "skills" / name
-            candidates.extend(self.target / ".claude" / "skills" / name / path.relative_to(base)
-                              for path in base.rglob("*") if path.is_file())
+            for root in self.skill_roots():
+                candidates.extend(self.target / root / name / path.relative_to(base)
+                                  for path in base.rglob("*") if path.is_file())
         if self.o.scaffold_tests:
             candidates.extend((self.target / self.docs / "project" / "test-plan.md",
                                self.target / ".ai-sdlc" / "testing-profile.json"))
@@ -3021,8 +3062,9 @@ class Installer(object):
             base = SRC / "optional" / "skills" / name
             for path in sorted(base.rglob("*")):
                 if path.is_file():
-                    self.install_file(path, self.target / ".claude" / "skills" / name
-                                      / path.relative_to(base))
+                    for root in self.skill_roots():
+                        self.install_file(path, self.target / root / name
+                                          / path.relative_to(base))
         self.wire_harnesses()
         self.note_profile()
         return skills
@@ -3090,7 +3132,7 @@ class Installer(object):
         dest_dir = ensure_inside(self.target, self.target / ".claude" / "hooks")
         for name, _, _, _, _ in self.HOOK_SPECS:
             self.install_file(SRC / "optional" / "hooks" / name, dest_dir / name)
-        for name in ("lib.sh", "README.md"):
+        for name in ("lib.sh", "adapter.sh", "README.md"):
             self.install_file(SRC / "optional" / "hooks" / name, dest_dir / name)
         for name, text in self.HOOK_LISTS:
             self.install_text(ensure_inside(self.target, self.target / ".ai-sdlc" / name),
@@ -3142,6 +3184,88 @@ class Installer(object):
         print("  %s .claude/settings.json (%d hook%s)"
               % ("merge         " if added else "unchanged     ", added,
                  "" if added == 1 else "s"))
+        self.install_harness_hooks()
+
+    # Which hooks each other harness can run, and the matcher it uses. Gemini CLI names
+    # its tools run_shell_command, write_file and replace, with the same argument names
+    # the hooks read. Cursor's beforeShellExecution carries the command only, so the
+    # file-write hooks have nothing to look at there and are not registered.
+    GEMINI_MATCHERS = {"Bash": "run_shell_command", "Write|Edit": "write_file|replace",
+                       "Write|Edit|MultiEdit": "write_file|replace",
+                       "Bash|Write|Edit": "run_shell_command|write_file|replace"}
+
+    def merge_json_hooks(self, rel, mutate):
+        """Load <rel> as JSON (or start empty), let mutate() add what is missing, write it
+        back. Anything already in the file stays: it is somebody's configuration."""
+        path = ensure_inside(self.target, self.target / rel)
+        if self.o.dry_run:
+            print("  would merge    %s (hooks)" % rel)
+            return
+        data = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except ValueError:
+                print("  skip           %s is not valid JSON -- hooks not merged. Fix it and re-run." % rel)
+                return
+            if not isinstance(data, dict):
+                print("  skip           %s is not an object -- hooks not merged." % rel)
+                return
+        added = mutate(data)
+        if added is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True) + "\n")
+        print("  %s %s (%d hook%s)" % ("merge         " if added else "unchanged     ",
+                                      rel, added, "" if added == 1 else "s"))
+
+    def install_harness_hooks(self):
+        """The same six rules under Gemini CLI and the three shell rules under Cursor,
+        through .claude/hooks/adapter.sh. Only for harnesses this install wired."""
+        if "GEMINI.md" in self.harnesses:
+            def gemini(data):
+                hooks = data.setdefault("hooks", {})
+                if not isinstance(hooks, dict):
+                    print("  skip           .gemini/settings.json has a non-object 'hooks' -- not merged.")
+                    return None
+                entries = hooks.setdefault("BeforeTool", [])
+                if not isinstance(entries, list):
+                    return None
+                added = 0
+                for name, _, matcher, _, status in self.HOOK_SPECS:
+                    command = 'sh "$GEMINI_PROJECT_DIR"/.claude/hooks/adapter.sh gemini %s' % name
+                    if any(isinstance(e, dict) and any(isinstance(h, dict) and h.get("command") == command
+                                                       for h in (e.get("hooks") or []))
+                           for e in entries):
+                        continue
+                    entries.append({"matcher": self.GEMINI_MATCHERS[matcher],
+                                    "hooks": [{"type": "command", "command": command,
+                                               "name": "ai-sdlc " + name[:-3],
+                                               "description": status}]})
+                    added += 1
+                return added
+            self.merge_json_hooks(".gemini/settings.json", gemini)
+        if ".cursor/rules/agents.mdc" in self.harnesses:
+            def cursor(data):
+                data.setdefault("version", 1)
+                hooks = data.setdefault("hooks", {})
+                if not isinstance(hooks, dict):
+                    print("  skip           .cursor/hooks.json has a non-object 'hooks' -- not merged.")
+                    return None
+                entries = hooks.setdefault("beforeShellExecution", [])
+                if not isinstance(entries, list):
+                    return None
+                added = 0
+                for name, _, matcher, _, _ in self.HOOK_SPECS:
+                    if "Bash" not in matcher:
+                        continue
+                    command = 'sh "$CURSOR_PROJECT_DIR"/.claude/hooks/adapter.sh cursor %s' % name
+                    if any(isinstance(e, dict) and e.get("command") == command for e in entries):
+                        continue
+                    entries.append({"command": command, "timeout": 15})
+                    added += 1
+                return added
+            self.merge_json_hooks(".cursor/hooks.json", cursor)
 
     def apply_git_ignores(self):
         want_gitignore = bool(self.w.a.get("gitignore_tools") if getattr(self.w, "interactive", False) else self.o.gitignore_tools)
@@ -3335,6 +3459,111 @@ class Installer(object):
 
     POINTER = ("Read and follow `AGENTS.md` in this directory. It is the operating "
                "contract for this repository and it takes precedence over habit.")
+
+    def skill_roots(self):
+        roots = [Path(".claude") / "skills"]
+        if getattr(self, "shared_skills", False):
+            roots.append(Path(".agents") / "skills")
+        return roots
+
+    GIT_HOOK_CALLS = (
+        ("pre-commit", "sh .ai-sdlc/git-hooks/pre-commit"),
+        ("commit-msg", 'sh .ai-sdlc/git-hooks/commit-msg "$1"'),
+    )
+
+    def install_git_hooks(self):
+        """Harness-independent guards git itself runs. The scripts are kit-managed under
+        .ai-sdlc/git-hooks/; the project's own hook mechanism gets one line that calls
+        them and is otherwise left alone, because that file is somebody's workflow."""
+        if not self.o.git_hooks:
+            return
+        names = ["pre-commit"] if self.o.git_hooks == "secrets" else ["pre-commit", "commit-msg"]
+        dest_dir = ensure_inside(self.target, self.target / ".ai-sdlc" / "git-hooks")
+        for name in names + ["lib.sh"]:
+            src = SRC / "optional" / ("hooks" if name == "lib.sh" else "git-hooks") / name
+            if self.install_file(src, dest_dir / name) and not self.o.dry_run and name != "lib.sh":
+                os.chmod(dest_dir / name, 0o755)
+        calls = [(n, c) for n, c in self.GIT_HOOK_CALLS if n in names]
+        root = self.target
+        if (root / ".pre-commit-config.yaml").exists() or (root / ".pre-commit-config.yml").exists():
+            print("  note           .pre-commit-config.yaml owns the git hooks. Add under `repos:`")
+            print("                   - repo: local")
+            print("                     hooks:")
+            for name, call in calls:
+                print("                       - id: nuhut-%s" % name)
+                print("                         name: nuhut %s guard" % name)
+                print("                         entry: %s" % call.replace(' "$1"', ""))
+                print("                         language: system")
+                print("                         pass_filenames: %s" % ("true" if name == "commit-msg" else "false"))
+                if name == "commit-msg":
+                    print("                         stages: [commit-msg]")
+            return
+        lefthook = [p for p in ("lefthook.yml", "lefthook.yaml", ".lefthook.yml") if (root / p).exists()]
+        if lefthook:
+            print("  note           %s owns the git hooks. Add:" % lefthook[0])
+            for name, call in calls:
+                print("                   %s:" % name)
+                print("                     commands:")
+                print("                       nuhut-%s:" % name)
+                print("                         run: %s" % call.replace('"$1"', "{1}"))
+            return
+        if (root / ".husky").is_dir():
+            self.chain_git_hooks(root / ".husky", calls, shebang=False)
+            return
+        hooks_path = ""
+        try:
+            hooks_path = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=str(root),
+                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                        universal_newlines=True).stdout.strip()
+        except OSError:
+            pass
+        if hooks_path:
+            hooks_dir = Path(hooks_path) if os.path.isabs(hooks_path) else root / hooks_path
+            try:
+                hooks_dir = ensure_inside(root, hooks_dir)
+            except Exception:
+                print("  note           core.hooksPath points outside the project (%s). Add to its"
+                      % hooks_path)
+                for name, call in calls:
+                    print("                 %s: %s" % (name, call))
+                return
+            self.chain_git_hooks(hooks_dir, calls, shebang=True)
+            return
+        git_dir = root / ".git"
+        if git_dir.is_dir():
+            self.chain_git_hooks(git_dir / "hooks", calls, shebang=True)
+            return
+        print("  note           not a git repository yet. After `git init`, re-run with --git-hooks,")
+        print("                 or add to .git/hooks/:")
+        for name, call in calls:
+            print("                 %s: %s" % (name, call))
+
+    def chain_git_hooks(self, hooks_dir, calls, shebang):
+        for name, call in calls:
+            path = hooks_dir / name
+            rel = self.rel(path)
+            if path.exists():
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if call.split()[1] in text:
+                    print("  unchanged      %s (already calls the kit hook)" % rel)
+                    continue
+                if self.o.dry_run:
+                    print("  would append   %s (call to %s)" % (rel, call.split()[1]))
+                    continue
+                joiner = "" if text.endswith("\n") or not text else "\n"
+                atomic_write_text(path, text + joiner + call + "\n")
+                print("  append         %s (call to %s)" % (rel, call.split()[1]))
+            else:
+                if self.o.dry_run:
+                    print("  would add      %s" % rel)
+                    continue
+                path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_text(path, ("#!/bin/sh\n" if shebang else "") + call + "\n")
+                print("  add            %s" % rel)
+            try:
+                os.chmod(path, os.stat(path).st_mode | 0o111)
+            except OSError:
+                pass
 
     def wire_harnesses(self):
         """Nothing in this kit runs unless the agent is told to read AGENTS.md, and each
@@ -3537,7 +3766,9 @@ class Installer(object):
             lines = ["name: Project quality", "", "on:", "  workflow_dispatch:",
                      "", "permissions:", "  contents: read", "",
                      "jobs:", "  quality:", "    runs-on: ubuntu-latest", "    steps:",
-                     "      - uses: actions/checkout@v4"]
+                     "      - uses: actions/checkout@v4",
+                     "      - name: SDLC records",
+                     "        run: python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
             for key, command in ordered:
                 lines.extend(("      - name: %s" % key.replace("_", " ").title(),
                               "        run: %s" % json.dumps(command)))
@@ -3545,7 +3776,8 @@ class Installer(object):
                           "# from the charter before adding push or pull_request triggers.", ""))
             return "\n".join(lines)
         lines = ["stages:", "  - quality", "", "quality:", "  stage: quality",
-                 "  when: manual", "  script:"]
+                 "  when: manual", "  script:",
+                 "    - python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
         for _, command in ordered:
             lines.append("    - %s" % json.dumps(command))
         lines.extend(("", "# Manual-only by default. Confirm commands, runtime, and service versions",
@@ -4256,6 +4488,7 @@ def main(argv):
         tailored = inst.tailor()
         inst.scaffold()
         inst.install_hooks()
+        inst.install_git_hooks()
         inst.apply_git_ignores()
         inst.record_manifest()
         inst.write_dashboard_state()

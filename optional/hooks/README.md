@@ -68,6 +68,27 @@ so once, rather than blocking your work over a missing dependency — they are g
 for an agent, not a security boundary. Anything that must not happen belongs in
 `permissions.deny` in `.claude/settings.json`, which the harness enforces itself.
 
+## The same rules under Gemini CLI and Cursor
+
+`--hooks` together with `--harness gemini` registers all six as `BeforeTool` hooks in
+`.gemini/settings.json`; with `--harness cursor`, the three shell rules as
+`beforeShellExecution` hooks in `.cursor/hooks.json`. Each entry calls
+`adapter.sh <harness> <hook>`, which reshapes the payload (Cursor sends the command at
+the top level) and the verdict (Gemini wants `decision`, Cursor wants `permission`) and
+nothing else. Both tools export `CLAUDE_PROJECT_DIR` as an alias of their own
+project-directory variable, so `lib.sh` anchors on the project root unchanged. Cursor has
+no event that sees a file write before it happens, so the three file rules are not
+registered there. Both merges are idempotent and leave existing entries alone.
+
+## The same rules without Claude Code
+
+`install.sh --git-hooks` installs the two commit-time rules, work-item ID and secret
+guard, as git `commit-msg` and `pre-commit` hooks under `.ai-sdlc/git-hooks/`. Git runs
+them for every agent and every human, so they are the portable half of this directory.
+They share `lib.sh` and the credential shapes, need no `jq`, and are chained onto the
+hook the project already has rather than replacing it. The other four rules need to see
+the tool call and stay here.
+
 ## Escaping them
 
 Deliberately possible, and deliberately visible: commit outside the tool, or remove the

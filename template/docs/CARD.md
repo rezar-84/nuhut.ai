@@ -175,8 +175,9 @@ Work that shipped without one gets it retroactively, noted as retroactive.
 Backlog row, positional: `| ID | Task | Tier | Owner role | Depends on | Status |`
 
 Status: `Ready` · `Blocked` (never started) · `In progress` · `In review` (includes
-holding a Block) · `Parked` (waiting on a named human) · `Done` (worklog entry exists) ·
-`Deferred` · `Dropped`.
+holding a Block) · `Parked` (waiting on a named human; also where an item you discovered
+and filed unasked enters, never `Ready`) · `Done` (worklog entry exists) · `Deferred` ·
+`Dropped`.
 
 **Keep the backlog terse — narrative goes in the worklog.** This is the most-broken
 formatting rule in the kit.
