@@ -6,6 +6,10 @@ plans, reviews, defects and postmortems by file name -- and writes one self-cont
 to .ai-sdlc/view/index.html, which git ignores. Nothing it cannot read is dropped: it is
 listed under "unread" so the page can say so.
 
+Also from git and the evidence folder: `flow`, the backlog's column counts at each
+committed day (one `git show` per day, capped), and `evidence`, the last verify runs
+reduced to stage results. Both feed charts; neither is a reason for the page not to open.
+
 Called by sdlc.py, which passes itself in as `rt` so the two share one set of parsers.
 This file must never contain two opening braces in a row (see sdlc.py).
 """

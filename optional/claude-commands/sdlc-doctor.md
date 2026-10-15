@@ -106,6 +106,12 @@ Per `{{DOCS_DIR}}/process/07-traceability.md`:
 - Worklog entries whose ID is not in the backlog.
 - Items marked `Parked` with no stated blocker or owner.
 - Branches or recent commits referencing an ID that exists in neither.
+- Backlog rows past the charter's staleness window: an `In progress` or `In review`
+  row that nothing has named since the window passed (backlog or worklog line, or a
+  commit subject, in git history) is a zombie claim, usually a session that died; a
+  `Ready`, `Blocked` or `Parked` row older than the window needs a decision. The
+  script reports each with the decision it needs. Your part: say which to finish,
+  park, defer or drop, and never silently delete a row (`Dropped` keeps it).
 
 ## 6. Worklog size
 

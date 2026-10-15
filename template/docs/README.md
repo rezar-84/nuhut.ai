@@ -29,8 +29,9 @@ sequence, the severity ladder, verdicts, traceability, and a table saying which 
 to open next. It replaces reading `process/02`, `04`, `06`, and `07` for ordinary work —
 those stay as escalation, and **the full document wins wherever they disagree**.
 
-Read it on every Tier 1 and Tier 2 change. It is also the routing for agent tools that
-have no equivalent of Claude Code's model-invoked skills.
+Read it on every Tier 1 and Tier 2 change. It is also the routing for an agent tool
+that does not load skills; tools that read `.agents/skills/` get the same routing from
+the skill descriptions.
 
 ## The viewer: `sdlc.py view`
 
@@ -47,8 +48,8 @@ python3 .ai-sdlc/bin/sdlc.py metrics         # process numbers in the terminal
 
 | Tab | Answers |
 | --- | --- |
-| **Map** | What is in this project? A mind map of work by status, open work by owner role, and documents. Click a dot to fold, a blue label to open. Includes health metrics, `doctor` findings, and a quick-jump to blockages. |
-| **Board** | Where is every item? Now, Next, Blocked, Parked, Later, Done, filtered by owner, tier or title. A red edge or warning chip indicates dependency blockages. |
+| **Map** | What is in this project? A mind map of work by status, open work by owner role, and documents. Click a dot to fold, a blue label to open. Includes health metrics, a grid of the last verify runs (one column per run, one row per stage: pass, fail, timed out, not run), `doctor` findings, and a quick-jump to blockages. |
+| **Board** | Where is every item? Now, Next, Blocked, Parked, Later, Done, filtered by owner, tier or title. A red edge or warning chip indicates dependency blockages. Opens with a cumulative-flow chart: column counts at each committed day the backlog changed, from its git history, so work piling up in Parked or Blocked is visible without reading the table. |
 | **Activity** | What are the agents doing? Items in flight, the latest worklog entries, and a summary of uncommitted working tree changes. |
 | **Blockages & Flow** | Where is work stuck? 3-column triage (Root Blockers ➔ Blocked Tasks ➔ Waiting on Human), bottleneck blast radius matrix, and human decision stall log. |
 | **Git Graph** | How did the code evolve? Interactive commit graph with branch/merge lanes, commit badges, author avatars, uncommitted delta banner, and commit inspector drawer. |

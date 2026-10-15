@@ -218,5 +218,6 @@ Tier 3 → one line there.
 | A choice the request did not settle, or a non-specialist is being asked | `process/14-decision-style.md` |
 | A person pastes a secret or personal data, or a record is about to quote one | `process/12-sensitive-data-in-records.md` |
 
-This table is the routing that Claude Code gets from skill descriptions. On any other
-agent tool, it is the routing.
+This table is the routing that a tool which loads skills (from `.claude/skills/` or
+`.agents/skills/`) gets from their descriptions. On any other agent tool, it is the
+routing.

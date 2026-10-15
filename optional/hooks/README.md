@@ -5,9 +5,11 @@ mechanical, by running before the tool call rather than after the fact. A skill 
 process document is advisory, since it makes the violation rare. A hook is what makes it
 close to impossible, so any rule that must hold without exception belongs here as well.
 
-**Claude Code only**, and **opt-in**: `./install.sh <dir> <PREFIX> --hooks`. Nothing
-installs them by accident, because a hook executes on your machine on every matching tool
-call and that is not something to acquire without deciding to.
+**Opt-in**: `./install.sh <dir> <PREFIX> --hooks`. Nothing installs them by accident,
+because a hook executes on your machine on every matching tool call and that is not
+something to acquire without deciding to. They are written for Claude Code and run
+unchanged under Gemini CLI and Cursor through `adapter.sh` (below); the two commit-time
+rules also exist as git hooks for every other tool and for humans (`--git-hooks`).
 
 ## What is here
 

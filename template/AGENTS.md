@@ -320,9 +320,11 @@ tempting and are not allowed here)_
 **Human approval required for:** _(fill in — the specific surfaces where a named human
 must sign off before merge or deploy. The charter's Risk defaults table points here.)_
 
-Where the opt-in hooks are installed, each command above that a machine can recognise
-(a production deploy, an infrastructure apply, a production migration) also gets a glob
-in `.ai-sdlc/gates.txt`, so it is denied until a human passes it. The agent prepares
+Where the opt-in hooks are installed (Claude Code, Gemini CLI and Cursor through
+`.claude/hooks/`; every tool and every human through the git hooks under
+`.ai-sdlc/git-hooks/`), each command above that a machine can recognise (a production
+deploy, an infrastructure apply, a production migration) also gets a glob in
+`.ai-sdlc/gates.txt`, so it is denied until a human passes it. The agent prepares
 everything up to that gate and never passes it.
 
 **Known agent mistakes:** _(none yet. When a review or postmortem finds the same mistake

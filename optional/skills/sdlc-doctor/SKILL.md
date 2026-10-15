@@ -1,6 +1,6 @@
 ---
 name: sdlc-doctor
-description: Check the project's own SDLC documents for gaps, staleness, and drift before relying on them — blank charter commands, unticked roles with no reason, artifacts past their staleness window, backlog and worklog IDs that do not match, an oversized worklog, or a profile that disagrees with the charter. Use at the start of a session in an unfamiliar project, before a release, or when a document looks like it may not describe reality.
+description: Check the project's own SDLC documents for gaps, staleness, and drift before relying on them — blank charter commands, unticked roles with no reason, artifacts past their staleness window, backlog and worklog IDs that do not match, backlog rows sitting past the staleness window (a zombie In progress claim, a Blocked or Parked row nobody chased, a Ready row nobody picked up), an oversized worklog, or a profile that disagrees with the charter. Use at the start of a session in an unfamiliar project, before a release, or when a document looks like it may not describe reality.
 ---
 
 # Doctor — is this project's paperwork still true?
@@ -49,6 +49,16 @@ about the specific artifact you are about to trust, stays with you.
   can settle it.
 - **Marking a document stale beats leaving a confident wrong one** — but the marking needs
   a backlog item, or it is just a label.
+
+## The rows that nobody prunes
+
+`sdlc.py doctor` ages every backlog row against the charter's staleness window. An
+`In progress` or `In review` row that nothing has named since the window passed is a
+claim with no session behind it: finish it, park it with a named human, or return it to
+`Ready`. A `Blocked`, `Parked` or `Ready` row past the window needs a decision, not
+another week in the queue: chase the named human, defer it with a condition, or move it
+to `Dropped` with a reason. The row stays either way; deleting one erases the record that
+the thing was considered.
 
 ## The one that grows quietly
 
