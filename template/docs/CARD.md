@@ -67,6 +67,10 @@ time, as today. **Epic** ([`process/11-epics.md`](process/11-epics.md)):
   park it and carry on with independent items), a Block, a failed verification outside
   scope, a plan that proves wrong, or anything irreversible or gated.
 
+## Decision style
+
+Request → work item → charter **Decision style** → `Guide` ([`process/14-decision-style.md`](process/14-decision-style.md)). **Ask** puts every material choice to the person with options and trade-offs. **Guide** recommends one option in plain language and asks. **Autopilot** takes the recommended option, logs it `(auto)`, and lists `(auto)` choices for review. No style lifts a Tier 1 stop, a gated command, or an ADR.
+
 ---
 
 ## Evidence — the seven words
@@ -100,13 +104,13 @@ the system or the measurement, never both.
 Run in this order; take the commands verbatim from `project/charter.md` → Commands.
 
 ```
-format → lint → typecheck → [infra] → unit → integration → [data] → contract →
-[eval] → build → scan → a11y → e2e → [perf]
+format → lint → typecheck → [complexity] → [infra] → unit → [mutation] →
+integration → [data] → contract → [eval] → build → scan → a11y → e2e → [perf]
 ```
 
 Bracketed stages exist only where the project has that surface. **Absent** if the charter
 names no command; **Not run** with a reason if you skipped it. Neither is assumed to pass.
-`[eval]` and `[perf]` report **Measured**, never "passed". An `[infra]` plan showing a
+`[complexity]`, `[eval]`, and `[perf]` report **Measured**, never "passed". An `[infra]` plan showing a
 destroy, replacement, or permission widening goes to a named human before it is applied.
 A `[data]` failure stops the pipeline; it never publishes and warns.
 

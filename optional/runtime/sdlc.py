@@ -35,7 +35,8 @@ import time
 STAGES = ("format", "lint", "typecheck", "complexity", "infra", "unit", "mutation",
           "integration", "data", "contract", "eval", "build", "scan", "a11y", "e2e", "perf")
 POINTER_FILES = ("CLAUDE.md", "GEMINI.md", "AGENT.md", "CONVENTIONS.md",
-                 ".github/copilot-instructions.md", ".windsurfrules", ".clinerules")
+                 ".github/copilot-instructions.md", ".cursorrules",
+                 ".windsurfrules", ".clinerules", ".roo/rules/agents.md")
 EFFORT = ("Lean", "Normal", "Beast")
 ACQUISITION = ("Standard", "Advanced")
 DEV_METHOD = ("Item", "Epic")

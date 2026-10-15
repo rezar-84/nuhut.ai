@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+## 3.5.0 — 2026-10-14
+
 - **Engineering-practice controls (optional, stack-neutral):**
   - Two conditional stages, `checks.complexity` and `checks.mutation`, follow the
     `checks.perf` pattern: absent unless the charter states a bar. A score with no stated
@@ -53,7 +55,7 @@ This project follows semantic versioning. User-visible changes are recorded here
 - **Gitignore options for runtime tooling (`--gitignore-tools`, `--git-exclude`):**
   - `--gitignore-tools`: appends `.ai-sdlc/` to the project's root `.gitignore` so kit
     runtime binaries, manifests, and local viewer caches are not committed to git.
-  - `--git-exclude`: appends `.ai-sdlc/` to `.git/info/exclude` (local stealth mode:
+  - `--git-exclude`: appends `.ai-sdlc/` to `.git/info/exclude` (local-only ignore:
     keeps `.gitignore` untouched for pull requests on team codebases).
   - The setup wizard gains an interactive prompt under `What to install`.
   - Re-running or upgrading is idempotent and never creates duplicate entries.
@@ -201,7 +203,7 @@ number without their own heading.
 - **Fixes:**
   - `secret-guard` missed a credential in a repository's first commit made with
     `commit -a`.
-  - "Black Widow" is gone as a display name for the Advanced acquisition profile.
+  - Removed the legacy display name for the Advanced acquisition profile.
   - Two README claims that cited no source were rewritten to rest on the kit's own
     reasoning.
 
@@ -370,7 +372,7 @@ number without their own heading.
     reviewer/subagent propagation, validation, and upgrade-safe defaults.
 - **Separate acquisition profiles**:
   - Replaced the ambiguous Beast scraping waiver with `Standard` and `Advanced`
-    capability profiles. Advanced (display name **Black Widow**) enables additional
+    capability profiles. `Advanced` enables additional
     extraction techniques on owned or explicitly authorised targets.
   - Reachability no longer substitutes for permission: authentication, paywalls,
     CAPTCHA, explicit denial, and other access controls remain stop conditions without
@@ -411,9 +413,9 @@ number without their own heading.
 
 The question this release answers is whether the kit needs a GUI. Researched rather than
 guessed, the answer was: one small read-only page, and distribution — not a web product.
-Claude Code Remote Control already drives local sessions from `claude.ai/code` and mobile,
-and the independent agent-orchestration GUIs have not found a business model (Bloop, the
-company behind vibe-kanban, shut down in April 2026 saying exactly that).
+Steering an agent session belongs to the agent harness itself (such as a terminal, an IDE
+integration, or Claude Code Remote Control), while the repository kit provides read-only
+visibility over the project's records.
 
 ### Added
 

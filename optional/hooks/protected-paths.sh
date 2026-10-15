@@ -13,6 +13,10 @@ list=.ai-sdlc/protected.txt
 rel=$(hook_rel_path "$(cat)")
 [ -n "$rel" ] || exit 0
 
+if [ "$rel" = "$list" ]; then
+  hook_deny "$list lists the single-writer paths protected in this repository. Changing that list is a human decision: propose the edit instead of making it."
+fi
+
 while IFS= read -r pattern || [ -n "$pattern" ]; do
   case "$pattern" in ''|'#'*) continue ;; esac
   # shellcheck disable=SC2254  # the glob is the point

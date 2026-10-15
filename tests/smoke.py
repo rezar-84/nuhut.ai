@@ -230,7 +230,7 @@ def test_custom_docs_dir():
     d = tempfile.mkdtemp(prefix="sdlc-custom-")
     code, out = run([d, "ACME", "-y", "--docs-dir", "handbook"])
     installed = [read(d, "AGENTS.md")]
-    for name in ("sdlc-log.md", "sdlc-plan.md", "sdlc-review.md", "sdlc-verify.md"):
+    for name in ("sdlc-doctor.md", "sdlc-log.md", "sdlc-plan.md", "sdlc-review.md", "sdlc-verify.md"):
         installed.append(read(d, ".claude/commands/%s" % name))
     check("exit 0", code == 0)
     check("contract and commands use custom path",
@@ -473,6 +473,11 @@ def test_harness_wiring():
     check("roo rules pointer written", "AGENTS.md" in read(d, ".roo/rules/agents.md"))
     check("no .roomodes is invented", not os.path.exists(os.path.join(d, ".roomodes")))
     check(".cursorrules written", "AGENTS.md" in read(d, ".cursorrules"))
+    p = subprocess.Popen([sys.executable, os.path.join(d, ".ai-sdlc", "bin", "sdlc.py"),
+                          "doctor", "--strict"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    doc_out = p.communicate()[0].decode("utf-8", "replace")
+    check("doctor accepts roo and cursor pointers without CLAUDE.md",
+          p.returncode == 0 and "no instruction file names AGENTS.md" not in doc_out, doc_out)
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -569,6 +574,8 @@ def test_hooks():
         check("an unrelated command is allowed", "deny" not in out, out)
         out = fire("protected-paths.sh", {"tool_input": {"file_path": "package-lock.json"}})
         check("an unlisted path is allowed", "deny" not in out, out)
+        out = fire("protected-paths.sh", {"tool_input": {"file_path": ".ai-sdlc/protected.txt"}})
+        check("the protected paths list itself is denied", '"permissionDecision":"deny"' in out, out)
         with open(os.path.join(d, ".ai-sdlc", "protected.txt"), "a") as fh:
             fh.write("package-lock.json\n")
         out = fire("protected-paths.sh", {"tool_input": {"file_path": "package-lock.json"}})

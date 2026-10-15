@@ -88,20 +88,29 @@ def cross_references(errors):
     for name in sorted(ruled - skill_dirs):
         errors.append("SKILL_RULES names %r, which has no skill directory" % name)
 
-    # Check stages: every key in the gates table has a charter row and a wizard field.
+    # Check stages: every key in the gates table has a charter row, a wizard field, and a runtime stage.
+    sys.path.insert(0, str(ROOT / "optional" / "runtime"))
+    import sdlc as runtime_sdlc                        # noqa: E402
     gates = (ROOT / "template" / "docs" / "process" / "04-quality-gates.md").read_text(encoding="utf-8")
     staged = set(re.findall(r"`checks\.([a-z0-9]+)`", gates))
     charter_keys = set(re.findall(r"^\| `checks\.([a-z0-9]+)` \|", charter, re.M))
     wizard_keys = {key for _, _, key in install.CMD_FIELDS} - {"install", "run"}
+    runtime_stages = set(runtime_sdlc.STAGES)
     for key in sorted(staged - charter_keys):
         errors.append("04-quality-gates names checks.%s with no charter Commands row" % key)
     for key in sorted(staged - wizard_keys):
         errors.append("04-quality-gates names checks.%s that the installer never asks for" % key)
     for key in sorted(wizard_keys - charter_keys):
         errors.append("the installer asks for checks.%s with no charter Commands row" % key)
+    for key in sorted(staged ^ runtime_stages):
+        errors.append("04-quality-gates and sdlc.py STAGES disagree on checks.%s" % key)
 
-    # Harnesses: every alias names a pointer the table actually knows how to write.
+    # Harnesses: every alias names a pointer the table actually knows how to write,
+    # and the runtime doctor checks every pointer file the installer can wire.
     known = {rel for rel, _ in install.HARNESS_POINTERS}
+    runtime_pointers = set(runtime_sdlc.POINTER_FILES) | {".cursor/rules/agents.mdc"}
+    for rel in sorted(known ^ runtime_pointers):
+        errors.append("install.py HARNESS_POINTERS and sdlc.py POINTER_FILES disagree on %r" % rel)
     for alias, targets in sorted(install.HARNESS_ALIASES.items()):
         for rel in targets:
             if rel not in known:

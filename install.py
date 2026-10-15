@@ -345,18 +345,18 @@ USAGE = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      wizard pre-selects what it detects; -y installs none, because
                      detection is not a decision.
   --harness <list>   comma-separated agent tools to wire up (default: claude). One of
-                     claude, gemini, amp, copilot, cursor, windsurf, cline, aider, or
-                     "all". Each gets a pointer file naming AGENTS.md; an instruction
+                     claude, gemini, amp, copilot, cursor, windsurf, cline, roo, aider,
+                     or "all". Each gets a pointer file naming AGENTS.md; an instruction
                      file that already exists is appended to, never overwritten. Codex,
-                     Jules, Zed, Factory and opencode read AGENTS.md directly and need
-                     nothing.
+                     Jules, Zed, Factory, opencode and Antigravity read AGENTS.md
+                     directly and need nothing.
   --adopt            with --upgrade: take over kit files an older version left
                      unmanaged -- sections 1-8 of AGENTS.md and the /sdlc-* commands.
                      The previous copies are backed up first. Needed once per project
                      installed before 3.3; the upgrade says when.
   --gitignore-tools  append .ai-sdlc/ to the project's root .gitignore so kit
                      tools, runtime binaries, and local viewer state are ignored.
-  --git-exclude      append .ai-sdlc/ to .git/info/exclude (local stealth mode:
+  --git-exclude      append .ai-sdlc/ to .git/info/exclude (local-only ignore:
                      leaves .gitignore untracked and clean for team repositories).
   --dry-run          list what would be written, write nothing
   --lang <code>      language for this setup's own prompts (default: en)

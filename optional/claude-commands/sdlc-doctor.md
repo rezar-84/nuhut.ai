@@ -53,7 +53,8 @@ looks in a different file. Check that at least one of these names it:
 
 ```sh
 grep -ln 'AGENTS.md' CLAUDE.md GEMINI.md AGENT.md CONVENTIONS.md \
-  .github/copilot-instructions.md .cursor/rules/*.mdc .windsurfrules .clinerules 2>/dev/null
+  .github/copilot-instructions.md .cursor/rules/*.mdc .cursorrules \
+  .windsurfrules .clinerules .roo/rules/agents.md 2>/dev/null
 ```
 
 No output is a **finding of the highest severity in this report**: the documents are
@@ -62,7 +63,7 @@ fix is one line — `Read and follow \`AGENTS.md\` in this directory.` — in wh
 the tool in use actually loads. `.ai-sdlc/profile.json` → `harnesses` records what the
 installer wired; a file listed there that no longer mentions `AGENTS.md` was edited since.
 
-Codex, Jules, Zed, Factory and opencode read `AGENTS.md` directly and need no pointer.
+Codex, Jules, Zed, Factory, opencode and Antigravity read `AGENTS.md` directly and need no pointer.
 
 ## 3. Charter completeness
 

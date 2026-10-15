@@ -47,6 +47,13 @@ You also choose a **development method**:
 - Existing installs keep working item by item; `--upgrade` adds the option without
   changing behaviour.
 
+A **decision style** sets who decides a choice the request left open and how much the
+agent says in chat: **Ask** pauses on open choices, **Guide** (the default) decides
+small tactical choices and asks on larger ones, and **Autopilot** takes the recommended
+option, logs it `(auto)`, and lists the decisions to review at the end. No style lifts a
+Tier 1 approval, a gated command, or an ADR for an expensive-to-reverse choice. Set the
+project default with `--decision-style <ask|guide|autopilot>` or in the charter.
+
 > **Status.** The process, installer, runtime checks and hooks are tested (`validate.py`,
 > `tests/smoke.py`, CI). Whether the kit measurably changes agent behaviour is what
 > `benchmarks/kit-value/` exists to show. It has not been run at N≥4 yet, so no such claim
@@ -124,11 +131,10 @@ see [Installing into a managed platform](#installing-into-a-managed-platform-lov
 below. The answer to "AI builders have no discipline" is to be the discipline they
 install.
 
-**A web UI for driving agents is deliberately not here.** A product for steering agents
-from a browser already exists first-party (Claude Code Remote Control syncs a local session
-to `claude.ai/code` and mobile), and the independent attempts at that category have not
-found a business model. What was missing is a way for the human to *see* the work while the
-agents do it, so that is what the kit ships: [the viewer](#seeing-the-work)
+**A web UI for driving agents is deliberately not here.** Steering an agent session
+belongs to the harness itself (such as a terminal, an IDE integration, or Claude Code
+Remote Control). What a repository-level kit needs is a way for the human to *see* the
+work while the agents do it, so that is what the kit ships: [the viewer](#seeing-the-work)
 (`sdlc.py view`, live with `--serve`), and the smaller static `docs/dashboard.html`. Both
 are read-only. Neither can change a record, start an agent, or approve anything.
 
@@ -213,15 +219,17 @@ For scripts, CI, or a plain copy with no questions:
 installs only the skills that do not depend on an answer. The target directory is required
 in this mode — without a terminal there is nobody to ask. Other flags: `--docs-dir <name>`
 to install the docs under a different directory, `--harness <list>`, `--profile
-<full|compact>`, `--effort-mode <lean|normal|beast>`, `--acquisition-profile
-<standard|advanced>`, `--hooks`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`, `--lang <code>`,
-`--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`, and `--upgrade`.
+<full|compact>`, `--effort-mode <lean|normal|beast>`, `--dev-method <item|epic>`,
+`--decision-style <ask|guide|autopilot>`, `--acquisition-profile <standard|advanced>`,
+`--hooks`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
+`--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`,
+and `--upgrade`.
 
 ### Ignoring runtime tools in Git
 
 For teams or developers using the kit locally on shared codebases without committing runtime tooling:
 - `--gitignore-tools`: appends `.ai-sdlc/` to the project's root `.gitignore` so runtime scripts, manifests, and local viewer caches stay uncommitted.
-- `--git-exclude`: appends `.ai-sdlc/` to `.git/info/exclude` (local stealth mode: leaves `.gitignore` completely untouched for team pull requests).
+- `--git-exclude`: appends `.ai-sdlc/` to `.git/info/exclude` (local-only ignore: leaves `.gitignore` completely untouched for team pull requests).
 
 ### Deployment platforms
 
@@ -266,9 +274,9 @@ exists, never overwriting, and never copying the contract itself.
 
 | Tool | Wiring |
 | --- | --- |
-| Codex, Jules, Zed, Factory, opencode | Nothing to do — they read `AGENTS.md` |
+| Codex, Jules, Zed, Factory, opencode, Antigravity | Nothing to do — they read `AGENTS.md` |
 | Claude Code | `CLAUDE.md`, plus slash commands, skills and optional hooks |
-| Gemini CLI · Amp · Copilot · Cursor · Windsurf · Cline · Aider | `--harness gemini,amp,copilot,cursor,windsurf,cline,aider` (or `all`) |
+| Gemini CLI · Amp · Copilot · Cursor · Windsurf · Cline · Roo Code · Aider | `--harness gemini,amp,copilot,cursor,windsurf,cline,roo,aider` (or `all`) |
 
 ```sh
 ./install.sh /path/to/project ACME -y --harness claude,cursor,copilot
@@ -330,7 +338,7 @@ overwrites an existing file, never installs a dependency, and leaves runtime and
 version confirmation to the project charter. Generated jobs are manual-only until a
 human confirms the commands and deliberately enables push or pull-request triggers.
 
-The installer copies `AGENTS.md` to the project root, `docs/` into the project, the four
+The installer copies `AGENTS.md` to the project root, `docs/` into the project, the five
 slash commands into `.claude/commands/`, and the selected skills into `.claude/skills/`;
 substitutes `{{PROJECT_NAME}}`, `{{PREFIX}}`, and `{{DOCS_DIR}}` in all of them; adds a
 `CLAUDE.md` pointer if none exists; and records checksums for portable files in
@@ -423,9 +431,9 @@ python3 .ai-sdlc/bin/sdlc.py metrics           # process measures, leading and l
 | Command | Key Flags | Description |
 | --- | --- | --- |
 | **`doctor`** | `--strict` | Audits project records, active roles, check commands, staleness windows, and validates the dependency graph (flags self-dependencies, non-existent backlog IDs, and circular dependency loops). |
-| **`verify`** | `--parallel` (`-j`), `--dry-run` | Runs the charter's check pipeline in topological order, writes immutable test evidence to `.ai-sdlc/evidence/YYYY-MM-DD-verify.txt`. `--parallel` runs independent steps concurrently using a worker pool. |
+| **`verify`** | `--parallel` (`-j`), `--stage`, `--timeout` | Runs the charter's check pipeline in order, writing immutable test evidence (`summary.md`, `summary.json`, and stage `.log` files) to `.ai-sdlc/evidence/<timestamp>/`. `--parallel` runs independent steps concurrently using a worker pool. |
 | **`plan-check <ID>`** | | Compares branch changes against the approved plan (`docs/project/plans/<ID>.md` or `.sdlc/specs/<ID>/spec.md`). Highlights unapproved file modifications and planned files left untouched with ANSI terminal colors. |
-| **`view`** | `--serve`, `--port`, `--interval`, `--export-html <file>`, `--no-open` | Generates the rich interactive developer dashboard. `--serve` runs a reactive local server on `127.0.0.1`. `--export-html` bundles an offline single-file report for CI/CD artifacts or PR previews. |
+| **`view`** | `--serve`, `--port`, `--interval`, `--export-html <file>`, `--svg`, `--no-open` | Generates the rich interactive developer dashboard. `--serve` runs a reactive local server on `127.0.0.1`. `--export-html` bundles an offline single-file report for CI/CD artifacts or PR previews. |
 | **`metrics`** | `--json` | Calculates quantitative project health metrics: work-in-progress (WIP), verification pass rate, cycle time, lead time, time waiting on humans, and lifecycle record gaps. |
 
 `verify` exists so a "Verified" claim can cite a file the script wrote instead of the
@@ -503,6 +511,7 @@ it ideal for CI/CD artifact publishing, PR status reports, and static team dashb
 The opt-in `--hooks` go one step further for Claude Code. They deny the tool call itself:
 
 - a commit with no work item ID, or with a credential in it
+- a file write containing a credential, with a warning when personal data is written to a record
 - an edit to a single-writer path
 - an edit to a reproducing test locked while its defect is fixed
 - a command, such as a production deploy, that `.ai-sdlc/gates.txt` says a human must pass
@@ -553,6 +562,10 @@ template/
       08-content-and-translation.md  source language, machine translation, RTL, per-locale checks
       09-probabilistic-and-data-systems.md  models, prompts, evaluation, pipelines, acquired data
       10-multi-agent.md          claiming, single-writer files, review fan-out, handoff
+      11-epics.md                grouping connected items under one plan and branch
+      12-sensitive-data-in-records.md  what project records may and may not hold
+      13-stack-evaluation.md     verifying and recording foundational stack choices
+      14-decision-style.md       Ask, Guide, and Autopilot decision styles
     roles/                   WHO reviews. One playbook per professional perspective.
       README.md + 16 role playbooks
     templates/               Blank artifacts to copy when a project needs one.
@@ -561,7 +574,7 @@ template/
                              full view is `sdlc.py view` from .ai-sdlc/bin/
     project/                 WHERE this project's filled-in reality lives.
       charter.md  backlog.md  worklog.md  assumptions-and-risks.md
-      adr/  reviews/  plans/  postmortems/  worklog-archive/
+      adr/  reviews/  plans/  defects/  epics/  postmortems/  worklog-archive/
 .claude-plugin/              plugin + marketplace manifests (commands only, no skills)
 optional/
   hooks/                     opt-in Claude Code enforcement (--hooks)

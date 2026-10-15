@@ -257,11 +257,12 @@ Detail: `{{DOCS_DIR}}/process/05-change-control.md`.
 ## 7. Quality bar
 
 Run, in order, whatever the charter's Commands table names for each stage:
-format → lint → typecheck → *infrastructure plan* → unit → integration → *data quality* →
-contract → *evaluation* → build → security/dependency scan → accessibility → end-to-end →
-*performance*. The italic stages exist only where the project has that surface. A stage
-the charter has no command for is reported **absent**, explicitly; a stage you did not
-run is reported **not run**, with the reason. Neither is silently assumed to pass.
+format → lint → typecheck → *complexity* → *infrastructure plan* → unit → *mutation* →
+integration → *data quality* → contract → *evaluation* → build →
+security/dependency scan → accessibility → end-to-end → *performance*. The italic stages
+exist only where the project has that surface. A stage the charter has no command for is
+reported **absent**, explicitly; a stage you did not run is reported **not run**, with
+the reason. Neither is silently assumed to pass.
 
 A stage whose result is a number rather than a pass — evaluation, performance, data
 freshness — is reported **Measured**, and is not a claim until it carries its method,
