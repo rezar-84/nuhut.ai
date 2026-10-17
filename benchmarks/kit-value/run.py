@@ -104,6 +104,7 @@ def run_cell(opts, template, task, arm, number, agent_version):
         prompt = handle.read().strip()
 
     env = git_env()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     if opts.isolate_config:
         # A fresh config dir per run: no user CLAUDE.md, memory, plugins or settings can
         # leak into any arm. Auth then has to come from ANTHROPIC_API_KEY.
