@@ -5,8 +5,8 @@
 /plugin install ai-sdlc@ai-sdlc
 ```
 
-That gives you the five `/sdlc-*` commands everywhere: `/sdlc-plan`, `/sdlc-review`,
-`/sdlc-verify`, `/sdlc-log`, `/sdlc-doctor`.
+That gives you the six `/sdlc-*` commands everywhere: `/sdlc-plan`, `/sdlc-build`,
+`/sdlc-verify`, `/sdlc-review`, `/sdlc-log`, `/sdlc-doctor`.
 
 ## The plugin deliberately ships no skills
 

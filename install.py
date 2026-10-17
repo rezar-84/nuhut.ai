@@ -2618,11 +2618,15 @@ def managed_source_texts(target, docs, ctx, profile="full"):
                 planned[(Path(docs) / "platforms" / src.name).as_posix()] = substitute(
                     src.read_text(encoding="utf-8"), ctx)
     commands_root = Path(target) / ".claude" / "commands"
-    if commands_root.is_dir():
-        for src in sorted((SRC / "optional" / "claude-commands").glob("*.md")):
-            if (commands_root / src.name).is_file():
-                planned[(Path(".claude") / "commands" / src.name).as_posix()] = substitute(
-                    src.read_text(encoding="utf-8"), ctx)
+    kit_commands = sorted((SRC / "optional" / "claude-commands").glob("*.md"))
+    # Once a project has any kit command, a command the kit gained since (sdlc-build)
+    # arrives with the upgrade instead of only on a fresh install.
+    has_commands = commands_root.is_dir() and any((commands_root / c.name).is_file()
+                                                  for c in kit_commands)
+    if has_commands:
+        for src in kit_commands:
+            planned[(Path(".claude") / "commands" / src.name).as_posix()] = substitute(
+                src.read_text(encoding="utf-8"), ctx)
     for skills_rel in (Path(".claude") / "skills", Path(".agents") / "skills"):
         skills_root = Path(target) / skills_rel
         if not skills_root.is_dir():
@@ -2634,6 +2638,12 @@ def managed_source_texts(target, docs, ctx, profile="full"):
                 if src.is_file():
                     rel = skills_rel / base.name / src.relative_to(base)
                     planned[rel.as_posix()] = substitute(src.read_text(encoding="utf-8"), ctx)
+    shared_root = Path(target) / ".agents" / "skills"
+    kit_skill_names = {p.name for p in (SRC / "optional" / "skills").iterdir() if p.is_dir()}
+    if shared_root.is_dir() and any((shared_root / n / "SKILL.md").is_file()
+                                    for n in kit_skill_names | set(LOOP_SKILLS)):
+        for name in LOOP_SKILLS:
+            planned[".agents/skills/%s/SKILL.md" % name] = substitute(command_skill_text(name), ctx)
     git_hooks_root = Path(target) / ".ai-sdlc" / "git-hooks"
     if git_hooks_root.is_dir():
         for name in ("pre-commit", "commit-msg"):
@@ -2654,6 +2664,54 @@ def managed_source_texts(target, docs, ctx, profile="full"):
         planned[".ai-sdlc/bin/" + name] = substitute(
             (SRC / "optional" / "runtime" / name).read_text(encoding="utf-8"), ctx)
     return planned
+
+
+# The loop's entry points, as skills for tools that list skills where Claude Code lists
+# commands (Antigravity's / menu, Codex, Cursor, Gemini CLI, Copilot). Generated from the
+# command files so there is one source. sdlc-doctor is not here: optional/skills/ already
+# ships a skill by that name.
+LOOP_SKILLS = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-log")
+LOOP_SKILL_WHEN = {
+    "sdlc-plan": "Use when the user invokes /sdlc-plan or asks to plan, frame or scope a "
+                 "change, or when a new request needs a tracked work item and a reviewed "
+                 "plan before any code is written.",
+    "sdlc-build": "Use only when the user invokes /sdlc-build or explicitly asks to build "
+                  "or implement a plan that is already approved. Never on your own "
+                  "initiative: building without an approved plan is what this loop exists "
+                  "to prevent.",
+    "sdlc-verify": "Use when the user invokes /sdlc-verify or asks to run the checks, and "
+                   "before claiming that anything passes, works or is done.",
+    "sdlc-review": "Use when the user invokes /sdlc-review or asks for a review of a plan "
+                   "or a change, and when a plan or a diff reaches a review gate.",
+    "sdlc-log": "Use when the user invokes /sdlc-log or asks to close, log or wrap up a "
+                "work item that is built, verified and reviewed.",
+}
+
+
+def command_skill_text(name):
+    """A loop command rewritten as an Agent Skills SKILL.md: name and description in the
+    frontmatter, the argument placeholder turned into prose, and references to other
+    commands turned into references to their skills. Placeholders are left for
+    substitute()."""
+    text = (SRC / "optional" / "claude-commands" / (name + ".md")).read_text(encoding="utf-8")
+    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+    meta, body = {}, text
+    if m:
+        body = text[m.end():]
+        for line in m.group(1).splitlines():
+            key, _, value = line.partition(":")
+            meta[key.strip()] = value.strip().strip('"')
+    hint = meta.get("argument-hint", "")
+    body = body.replace(
+        "$ARGUMENTS",
+        "the request given with this skill: the text after its name, or the request in the "
+        "conversation that called for it" + (" (expected: `%s`)" % hint if hint else "") + ".")
+    body = re.sub(r"`/(sdlc-[a-z-]+)`", r"the `\1` skill", body)
+    description = "%s. %s" % (meta.get("description", name).rstrip("."), LOOP_SKILL_WHEN[name])
+    return ("---\nname: %s\ndescription: %s\n---\n\n"
+            "<!-- Generated from the kit's optional/claude-commands/%s.md by install.py. "
+            "Kit-managed: change the kit, not this file. -->\n%s"
+            % (name, json.dumps(description, ensure_ascii=False), name, body))
 
 
 def hook_command(name):
@@ -3026,6 +3084,9 @@ class Installer(object):
                               for path in (SRC / "optional" / "claude-commands").glob("*.md"))
         candidates.extend(self.target / self.docs / "platforms" / path.name
                           for path in self.platform_sources())
+        if self.shared_skills and w.a.get("commands", True):
+            candidates.extend(self.target / ".agents" / "skills" / name / "SKILL.md"
+                              for name in LOOP_SKILLS)
         for name in w.chosen_skills():
             base = SRC / "optional" / "skills" / name
             for root in self.skill_roots():
@@ -3065,6 +3126,11 @@ class Installer(object):
                     for root in self.skill_roots():
                         self.install_file(path, self.target / root / name
                                           / path.relative_to(base))
+        if self.shared_skills and w.a.get("commands", True):
+            # The commands, as skills, for tools whose / menu lists skills.
+            for name in LOOP_SKILLS:
+                self.install_text(self.target / ".agents" / "skills" / name / "SKILL.md",
+                                  substitute(command_skill_text(name), self.ctx))
         self.wire_harnesses()
         self.note_profile()
         return skills
@@ -4146,7 +4212,7 @@ def upgrade(target, o):
     # Commands a pre-3.3 install left unmanaged may carry project edits nobody can tell
     # from an old kit version, so they change only when the project says --adopt.
     unadopted = sorted(rel for rel in planned
-                       if rel.startswith((".claude/commands/", ".claude/hooks/"))
+                       if rel.startswith((".claude/commands/", ".claude/hooks/", ".agents/skills/"))
                        and (target / rel).is_file()
                        and rel not in previous_files and not o.adopt)
     for rel in unadopted:
@@ -4203,6 +4269,13 @@ def upgrade(target, o):
                          SRC / "template" / "docs" / "project" / "charter.md"))
     stale_commands = [r for r in unadopted if r.startswith(".claude/commands/")]
     stale_hooks = [r for r in unadopted if r.startswith(".claude/hooks/")]
+    stale_shared = [r for r in unadopted if r.startswith(".agents/skills/")]
+    if stale_shared:
+        notes.append("%d files under .agents/skills/ exist but the kit does not own them "
+                     "(hand-made, or from before shared skills were managed): %s. They were "
+                     "left alone. Re-run with --upgrade --adopt to replace them with the "
+                     "kit's versions (backed up first)." % (len(stale_shared), ", ".join(
+                         sorted(set(r.split("/")[2] for r in stale_shared)))))
     if stale_commands:
         notes.append("%d /sdlc-* commands predate managed upgrades and were not updated. "
                      "Re-run with --upgrade --adopt to replace them (backed up first)."

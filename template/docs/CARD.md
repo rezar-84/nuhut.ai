@@ -187,6 +187,23 @@ Tier 3 → one line there.
 
 ---
 
+## The loop's commands, on any tool
+
+These names mean the same loop step on every tool. Claude Code has them as `/` commands,
+and tools that list skills (Antigravity, Codex, Cursor, Gemini CLI, Copilot) have them as
+skills of the same name. On a tool with neither, read a request in this form as the step
+it names. **Never map an unknown `/sdlc-*` name to the nearest skill**: if it is not in
+this table, say so and ask.
+
+| Name | Runs | Stops before |
+| --- | --- | --- |
+| `sdlc-plan` | FRAME → PLAN → DESIGN REVIEW (`process/00-operating-model.md`) | any code |
+| `sdlc-build` | BUILD, for an ID whose plan is approved | VERIFY; nothing is called *Verified* |
+| `sdlc-verify` | VERIFY, through `sdlc.py verify` (`process/04-quality-gates.md`) | fixing anything |
+| `sdlc-review` | DESIGN or SHIP REVIEW by the active roles (`process/02-role-reviews.md`) | merging |
+| `sdlc-log` | LOG → CLOSE (`process/03-ready-and-done.md`) | |
+| `sdlc-doctor` | the record audit, through `sdlc.py doctor` | fixing what needs a human |
+
 ## What to open next
 
 | When | Read |

@@ -230,7 +230,7 @@ def test_custom_docs_dir():
     d = tempfile.mkdtemp(prefix="sdlc-custom-")
     code, out = run([d, "ACME", "-y", "--docs-dir", "handbook"])
     installed = [read(d, "AGENTS.md")]
-    for name in ("sdlc-doctor.md", "sdlc-log.md", "sdlc-plan.md", "sdlc-review.md", "sdlc-verify.md"):
+    for name in ("sdlc-build.md", "sdlc-doctor.md", "sdlc-log.md", "sdlc-plan.md", "sdlc-review.md", "sdlc-verify.md"):
         installed.append(read(d, ".claude/commands/%s" % name))
     check("exit 0", code == 0)
     check("contract and commands use custom path",
@@ -450,6 +450,42 @@ def test_harness_wiring():
     check("the shared copy is substituted and kit-managed",
           "{{" not in read(d, ".agents/skills/sdlc-intake/SKILL.md")
           and ".agents/skills/sdlc-intake/SKILL.md" in json.loads(read(d, ".ai-sdlc/manifest.json")).get("files", {}))
+    shutil.rmtree(d, ignore_errors=True)
+
+    # The loop's commands as skills, for tools whose / menu lists skills (Antigravity).
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-harness-loop-"))
+    code, out = run([d, "HRN", "-y", "--harness", "antigravity"])
+    loop = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-log")
+    check("an AGENTS.md-native tool gets the loop commands as skills",
+          all(os.path.isfile(os.path.join(d, ".agents", "skills", n, "SKILL.md")) for n in loop), out[-300:])
+    plan = read(d, ".agents/skills/sdlc-plan/SKILL.md")
+    check("a generated skill has Agent Skills frontmatter and no command placeholder",
+          plan.startswith("---\nname: sdlc-plan\ndescription: ") and "$ARGUMENTS" not in plan
+          and "{{" not in plan and "the `sdlc-review` skill" in plan, plan[:300])
+    check("sdlc-build is explicit-request only and refuses to start without a plan",
+          "Never on your own initiative" in read(d, ".agents/skills/sdlc-build/SKILL.md")
+          and "do not start" in read(d, ".agents/skills/sdlc-build/SKILL.md"))
+    check("the loop skills never land in .claude/skills/, where commands already exist",
+          not any(os.path.exists(os.path.join(d, ".claude", "skills", n)) for n in loop))
+    check("the generated skills are kit-managed",
+          all(".agents/skills/%s/SKILL.md" % n in json.loads(read(d, ".ai-sdlc/manifest.json")).get("files", {})
+              for n in loop))
+    # A hand-made copy (an earlier agent's patch) is never overwritten, by upgrade or re-run.
+    write(d, ".agents/skills/sdlc-plan/SKILL.md", "---\nname: sdlc-plan\ndescription: mine\n---\nMINE\n")
+    manifest = json.loads(read(d, ".ai-sdlc/manifest.json"))
+    manifest["files"].pop(".agents/skills/sdlc-plan/SKILL.md", None)
+    shutil.rmtree(os.path.join(d, ".agents", "skills", "sdlc-build"))
+    manifest["files"].pop(".agents/skills/sdlc-build/SKILL.md", None)
+    write(d, ".ai-sdlc/manifest.json", json.dumps(manifest))
+    code, out = run([d, "HRN", "--upgrade"])
+    check("upgrade leaves an unowned shared skill alone and says so",
+          code == 0 and read(d, ".agents/skills/sdlc-plan/SKILL.md").endswith("MINE\n")
+          and "--adopt" in out and "sdlc-plan" in out, out[-500:])
+    check("upgrade adds a loop skill the project lacks",
+          os.path.isfile(os.path.join(d, ".agents", "skills", "sdlc-build", "SKILL.md")), out[-300:])
+    code, out = run([d, "HRN", "--upgrade", "--adopt"])
+    check("--adopt replaces it",
+          code == 0 and "MINE" not in read(d, ".agents/skills/sdlc-plan/SKILL.md"), out[-300:])
     shutil.rmtree(d, ignore_errors=True)
 
     # A fresh project gets only the harnesses that were asked for.

@@ -145,7 +145,7 @@ are read-only. Neither can change a record, start an agent, or approve anything.
 /plugin install ai-sdlc@ai-sdlc
 ```
 
-That gives you the five `/sdlc-*` commands everywhere. **It ships no skills on purpose** —
+That gives you the six `/sdlc-*` commands everywhere. **It ships no skills on purpose** —
 skills are model-invoked, so each one costs context in every turn whether it fires or not,
 and choosing them per project is the entire point of the fact model. Run the installer for
 those. See `.claude-plugin/README.md`.
@@ -285,7 +285,7 @@ What each layer of the kit needs from the tool:
 | Contract, process, roles, templates, card | yes | yes |
 | Runtime (`doctor`, `verify`, `plan-check`, `view`, `metrics`) | yes | yes — it is a shell command |
 | Skills | `.claude/skills/` | `.agents/skills/`, the cross-client location of the [Agent Skills](https://agentskills.io) standard; installed when `--harness` names any tool other than claude |
-| Slash commands | `.claude/commands/` | no equivalent; the skills cover the same ground |
+| Loop commands (`sdlc-plan`, `-build`, `-verify`, `-review`, `-log`, `-doctor`) | `/` commands in `.claude/commands/` | skills of the same name in `.agents/skills/`, so they appear in a `/` menu that lists skills (Antigravity); `CARD.md` names what each runs on any tool |
 | Tool-call hooks (`--hooks`) | yes | Gemini CLI: all six rules; Cursor: the three shell rules; both through `.claude/hooks/adapter.sh`. Other tools: no |
 | Git hooks (`--git-hooks`) | yes | yes — git runs them for every agent and every human |
 | CI (`--scaffold-ci`) | yes | yes — the doctor runs strictly before the quality commands |
@@ -350,7 +350,7 @@ overwrites an existing file, never installs a dependency, and leaves runtime and
 version confirmation to the project charter. Generated jobs are manual-only until a
 human confirms the commands and deliberately enables push or pull-request triggers.
 
-The installer copies `AGENTS.md` to the project root, `docs/` into the project, the five
+The installer copies `AGENTS.md` to the project root, `docs/` into the project, the six
 slash commands into `.claude/commands/`, and the selected skills into `.claude/skills/`;
 substitutes `{{PROJECT_NAME}}`, `{{PREFIX}}`, and `{{DOCS_DIR}}` in all of them; adds a
 `CLAUDE.md` pointer if none exists; and records checksums for portable files in

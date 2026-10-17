@@ -4,6 +4,23 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **`/sdlc-build`: the loop's missing entry point.** BUILD had no command, so after
+  `/sdlc-plan` nothing said what to run next. It refuses to start without an approved
+  plan, puts the reproducing test first for a defect, keeps to the plan's file list
+  (`plan-check`), files anything discovered as `Parked`, and stops before VERIFY.
+- **The loop commands as skills, for tools whose `/` menu lists skills.** In Antigravity
+  `/sdlc-plan` matched the nearest checklist skill (`sdlc-scrape-compliance`), because
+  the commands existed only for Claude Code. When `--harness` names any tool other than
+  claude, `sdlc-plan`, `-build`, `-verify`, `-review` and `-log` are generated from the
+  command files into `.agents/skills/` (never `.claude/skills/`). `sdlc-build`'s
+  description restricts it to an explicit request. `CARD.md` gains a table of what each
+  name runs on any tool, and tells the agent never to map an unknown `/sdlc-*` name to
+  the nearest skill.
+- **Upgrade safety for shared skills.** A file under `.agents/skills/` the kit does not
+  own, such as a hand-made copy, is left alone and named; `--adopt` replaces it after a
+  backup. `--upgrade` now adds a kit command or loop skill a project is missing, once it
+  has any.
+
 - **The tool-call hooks under Gemini CLI and Cursor.** `optional/hooks/adapter.sh`
   runs any kit hook behind another harness, translating the payload and the verdict.
   `--hooks` with `--harness gemini` merges all six rules into `.gemini/settings.json`
