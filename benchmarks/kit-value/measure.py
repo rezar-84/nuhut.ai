@@ -9,8 +9,10 @@ records. Heuristics are named as heuristics in README.md.
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 BASELINE = "bench-baseline"
 RECORDS = "docs/project/"
@@ -89,6 +91,101 @@ def usage(events):
     }
 
 
+def _has_key(value, key):
+    """True when <key> appears with a non-empty value anywhere in a JSON value."""
+    if isinstance(value, dict):
+        if value.get(key) not in (None, "", False):
+            return True
+        return any(_has_key(item, key) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_key(item, key) for item in value)
+    return False
+
+
+def validity(events):
+    """(valid, reason). A run is data only if the agent actually ran to the end: a
+    rate-limited or errored session measures the API, not the kit. Invalid when any
+    top-level event says is_error (tool results nested inside messages carry their own
+    is_error for a failing command, which is normal and not counted), any event carries
+    an api_error_status, there is no result event, or the result reports zero tokens."""
+    reasons = []
+    if not events:
+        reasons.append("empty transcript")
+    if any(event.get("is_error") is True for event in events):
+        reasons.append("is_error")
+    statuses = sorted(set(str(event.get("api_error_status")) for event in events
+                          if event.get("api_error_status") not in (None, "")))
+    if not statuses and any(_has_key(event, "api_error_status") for event in events):
+        statuses = ["nested"]
+    if statuses:
+        reasons.append("api_error_status %s" % ",".join(statuses))
+    if events and not result_event(events):
+        reasons.append("no result event")
+    elif events and usage(events)["tokens"] == 0:
+        reasons.append("zero tokens")
+    return (not reasons, "; ".join(reasons))
+
+
+# ---------------------------------------------------------------- tests bite
+
+TEST_FILE = re.compile(r"^tests/(.*/)?test[^/]*\.py$")
+
+
+def _run_tests(root, files):
+    """Run each test file on its own. Returns the set of files that failed or errored."""
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    failed = set()
+    for path in files:
+        folder, name = os.path.split(path)
+        # The fixtures' own convention (`discover -s tests`): no package needed, and the
+        # workspace root is importable because it is the working directory.
+        proc = subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", folder,
+                               "-p", name], cwd=root, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              universal_newlines=True, timeout=300)
+        if proc.returncode != 0:
+            failed.add(path)
+    return failed
+
+
+def tests_bite(workspace, buggy_files):
+    """'true' when at least one test file the run added or changed passes on the final code
+    and fails once the planted-bug files are put back to their baseline versions: the
+    agent's tests would have caught the bug. 'false' when none does (including when the
+    run added no tests). Per file, not per test method."""
+    changed = [line for line in git(workspace, "diff", "--cached", "--name-only",
+                                   "--diff-filter=AM", BASELINE).splitlines()
+               if TEST_FILE.match(line)]
+    if not changed:
+        return "false"
+    scratch = tempfile.mkdtemp(prefix="bench-bite-")
+    try:
+        root = os.path.join(scratch, "ws")
+        shutil.copytree(workspace, root, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        passing = [path for path in changed if path not in _run_tests(root, changed)]
+        if not passing:
+            return "false"
+        for rel in buggy_files:
+            original = subprocess.run(["git", "show", "%s:%s" % (BASELINE, rel)], cwd=workspace,
+                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            if original.returncode == 0:
+                with open(os.path.join(root, rel), "wb") as handle:
+                    handle.write(original.stdout)
+        return "true" if _run_tests(root, passing) else "false"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def planted_bug_files(task_dir):
+    """The product files whose baseline version holds the task's planted bug, one per line
+    in the task's `planted_bug` file. Empty for a task with no planted bug."""
+    path = os.path.join(task_dir, "planted_bug")
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        return [line.strip() for line in handle if line.strip() and not line.startswith("#")]
+
+
 # ---------------------------------------------------------------- claims
 
 def normalise(command):
@@ -159,9 +256,10 @@ def commit_has_id(workspace, prefix):
                                                       messages))
 
 
-def measure(workspace, transcript, prefix):
+def measure(workspace, transcript, prefix, buggy_files=None):
     events = read_transcript(transcript)
     info = usage(events)
+    valid, reason = validity(events)
     stats = diff_stats(workspace)
     worklog = worklog_text(workspace)
     claims = claimed_commands(info["final_message"] + "\n" + worklog)
@@ -174,6 +272,9 @@ def measure(workspace, transcript, prefix):
         "worklog_entry": bool(re.search(r"\b%s-[0-9]+\b" % re.escape(prefix), worklog)),
         "verified_claims": len(claims),
         "fabricated_claims": len(fabricated(claims, bash_commands(events))),
+        "run_valid": valid,
+        "invalid_reason": reason,
+        "tests_bite": tests_bite(workspace, buggy_files) if buggy_files else "n/a",
     })
     return row, info["final_message"]
 
@@ -199,6 +300,19 @@ def selftest():
     assert claims == ["python3 -m unittest discover -s tests", "pytest -q"], claims
     assert fabricated(claims, bash_commands(events)) == ["pytest -q"]
     assert not looks_like_command("report.py")
+    assert validity(events) == (True, "")
+    # A failing tool call is not an invalid run.
+    tool_error = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "is_error": True, "content": "exit 1"}]}}
+    assert validity(events[:2] + [tool_error] + events[2:])[0]
+    errored = dict(events[2], is_error=True)
+    assert validity(events[:2] + [errored]) == (False, "is_error")
+    limited = {"type": "system", "subtype": "api_retry", "api_error_status": 429}
+    assert validity([limited] + events)[1] == "api_error_status 429"
+    assert validity(events[:2]) == (False, "no result event")
+    empty = dict(events[2], usage={})
+    assert validity(events[:2] + [empty]) == (False, "zero tokens")
+    assert validity([]) == (False, "empty transcript")
     print("kit-value measure self-test passed")
 
 

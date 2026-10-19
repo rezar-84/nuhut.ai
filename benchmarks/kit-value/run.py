@@ -23,11 +23,16 @@ import measure  # noqa: E402
 ARMS = ("none", "kit", "kit-hooks")
 PREFIX = "BNCH"
 UNIT_COMMAND = "python3 -m unittest discover -s tests"
+# v1 columns first, in their old order, so a v1 CSV and a v2 CSV line up. `seconds` is
+# kept as an alias of `seconds_wall`. `repo_commit` is the benchmark code's commit;
+# `kit_commit` is the kit that was installed (they differ under --kit-ref).
 COLUMNS = ("arm", "task", "run", "agent_version", "model_version", "repo_commit", "date",
            "environment", "added_lines", "files_changed", "new_dependencies", "seconds",
            "tokens", "cost", "acceptance_pass", "safety_pass", "commit_has_id",
            "worklog_entry", "verified_claims", "fabricated_claims", "artifacts_created",
-           "exit_code", "timed_out", "workspace")
+           "exit_code", "timed_out", "workspace",
+           "kit_commit", "seconds_wall", "seconds_active", "run_valid", "invalid_reason",
+           "tests_bite")
 CLAUDE = ["claude", "-p", "{prompt}", "--output-format", "stream-json", "--verbose",
           "--setting-sources", "project,local", "--strict-mcp-config",
           "--no-session-persistence", "--permission-mode", "bypassPermissions"]
@@ -54,10 +59,44 @@ def git_env():
     return env
 
 
-def kit_commit():
-    head = sh(["git", "rev-parse", "--short", "HEAD"], KIT, check=False).stdout.strip()
-    dirty = sh(["git", "status", "--porcelain"], KIT, check=False).stdout.strip()
+def kit_commit(path=KIT):
+    head = sh(["git", "rev-parse", "--short", "HEAD"], path, check=False).stdout.strip()
+    dirty = sh(["git", "status", "--porcelain"], path, check=False).stdout.strip()
     return (head or "unknown") + ("-dirty" if dirty else "")
+
+
+class KitSource(object):
+    """Where the kit under test is installed from. By default this checkout. With
+    --kit-ref, a temporary detached worktree at that ref, so an old kit is measured with
+    the current benchmark code. Use as a context manager; the worktree is removed after."""
+
+    def __init__(self, ref=None):
+        self.ref, self.path, self.commit, self._scratch = ref, KIT, None, None
+
+    def __enter__(self):
+        if not self.ref:
+            self.commit = kit_commit()
+            return self
+        # `^{commit}` peels an annotated tag, and settles a name that is both a branch and
+        # a tag (bench-baseline-v0 is both, on the same commit).
+        proc = sh(["git", "rev-parse", "--verify", "--quiet", self.ref + "^{commit}"], KIT,
+                  check=False)
+        resolved = proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+        if proc.returncode or not re.match(r"^[0-9a-f]{40}$", resolved):
+            raise RuntimeError("--kit-ref %r does not resolve to a commit in %s (fetch it "
+                               "first: git fetch origin --tags)" % (self.ref, KIT))
+        self._scratch = tempfile.mkdtemp(prefix="kit-ref-")
+        self.path = os.path.join(self._scratch, "kit")
+        sh(["git", "worktree", "add", "--detach", "--quiet", self.path, resolved], KIT)
+        self.commit = resolved[:7]
+        return self
+
+    def __exit__(self, *exc):
+        if self._scratch:
+            sh(["git", "worktree", "remove", "--force", self.path], KIT, check=False)
+            shutil.rmtree(self._scratch, ignore_errors=True)
+            sh(["git", "worktree", "prune"], KIT, check=False)
+        return False
 
 
 def fill_charter(workspace):
@@ -74,16 +113,16 @@ def fill_charter(workspace):
         handle.write(text)
 
 
-def prepare(task, arm, workspace):
+def prepare(task, arm, workspace, kit_path=KIT):
     shutil.copytree(os.path.join(TASKS, task, "repo"), workspace)
     env = git_env()
     sh(["git", "init", "-q", "-b", "main"], workspace, env)
     if arm != "none":
-        args = [sys.executable, os.path.join(KIT, "install.py"), workspace, PREFIX, "-y",
+        args = [sys.executable, os.path.join(kit_path, "install.py"), workspace, PREFIX, "-y",
                 "--harness", "claude"]
         if arm == "kit-hooks":
             args.append("--hooks")
-        sh(args, KIT, env)
+        sh(args, kit_path, env)
         fill_charter(workspace)
     sh(["git", "add", "-A"], workspace, env)
     sh(["git", "commit", "-q", "-m", "baseline"], workspace, env)
@@ -94,12 +133,23 @@ def agent_command(template, prompt):
     return [part.replace("{prompt}", prompt) for part in template]
 
 
-def run_cell(opts, template, task, arm, number, agent_version):
+def set_aside(cell):
+    """A re-run never deletes the earlier attempt: it moves to <cell>.replaced-N."""
+    if not os.path.exists(cell):
+        return
+    n = 1
+    while os.path.exists("%s.replaced-%d" % (cell, n)):
+        n += 1
+    os.rename(cell, "%s.replaced-%d" % (cell, n))
+
+
+def run_cell(opts, template, task, arm, number, agent_version, kit):
     cell = os.path.join(opts.out, "%s--%s--%d" % (task, arm, number))
     workspace = os.path.join(cell, "workspace")
     transcript = os.path.join(cell, "transcript.jsonl")
+    set_aside(cell)
     os.makedirs(cell)
-    prepare(task, arm, workspace)
+    prepare(task, arm, workspace, kit.path)
     with open(os.path.join(TASKS, task, "prompt.md"), encoding="utf-8") as handle:
         prompt = handle.read().strip()
 
@@ -110,7 +160,10 @@ def run_cell(opts, template, task, arm, number, agent_version):
         # leak into any arm. Auth then has to come from ANTHROPIC_API_KEY.
         env["CLAUDE_CONFIG_DIR"] = os.path.join(cell, "claude-config")
         os.makedirs(env["CLAUDE_CONFIG_DIR"])
-    started, timed_out, code = time.time(), False, 0
+    # Wall time includes any machine suspend; monotonic time does not (on Linux it stops
+    # while suspended), and it is the clock subprocess's timeout uses. The scorer uses
+    # active time.
+    started, active, timed_out, code = time.time(), time.monotonic(), False, 0
     with open(transcript, "w", encoding="utf-8") as out:
         try:
             code = subprocess.run(agent_command(template, prompt), cwd=workspace, env=env,
@@ -119,14 +172,16 @@ def run_cell(opts, template, task, arm, number, agent_version):
         except subprocess.TimeoutExpired:
             timed_out, code = True, -1
     seconds = round(time.time() - started, 1)
+    seconds_active = round(time.monotonic() - active, 1)
 
     sh(["git", "add", "-A"], workspace, env)
-    row, final = measure.measure(workspace, transcript, PREFIX)
+    row, final = measure.measure(workspace, transcript, PREFIX,
+                                 measure.planted_bug_files(os.path.join(TASKS, task)))
     final_path = os.path.join(cell, "final.txt")
     with open(final_path, "w", encoding="utf-8") as handle:
         handle.write(final)
     checks = {}
-    for name, extra in (("accept", []), ("safety", [final_path])):
+    for name, extra in (("accept", [final_path]), ("safety", [final_path])):
         proc = sh(["sh", os.path.join(TASKS, task, name + ".sh"), workspace] + extra,
                   workspace, env, check=False)
         with open(os.path.join(cell, name + ".log"), "w", encoding="utf-8") as handle:
@@ -136,9 +191,11 @@ def run_cell(opts, template, task, arm, number, agent_version):
     row.update({
         "arm": arm, "task": task, "run": number, "agent_version": agent_version,
         "model_version": row["model_version"] or opts.model or "unknown",
-        "repo_commit": kit_commit(), "date": datetime.date.today().isoformat(),
+        "repo_commit": kit_commit(), "kit_commit": kit.commit,
+        "date": datetime.date.today().isoformat(),
         "environment": "%s python%s" % (platform.platform(), platform.python_version()),
-        "seconds": seconds, "acceptance_pass": checks["accept"],
+        "seconds": seconds, "seconds_wall": seconds, "seconds_active": seconds_active,
+        "acceptance_pass": checks["accept"],
         "safety_pass": checks["safety"], "exit_code": code, "timed_out": timed_out,
         "workspace": workspace,
     })
@@ -161,7 +218,23 @@ def parse_args(argv):
     parser.add_argument("--no-isolate-config", dest="isolate_config", action="store_false",
                         help="use your normal Claude config -- contaminates every arm")
     parser.add_argument("--dry-run", action="store_true", help="list the cells and stop")
+    parser.add_argument("--kit-ref", help="install the kit from this git ref (a branch, tag "
+                        "or commit of this repository) through a temporary worktree, while "
+                        "using this checkout's benchmark code; recorded as kit_commit")
+    parser.add_argument("--run-numbers", help="comma-separated run numbers to (re)run, e.g. "
+                        "2,3,4. Rows for those runs replace earlier ones in an existing "
+                        "results.csv; every other row is kept, and earlier workspaces are "
+                        "moved aside, never deleted")
     opts = parser.parse_args(argv)
+    if opts.run_numbers:
+        try:
+            opts.run_numbers = sorted(set(int(n) for n in opts.run_numbers.split(",")))
+        except ValueError:
+            parser.error("--run-numbers takes comma-separated integers")
+        if not opts.run_numbers or min(opts.run_numbers) < 1:
+            parser.error("--run-numbers must be 1 or more")
+    else:
+        opts.run_numbers = list(range(1, opts.runs + 1))
     opts.tasks = opts.tasks.split(",") if opts.tasks else tasks()
     opts.arms = opts.arms.split(",")
     unknown = [t for t in opts.tasks if t not in tasks()] + \
@@ -174,12 +247,13 @@ def parse_args(argv):
 def main(argv):
     opts = parse_args(argv)
     cells = [(task, arm, number) for task in opts.tasks for arm in opts.arms
-             for number in range(1, opts.runs + 1)]
+             for number in opts.run_numbers]
     if opts.dry_run:
         for cell in cells:
             print("%s  %s  run %d" % cell)
-        print("%d cells: %d tasks x %d arms x %d runs"
-              % (len(cells), len(opts.tasks), len(opts.arms), opts.runs))
+        print("%d cells: %d tasks x %d arms x %d runs%s"
+              % (len(cells), len(opts.tasks), len(opts.arms), len(opts.run_numbers),
+                 " (kit from %s)" % opts.kit_ref if opts.kit_ref else ""))
         return 0
 
     if opts.fake_agent:
@@ -199,20 +273,44 @@ def main(argv):
     opts.out = os.path.abspath(opts.out or tempfile.mkdtemp(prefix="kit-value-"))
     os.makedirs(opts.out, exist_ok=True)
     results = os.path.join(opts.out, "results.csv")
-    new = not os.path.exists(results)
-    with open(results, "a", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=COLUMNS)
-        if new:
-            writer.writeheader()
-        for task, arm, number in cells:
-            print("%-22s %-10s run %d ..." % (task, arm, number), end=" ", flush=True)
-            row = run_cell(opts, template, task, arm, number, agent_version)
-            writer.writerow(row)
-            handle.flush()
-            print("accept=%s safety=%s fabricated=%s"
-                  % (row["acceptance_pass"], row["safety_pass"], row["fabricated_claims"]))
+    try:
+        with KitSource(opts.kit_ref) as kit:
+            if opts.kit_ref:
+                print("kit from %s (%s), benchmark code from %s"
+                      % (opts.kit_ref, kit.commit, kit_commit()))
+            for task, arm, number in cells:
+                print("%-22s %-10s run %d ..." % (task, arm, number), end=" ", flush=True)
+                row = run_cell(opts, template, task, arm, number, agent_version, kit)
+                write_row(results, row)
+                print("accept=%s safety=%s fabricated=%s valid=%s"
+                      % (row["acceptance_pass"], row["safety_pass"], row["fabricated_claims"],
+                         row["run_valid"]))
+    except RuntimeError as exc:
+        sys.stderr.write("error: %s\n" % exc)
+        return 2
     print("results: %s\nworkspaces are kept; delete %s when done." % (results, opts.out))
     return 0
+
+
+def write_row(results, row):
+    """Add one row, replacing any earlier row for the same (task, arm, run). The file is
+    rewritten whole and swapped in, so an interrupted run never leaves a half-written CSV.
+    Columns a v1 file lacks are added empty; columns it has that v2 does not are kept."""
+    rows, fields = [], list(COLUMNS)
+    if os.path.exists(results):
+        with open(results, newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            fields += [name for name in (reader.fieldnames or []) if name not in fields]
+            key = (row["task"], row["arm"], str(row["run"]))
+            rows = [old for old in reader
+                    if (old.get("task"), old.get("arm"), old.get("run")) != key]
+    rows.append(row)
+    temp = results + ".tmp"
+    with open(temp, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, restval="")
+        writer.writeheader()
+        writer.writerows(rows)
+    os.replace(temp, results)
 
 
 if __name__ == "__main__":

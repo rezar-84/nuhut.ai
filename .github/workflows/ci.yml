@@ -16,6 +16,10 @@ jobs:
         python-version: ["3.8", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history and tags: the benchmark and upgrade tests install older kit
+          # commits (bench-baseline-v0, ecab81b) through git worktrees.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
