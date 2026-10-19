@@ -1700,6 +1700,131 @@ def test_lean_kit():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_separation():
+    print("separation of duties: trailers, evidence ledger, independent review")
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-sep-"))
+    subprocess.call(["git", "init", "-q", d])
+    write(d, "app.py", "def add(a, b):\n    return a + b\n")
+    write(d, "tests/test_app.py", "import unittest\nfrom app import add\n\n\nclass T(unittest.TestCase):\n"
+                                  "    def test_add(self):\n        self.assertEqual(add(1, 2), 3)\n")
+    write(d, ".gitignore", "__pycache__/\n")
+    code, out = run([d, "SEP", "-y", "--git-hooks"])
+    check("installs", code == 0, out[-300:])
+    write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
+        "| `checks.unit` | |", "| `checks.unit` | `%s -m unittest discover -s tests` |" % sys.executable))
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+
+    def sdlc(*args, **extra):
+        p = subprocess.Popen([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, env=dict(env, **extra))
+        text = p.communicate()[0].decode("utf-8", "replace")
+        return p.returncode, text
+
+    def commit(*messages):
+        args = []
+        for m in messages:
+            args += ["-m", m]
+        p = subprocess.Popen(git + ["commit", "-q", "--allow-empty"] + args, cwd=d,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        text = p.communicate()[0].decode("utf-8", "replace")
+        return p.returncode, text
+
+    subprocess.call(git + ["add", "-A"], cwd=d)
+    code, out = commit("Install the kit", "Work-Item: SEP-1\nAgent: claude-code\nModel: claude-opus-5-5")
+    check("a commit with only a Work-Item trailer passes the git hook", code == 0, out)
+    code, out = commit("Tidy", "Work-Item: none")
+    check("a Work-Item trailer that names no ID is refused", code != 0 and "names no ID" in out, out)
+    code, out = commit("SEP-2 tidy")
+    check("the 3.x form, the ID in the subject, still passes", code == 0, out)
+
+    # Trailers: parsing, and what `sdlc.py trailers` prints from flags and environment.
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import sdlc as runtime
+    sys.path.pop(0)
+    check("trailers are read from the last paragraph only",
+          runtime.trailers("SEP-1 fix\n\nAgent: not-a-trailer here\n\nWork-Item: SEP-1\nModel: gpt-5")
+          == {"Work-Item": "SEP-1", "Model": "gpt-5"})
+    check("model families", runtime.model_family("claude-opus-5-5") == "anthropic"
+          and runtime.model_family("gpt-5-codex") == "openai" and runtime.model_family("gemini-3-pro") == "google"
+          and runtime.model_family("unknown") == "unknown")
+    code, out = sdlc("trailers", "SEP-3", "--model", "claude-opus-5-5", CLAUDECODE="1")
+    check("trailers prints the block, agent from the environment",
+          out.strip() == "Work-Item: SEP-3\nAgent: claude-code\nModel: claude-opus-5-5", out)
+
+    # Evidence ledger: verify writes one committed line per stage it ran.
+    write(d, "app.py", "def add(a, b):\n    return a + b  # SEP-4\n")
+    code, out = sdlc("verify", "--stage", "unit")
+    rows = [json.loads(l) for l in read(d, "docs/project/evidence-ledger.jsonl").splitlines() if l.strip()]
+    check("verify appends a ledger line with command, exit code, output hash, time and commit",
+          len(rows) == 1 and rows[0]["stage"] == "unit" and rows[0]["exit_code"] == 0
+          and len(rows[0]["output_sha256"]) == 64 and rows[0]["time"] and len(rows[0]["commit"]) == 40
+          and rows[0]["dirty"] is True, str(rows))
+    subprocess.call(git + ["add", "-A"], cwd=d)
+    commit("Add a comment", "Work-Item: SEP-4\nAgent: claude-code\nModel: claude-opus-5-5")
+    worklog = read(d, "docs/project/worklog.md")
+    write(d, "docs/project/worklog.md", worklog.replace(
+        "<!-- New entries go here, above the older ones. -->",
+        "<!-- New entries go here, above the older ones. -->\n\n## SEP-4 — comment\n\nVerified: unit passes.\n\n"
+        "## SEP-2 — tidy\n\nVerified: unit passes.\n"))
+    code, out = sdlc("doctor")
+    check("Verified with a ledger run on the item's (uncommitted) change is accepted",
+          not re.search(r"evidence .*SEP-4", out), out)
+    check("Verified with no ledger run for the item is flagged",
+          "SEP-2" in out and "evidence ledger has no" in out, out)
+
+    # Independent review: a Tier 1 item, built, whose commits name the author.
+    backlog = read(d, "docs/project/backlog.md")
+    i = backlog.index("## Done")
+    j = backlog.index("\n", backlog.index("| --- ", i)) + 1
+    write(d, "docs/project/backlog.md", backlog[:j] + "| SEP-4 | Comment | 1 | security | | Done | 2026-10-19 |\n"
+          "| SEP-1 | Install | 2 | qa | | Done | 2026-10-19 |\n" + backlog[j:])
+    code, out = sdlc("doctor", "--strict")
+    check("a built Tier 1 item with no independent review fails",
+          code == 1 and "SEP-4" in out and "no review from a model family other than" in out, out)
+    check("Tier 2 is not judged by default", not re.search(r"SEP-1 .*Tier 2", out), out)
+    write(d, "stub_same.py", "import sys\nsys.stdin.read()\nprint('Model: claude-sonnet-5-5')\n"
+                             "print('Verdict: Pass')\nprint('Checked: the diff')\n")
+    write(d, "stub_other.py", "import sys\nprompt = sys.stdin.read()\nassert 'Work item SEP-4, Tier 1' in prompt\n"
+                              "assert '## Playbook' in prompt and '## Diff' in prompt\n"
+                              "print('Model: gpt-5')\nprint('Verdict: Pass with conditions')\n")
+    code, out = sdlc("review", "SEP-4", "--role", "security", "--by", "cmd:%s stub_same.py" % sys.executable)
+    check("a same-family review is saved and labelled self-check",
+          code == 0 and "self-check" in out and "anthropic" not in out.split("verdict")[0][-5:], out)
+    code, out = sdlc("doctor", "--strict")
+    check("a self-check does not clear the gate", code == 1 and "SEP-4" in out, out)
+    code, out = sdlc("review", "SEP-4", "--role", "security", "--by", "cmd:%s stub_other.py" % sys.executable)
+    check("an other-family review is saved as independent", code == 0 and "independent;" in out, out)
+    saved = [n for n in os.listdir(os.path.join(d, "docs", "project", "reviews")) if n.startswith("SEP-4-ship-security")]
+    texts = [read(os.path.join(d, "docs", "project", "reviews"), n) for n in saved]
+    text = next((t for t in texts if "gpt-5" in t), "")
+    check("the review file records reviewer and author identity",
+          "**Reviewer model:** gpt-5" in text and "**Author:** claude-code / claude-opus-5-5" in text
+          and "**Independence:** independent" in text and "Verdict: Pass with conditions" in text, text[:600])
+    code, out = sdlc("doctor", "--strict")
+    check("an independent review clears the gate", "no review from a model family" not in out, out)
+    write(d, "docs/project/charter.md", re.sub(r"\| \*\*Independent review required for\*\* \|[^\n]*",
+                                               "| **Independent review required for** | `Tier 1 and 2` |",
+                                               read(d, "docs/project/charter.md")))
+    commit("Wire it", "Work-Item: SEP-1\nAgent: claude-code\nModel: claude-opus-5-5")
+    code, out = sdlc("doctor", "--strict")
+    check("the charter can extend the rule to Tier 2", code == 1 and "SEP-1" in out and "Tier 2" in out, out)
+    if shutil.which("codex") is None:
+        code, out = sdlc("review", "SEP-4", "--role", "security", "--by", "codex")
+        check("a missing harness CLI fails with a clear message", code == 2 and "codex is not installed" in out, out)
+
+    # Budgets: reported against Tokens/Minutes trailers, never enforced.
+    write(d, "docs/project/charter.md", re.sub(r"\| \*\*Agent budget per tier\*\* \|[^\n]*",
+                                               "| **Agent budget per tier** | Tier 1: 1k tokens, 5 min |",
+                                               read(d, "docs/project/charter.md")))
+    commit("More", "Work-Item: SEP-4\nAgent: claude-code\nModel: claude-opus-5-5\nTokens: 5000\nMinutes: 3")
+    code, out = sdlc("metrics", "--json")
+    check("metrics reports usage against the tier's budget",
+          "1 of 1 items with usage recorded are over their tier's budget: SEP-4" in out, out[-600:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_dashboard():
     print("status page and its generated state")
     d = fixture("next")
@@ -2519,7 +2644,7 @@ def main():
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_git_hooks,
                  test_runtime, test_view, test_kit_value_benchmark, test_kit_value_checks,
-                 test_upgrade_from_350, test_lean_kit,
+                 test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
                  test_domain_detection,
                  test_role_and_skill_selection, test_profile,

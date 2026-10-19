@@ -71,6 +71,38 @@ approved on trust, which defeats the purpose.
 
 ---
 
+## Commit trailers: who made the change
+
+Every commit made under this kit ends with three trailers, so a reviewer, the doctor and
+the viewer can tell which item a change belongs to and which agent and model wrote it:
+
+```
+Work-Item: {{PREFIX}}-123
+Agent: claude-code
+Model: claude-opus-5-5
+```
+
+`Work-Item` is required: the commit hooks refuse a commit with neither the trailer nor
+the ID in the message (the 3.x form, still accepted). `Agent` and `Model` are what the
+independence rule compares (`02-role-reviews.md`): an item whose commits carry them gets
+judged; one without them does not. Optional `Tokens` and `Minutes` trailers feed the
+charter's **Agent budget per tier**.
+
+`python3 .ai-sdlc/bin/sdlc.py trailers <ID>` prints the block. It reads `AI_SDLC_AGENT` and
+`AI_SDLC_MODEL` first, then what the harness exposes:
+
+| Harness | Agent from | Model from |
+| --- | --- | --- |
+| Claude Code | `CLAUDECODE` → `claude-code` | `ANTHROPIC_MODEL` if set; otherwise the agent writes the id from its own system prompt |
+| Gemini CLI | `GEMINI_CLI` → `gemini-cli` | `GEMINI_MODEL` if set; otherwise the agent writes it |
+| Codex | `CODEX_SANDBOX` or `CODEX_HOME` → `codex` | `CODEX_MODEL` or `OPENAI_MODEL` if set; otherwise the agent writes it |
+| Cursor | `CURSOR_TRACE_ID` or `CURSOR_AGENT` → `cursor` | not exposed; the agent writes it |
+| Any other, or a human | `AI_SDLC_AGENT` | `AI_SDLC_MODEL`, or `human` |
+
+Where the script prints `unknown`, replace it with what you know. Never guess a model:
+`unknown` is an honest value, and the doctor treats an unknown author as unjudgeable,
+not as independent.
+
 ## Approvals
 
 | Change | Approval |

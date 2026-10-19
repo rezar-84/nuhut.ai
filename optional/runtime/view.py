@@ -602,6 +602,17 @@ def metrics(rt, project, model, today=None):
         "%d of %d runs (%d%%)" % (len(passed), len(ran), 100 * len(passed) // len(ran))
         if ran else "no runs recorded", "sdlc.py verify evidence under .ai-sdlc/evidence/")
 
+    try:
+        usage = rt.budget_usage(project)
+    except Exception:
+        usage = []
+    if usage:
+        over = [u for u in usage if (u["budget"].get("tokens") and u["tokens"] > u["budget"]["tokens"])
+                or (u["budget"].get("minutes") and u["minutes"] > u["budget"]["minutes"])]
+        add("Agent budget", "leading",
+            "%d of %d items with usage recorded are over their tier's budget%s"
+            % (len(over), len(usage), (": " + ", ".join(u["item"] for u in over)) if over else ""),
+            "Tokens and Minutes commit trailers against the charter's Agent budget per tier")
     done = [it for it in items if it.get("column") == "Done"]
     recent = [it for it in done if _date(it.get("extra", {}).get("Completed"))
               and (today - _date(it["extra"]["Completed"])).days <= 28]

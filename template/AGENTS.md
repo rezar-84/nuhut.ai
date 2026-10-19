@@ -104,7 +104,8 @@ the fix, and check it bites with `python3 .ai-sdlc/bin/sdlc.py bite <test comman
 
 ## 6. Change control
 
-- Commits are small and carry the ID. Branches: `<type>/{{PREFIX}}-###-slug`.
+- Commits are small and end with `Work-Item`, `Agent` and `Model` trailers
+  (`sdlc.py trailers <ID>` prints them). Branches: `<type>/{{PREFIX}}-###-slug`.
 - Never commit or paste into a record a secret, credential, `.env` content or customer
   data. Name it; do not quote it.
 - Expensive-to-reverse decisions get an ADR in `{{DOCS_DIR}}/project/adr/`.

@@ -25,6 +25,14 @@ fi
 
 # The prefix is letters only (the installer refuses anything else), so it is safe in a
 # pattern. IDs are whole tokens: PREFIX-12, #12 and GH-12 always count.
+# A Work-Item trailer is the 4.0 form. Its value must be an ID: a trailer that names
+# nothing ("Work-Item: none") is refused rather than taken as compliance.
+trailer=$(printf '%s\n' "$cmd" | sed -n 's/^[[:space:]]*Work-Item:[[:space:]]*\([^[:space:]"'"'"']*\).*/\1/p' | tail -1)
+if [ -n "$trailer" ]; then
+  printf '%s' "$trailer" | grep -Eiq "^(${prefix}-[0-9]+|#[0-9]+|GH-[0-9]+|[A-Za-z][0-9]+(\.[0-9]+)*)$" && exit 0
+  hook_deny "work item ID: the Work-Item trailer names no ID ($trailer); write Work-Item: ${prefix}-###."
+fi
+# The 3.x form, still accepted: the ID anywhere in the message.
 if printf '%s' "$cmd" | grep -Eiq "(^|[^A-Za-z0-9])(${prefix}-[0-9]+|#[0-9]+|GH-[0-9]+)([^A-Za-z0-9]|$)"; then
   exit 0
 fi

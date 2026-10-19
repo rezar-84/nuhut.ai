@@ -12,6 +12,8 @@ markdown commands that call this.
     python3 .ai-sdlc/bin/sdlc.py view [--no-open] [--json] [--serve [--port 8765]]
     python3 .ai-sdlc/bin/sdlc.py metrics [--json]
     python3 .ai-sdlc/bin/sdlc.py log --since main [--write]
+    python3 .ai-sdlc/bin/sdlc.py trailers ACME-12 [--agent X --model Y]
+    python3 .ai-sdlc/bin/sdlc.py review ACME-12 --role security --by codex|gemini|claude|cmd:<command>
     python3 .ai-sdlc/bin/sdlc.py bite [--base REF] <test command> | --restore
 
 Standard library only. Installed and upgraded by the kit, so a local edit blocks
@@ -832,6 +834,8 @@ def doctor(project, today=None):
     today = today or datetime.date.today()
     check_bite_leftover(project, out)
     check_hook_dependency(project, out)
+    check_identity(project, out)
+    check_verified_claims(project, out)
     check_placeholders(project, out)
     check_pointer(project, out)
     check_charter(project, out)
@@ -955,6 +959,11 @@ def verify(project, selected, timeout, parallel=False):
     }
     with open(os.path.join(folder, "summary.json"), "w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)
+    ledger_append(project, [{
+        "time": summary["generated"], "commit": head, "dirty": dirty, "stage": e["stage"],
+        "command": e["command"], "exit_code": e.get("exit_code"), "result": e["result"],
+        "output_sha256": e.get("log_sha256", ""), "run": os.path.basename(folder)}
+        for e in results if "exit_code" in e])
     text = summary_markdown(summary, os.path.relpath(folder, project.root))
     with open(os.path.join(folder, "summary.md"), "w", encoding="utf-8") as handle:
         handle.write(text)
@@ -974,6 +983,374 @@ def evidence_runs(project):
         except (IOError, OSError, ValueError):
             continue
     return runs
+
+
+# ---------------------------------------------------------------- identity
+
+TRAILER = re.compile(r"^([A-Z][A-Za-z-]+):[ \t]*(.+?)[ \t]*$")
+
+
+def trailers(message):
+    """{key: value} from the trailer block, the last paragraph of a commit message."""
+    paragraphs = [p for p in re.split(r"\n\s*\n", message.strip()) if p.strip()]
+    found = {}
+    if len(paragraphs) < 2:
+        return found
+    for line in paragraphs[-1].splitlines():
+        m = TRAILER.match(line.strip())
+        if m:
+            found[m.group(1)] = m.group(2)
+    return found
+
+
+# Each harness fills Agent and Model differently; `sdlc.py trailers` reads what the
+# environment gives and the agent supplies the rest (process/05-change-control.md).
+AGENT_ENV = (("CLAUDECODE", "claude-code"), ("GEMINI_CLI", "gemini-cli"),
+             ("CODEX_SANDBOX", "codex"), ("CODEX_HOME", "codex"),
+             ("CURSOR_TRACE_ID", "cursor"), ("CURSOR_AGENT", "cursor"))
+MODEL_ENV = ("AI_SDLC_MODEL", "ANTHROPIC_MODEL", "CLAUDE_CODE_MODEL", "GEMINI_MODEL",
+             "OPENAI_MODEL", "CODEX_MODEL")
+
+
+def identity(agent=None, model=None):
+    if not agent:
+        agent = os.environ.get("AI_SDLC_AGENT", "")
+    if not agent:
+        agent = next((name for var, name in AGENT_ENV if os.environ.get(var)), "unknown")
+    if not model:
+        model = next((os.environ[var] for var in MODEL_ENV if os.environ.get(var)), "unknown")
+    return agent, model
+
+
+def model_family(name):
+    """Coarse vendor family, which is what independence is judged on."""
+    n = (name or "").lower()
+    for family, marks in (("anthropic", ("claude", "anthropic", "opus", "sonnet", "haiku",
+                                         "fable", "mythos")),
+                          ("openai", ("gpt", "openai", "codex", "o1", "o3", "o4")),
+                          ("google", ("gemini", "google", "bard")),
+                          ("meta", ("llama",)), ("mistral", ("mistral", "mixtral")),
+                          ("deepseek", ("deepseek",)), ("qwen", ("qwen",)),
+                          ("human", ("human", "person"))):
+        if any(mark in n for mark in marks):
+            return family
+    return "unknown"
+
+
+def item_commits(project, item):
+    """[(sha, parent, trailers)] for commits naming <item> in a Work-Item trailer or in
+    the message, newest first."""
+    out = project.git("log", "--all", "--format=%H%x01%P%x01%B%x00")
+    found = []
+    pattern = re.compile(r"(?<![A-Za-z0-9])%s(?![0-9])" % re.escape(item))
+    for record in out.split("\x00"):
+        parts = record.strip("\n").split("\x01")
+        if len(parts) < 3 or not parts[0].strip():
+            continue
+        tags = trailers(parts[2])
+        if tags.get("Work-Item") == item or pattern.search(parts[2]):
+            found.append((parts[0].strip(), (parts[1].split() or [""])[0], tags))
+    return found
+
+
+def item_author(project, item):
+    """(agent, model) from the item's commit trailers, or (None, None) when no commit
+    carries them -- work from before 4.0, which the identity rules do not judge."""
+    for _, _, tags in item_commits(project, item):
+        if tags.get("Model") or tags.get("Agent"):
+            return tags.get("Agent", "unknown"), tags.get("Model", "unknown")
+    return None, None
+
+
+# ---------------------------------------------------------------- ledger
+
+def ledger_path(project):
+    return project.path(os.path.join(project.docs, "project", "evidence-ledger.jsonl"))
+
+
+def ledger_append(project, entries):
+    """The committed evidence ledger: one JSON line per stage run by `sdlc.py verify` (or
+    `bite`). Logs stay in the git-ignored evidence folder; the ledger is the part a
+    reviewer on another machine, or CI, can check a claim against."""
+    path = ledger_path(project)
+    folder = os.path.dirname(path)
+    if not os.path.isdir(folder):
+        return
+    with open(path, "a", encoding="utf-8") as handle:
+        for entry in entries:
+            handle.write(json.dumps(entry, sort_keys=True) + "\n")
+
+
+def ledger(project):
+    rows = []
+    try:
+        with open(ledger_path(project), encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    continue
+    except (IOError, OSError):
+        pass
+    return rows
+
+
+def evidence_matches(project, item, rows=None):
+    """Ledger rows that verify <item> (the usual order is verify, then commit)."""
+    rows = ledger(project) if rows is None else rows
+    commits = item_commits(project, item)
+    heads = set(sha for sha, _, _ in commits)
+    parents = set(parent for _, parent, _ in commits if parent)
+    # A clean run on one of the item's commits, or a run on the parent of one with the
+    # change still uncommitted. A dirty run on the item's own commit verified whatever
+    # came next, not the item.
+    return [row for row in rows if (row.get("commit") in heads and not row.get("dirty"))
+            or (row.get("dirty") and row.get("commit") in parents)]
+
+
+# ---------------------------------------------------------------- review
+
+REVIEW_HARNESSES = {
+    "claude": (["claude", "-p", "{prompt}", "--output-format", "text"], "--model"),
+    "codex": (["codex", "exec", "{prompt}"], "--model"),
+    "gemini": (["gemini", "-p", "{prompt}"], "--model"),
+}
+
+
+def item_diff(project, item, base=None):
+    commits = item_commits(project, item)
+    if not commits and not base:
+        return None, "no commit names %s; pass --base to review the working tree" % item
+    if base:
+        return project.git("diff", base), None
+    oldest, newest = commits[-1], commits[0]
+    start = oldest[1] or project.git("hash-object", "-t", "tree", "/dev/null").strip()
+    return project.git("diff", start, newest[0]), None
+
+
+def item_tier(project, item):
+    for row_id, _, cells in backlog_rows(project.records("backlog.md"), project.prefix,
+                                         getattr(project, "legacy_prefixes", None)):
+        if row_id == item and len(cells) > 2:
+            m = re.search(r"[123]", cells[2])
+            return m.group(0) if m else ""
+    return ""
+
+
+def review_prompt(project, item, role, tier, diff):
+    playbook = read(project.path(os.path.join(project.docs, "roles", role + ".md")))
+    charter = project.charter
+    rows = "\n".join(line for line in charter.splitlines()
+                     if re.match(r"^\| \*\*(Project|What it is|Work item prefix|Tier rules|"
+                                 r"Always Tier 1 here|Never Tier 1 here|Human approval "
+                                 r"required for|Data categories held|Access level model|"
+                                 r"Accessibility target|Jurisdictions / regimes)\*\*", line))
+    return ("You are an independent reviewer. Review the diff below as the %s role, using only "
+            "the playbook, the charter rows and the diff given here. Work item %s, Tier %s.\n\n"
+            "Answer in this exact shape:\nVerdict: Pass | Pass with conditions | Block\n"
+            "Checked: <what you examined>\nNot checked: <what you did not>\nFindings:\n"
+            "| # | Sev | Location | Finding | Consequence | Fix |\n\n"
+            "## Playbook\n\n%s\n\n## Charter rows\n\n%s\n\n## Diff\n\n```diff\n%s\n```\n"
+            % (role, item, tier or "unknown", playbook, rows or "(none filled)", diff))
+
+
+def review(project, item, role, by, model=None, stage="ship", base=None, timeout=1800):
+    """Run one role's review of <item>'s diff in another harness, headless, and save it in
+    the review format. Returns (path, record, error)."""
+    if not os.path.isfile(project.path(os.path.join(project.docs, "roles", role + ".md"))):
+        return None, None, "no playbook %s/roles/%s.md" % (project.docs, role)
+    if by.startswith("cmd:"):
+        command, harness = by[4:].strip(), "cmd"
+        if not command:
+            return None, None, "--by cmd: needs a command"
+    elif by in REVIEW_HARNESSES:
+        command, harness = None, by
+        if shutil.which(REVIEW_HARNESSES[by][0][0]) is None:
+            return None, None, ("%s is not installed (no `%s` on PATH); install it, or use "
+                                "--by cmd:<command> with a reviewer that reads the prompt on "
+                                "stdin" % (by, REVIEW_HARNESSES[by][0][0]))
+    else:
+        return None, None, "--by must be claude, codex, gemini or cmd:<command>"
+    diff, error = item_diff(project, item, base)
+    if error:
+        return None, None, error
+    tier = item_tier(project, item)
+    prompt = review_prompt(project, item, role, tier, diff)
+    try:
+        if command:
+            proc = subprocess.run(command, shell=True, cwd=project.root, input=prompt,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  universal_newlines=True, timeout=timeout)
+        else:
+            args, flag = REVIEW_HARNESSES[by]
+            args = [part.replace("{prompt}", prompt) for part in args]
+            if model:
+                args += [flag, model]
+            proc = subprocess.run(args, cwd=project.root, stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  universal_newlines=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, None, "the reviewer did not answer within %ds" % timeout
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None, None, "the reviewer failed (exit %s): %s" % (
+            proc.returncode, (proc.stderr or proc.stdout).strip()[-400:])
+    reviewer_model = model or "unknown (the harness default)"
+    if harness == "cmd":
+        m = re.search(r"^Model:\s*(\S+)", proc.stdout, re.M)
+        reviewer_model = model or (m.group(1) if m else "unknown")
+    author_agent, author_model = item_author(project, item)
+    family_reviewer = model_family(reviewer_model if reviewer_model != "unknown (the harness default)"
+                                   else {"claude": "claude", "codex": "openai",
+                                         "gemini": "gemini"}.get(harness, ""))
+    family_author = model_family(author_model or author_agent or "")
+    independent = (family_reviewer not in ("unknown",) and family_author != "unknown"
+                   and family_reviewer != family_author)
+    verdict = re.search(r"^Verdict:\s*(Pass with conditions|Pass|Block)", proc.stdout, re.M)
+    folder = project.path(os.path.join(project.docs, "project", "reviews"))
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    name = "%s-%s-%s.md" % (item, stage, role)
+    path = os.path.join(folder, name)
+    n = 1
+    while os.path.exists(path):
+        n += 1
+        path = os.path.join(folder, "%s-%s-%s-%d.md" % (item, stage, role, n))
+    record = {
+        "item": item, "stage": stage, "role": role, "tier": tier,
+        "reviewer_agent": harness if harness != "cmd" else "cmd:" + command.split()[0],
+        "reviewer_model": reviewer_model, "reviewer_family": family_reviewer,
+        "author_agent": author_agent or "unknown", "author_model": author_model or "unknown",
+        "author_family": family_author,
+        "independence": "independent" if independent else "self-check",
+        "verdict": verdict.group(1) if verdict else "unstated",
+    }
+    today = datetime.date.today().isoformat()
+    text = ("---\nstatus: current\nowner: %s\nlast-reviewed: %s\n---\n\n"
+            "# Review — %s\n\n**Stage:** %s **Tier:** %s\n"
+            "**Reviewed:** the item's diff (%d lines), by `sdlc.py review`\n"
+            "**Reviewer agent:** %s\n**Reviewer model:** %s\n"
+            "**Author:** %s / %s\n**Independence:** %s\n\n---\n\n## %s\n\n%s\n"
+            % (record["reviewer_agent"], today, item, stage, tier or "unknown",
+               len(diff.splitlines()), record["reviewer_agent"], reviewer_model,
+               record["author_agent"], record["author_model"],
+               record["independence"] + ("" if independent else
+                                          " (same model family as the author, or unknown; "
+                                          "it cannot clear a gate)"),
+               role, proc.stdout.strip()))
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return os.path.relpath(path, project.root), record, None
+
+
+def review_records(project, item):
+    """Parsed headers of every review file for <item>."""
+    folder = project.path(os.path.join(project.docs, "project", "reviews"))
+    found = []
+    if not os.path.isdir(folder):
+        return found
+    for name in sorted(os.listdir(folder)):
+        if not (name.startswith(item + "-") and name.endswith(".md")):
+            continue
+        text = read(os.path.join(folder, name))
+        fields = dict(re.findall(r"^\*\*(Reviewer agent|Reviewer model|Independence|Author):\*\*"
+                                 r"\s*(.+)$", text, re.M))
+        found.append({"file": name, "fields": fields})
+    return found
+
+
+def check_identity(project, out):
+    """Tier 1 work (and Tier 2 if the charter says so) needs a review from a different
+    model family than the author's. Same-family reviews are recorded as self-checks and
+    clear nothing. Only items whose commits carry Agent or Model trailers are judged:
+    earlier work has no author identity to compare."""
+    cell = UNFILLED.sub("", labelled(project.charter, "Independent review required for") or "")
+    # The template lists both options; only a cell that names "Tier 1 and 2" alone decides.
+    tiers = {"1", "2"} if "and 2" in cell and cell.count("Tier 1") == 1 else {"1"}
+    where = os.path.join(project.docs, "project", "backlog.md")
+    for item, status, cells in backlog_rows(project.records("backlog.md"), project.prefix,
+                                            getattr(project, "legacy_prefixes", None)):
+        tier = re.search(r"[123]", cells[2]).group(0) if len(cells) > 2 and \
+            re.search(r"[123]", cells[2]) else ""
+        if tier not in tiers or status not in ("In review", "Parked", "Done"):
+            continue
+        agent, model = item_author(project, item)
+        if agent is None:
+            continue
+        author = model_family(model if model != "unknown" else agent)
+        independent = []
+        for rec in review_records(project, item):
+            reviewer = model_family(rec["fields"].get("Reviewer model", "") or
+                                    rec["fields"].get("Reviewer agent", ""))
+            if reviewer not in ("unknown",) and author != "unknown" and reviewer != author:
+                independent.append(rec["file"])
+        if not independent:
+            out.add("fail", "independence", "%s %s" % (where, item),
+                    "Tier %s, %s: no review from a model family other than the author's "
+                    "(%s). Run `sdlc.py review %s --role <role> --by <other harness>`; a "
+                    "same-family review is a self-check and cannot clear this gate"
+                    % (tier, status, author, item))
+
+
+def check_verified_claims(project, out):
+    """A worklog entry that says Verified for an item must have a ledger row for one of
+    that item's commits. Only entries for items that have commits are judged."""
+    rows = ledger(project)
+    text = project.records("worklog.md")
+    prefix = project.prefix
+    if not prefix or not text:
+        return
+    entries = re.split(r"(?m)^(?=## |- [0-9]{4}-[0-9]{2}-[0-9]{2} · )", text)
+    where = os.path.join(project.docs, "project", "worklog.md")
+    for entry in entries:
+        head = re.match(r"^(?:## |- [0-9-]+ · )(%s-[0-9]+)" % re.escape(prefix), entry)
+        if not head or not re.search(r"\bVerified\b", entry):
+            continue
+        item = head.group(1)
+        if not item_commits(project, item):
+            continue
+        if not evidence_matches(project, item, rows):
+            out.add("warn", "evidence", "%s %s" % (where, item),
+                    "says Verified, but the evidence ledger has no `sdlc.py verify` run on "
+                    "this item's commits. Only verify makes a result Verified")
+
+
+def budgets(project):
+    """{tier: {"tokens": n, "minutes": n}} from the charter's Agent budget per tier row."""
+    cell = UNFILLED.sub("", labelled(project.charter, "Agent budget per tier") or "")
+    found = {}
+    for tier, body in re.findall(r"Tier\s*([123])\s*:\s*([^;|]+)", cell):
+        entry = {}
+        tokens = re.search(r"([0-9.]+)\s*([kKmM]?)\s*tokens", body)
+        if tokens:
+            scale = {"k": 1e3, "m": 1e6}.get(tokens.group(2).lower(), 1)
+            entry["tokens"] = int(float(tokens.group(1)) * scale)
+        minutes = re.search(r"([0-9.]+)\s*(min|minutes|h|hours)", body)
+        if minutes:
+            entry["minutes"] = float(minutes.group(1)) * (60 if minutes.group(2).startswith("h") else 1)
+        found[tier] = entry
+    return found
+
+
+def budget_usage(project):
+    """Per item with Tokens/Minutes trailers: its tier, its usage, and its tier's budget.
+    No harness writes these by itself; an agent adds them where it can read its usage."""
+    limits = budgets(project)
+    report = []
+    for item, _, cells in backlog_rows(project.records("backlog.md"), project.prefix,
+                                       getattr(project, "legacy_prefixes", None)):
+        tokens = minutes = 0
+        seen = False
+        for _, _, tags in item_commits(project, item):
+            if "Tokens" in tags or "Minutes" in tags:
+                seen = True
+                tokens += int(re.sub(r"[^0-9]", "", tags.get("Tokens", "0")) or 0)
+                minutes += float(re.sub(r"[^0-9.]", "", tags.get("Minutes", "0")) or 0)
+        if not seen:
+            continue
+        tier = item_tier(project, item)
+        report.append({"item": item, "tier": tier, "tokens": tokens, "minutes": minutes,
+                       "budget": limits.get(tier, {})})
+    return report
 
 
 # ---------------------------------------------------------------- log
@@ -1178,6 +1555,11 @@ def bite(project, command, base=None, timeout=1800):
     folder = evidence_dir(project, "-bite")
     with open(os.path.join(folder, "bite.json"), "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2)
+    ledger_append(project, [{"time": result["generated"], "commit": result["git_head"],
+                             "dirty": result["dirty"], "stage": "bite", "command": command,
+                             "exit_code": 0 if result["bites"] else 1,
+                             "result": "Verified: %s" % ("pass" if result["bites"] else "fail"),
+                             "output_sha256": "", "run": os.path.basename(folder)}])
     result["evidence"] = os.path.relpath(folder, project.root)
     return result, None
 
@@ -1559,6 +1941,23 @@ def main(argv):
     lg.add_argument("--since", required=True, help="git ref to start after, e.g. main or HEAD~5")
     lg.add_argument("--write", action="store_true", help="insert the drafts into the worklog "
                     "(items it already names are skipped)")
+    tr = sub.add_parser("trailers", help="print the commit trailers for a work item")
+    tr.add_argument("item", help="work item ID")
+    tr.add_argument("--agent", help="the harness making the commit (default: from the "
+                    "environment, else unknown)")
+    tr.add_argument("--model", help="the model id (default: from the environment, else "
+                    "unknown)")
+    rv = sub.add_parser("review", help="run one role's review of an item's diff in another "
+                        "harness and save it")
+    rv.add_argument("item", help="work item ID")
+    rv.add_argument("--role", required=True, help="role playbook, e.g. security")
+    rv.add_argument("--by", required=True, help="claude, codex, gemini, or cmd:<command> "
+                    "(reads the prompt on stdin, prints the review)")
+    rv.add_argument("--model", help="model to ask the harness for; recorded")
+    rv.add_argument("--stage", default="ship", choices=("design", "ship"))
+    rv.add_argument("--base", help="review the diff from this ref to the working tree "
+                    "instead of the item's commits")
+    rv.add_argument("--timeout", type=int, default=1800)
     bt = sub.add_parser("bite", help="check that a test command fails without the change "
                         "and passes with it")
     bt.add_argument("test_command", nargs=argparse.REMAINDER,
@@ -1601,6 +2000,21 @@ def main(argv):
             print(line)
         for orphan in orphans:
             print("no work item ID: %s" % orphan, file=sys.stderr)
+        return 0
+    if opts.command == "trailers":
+        agent, model = identity(opts.agent, opts.model)
+        print("Work-Item: %s\nAgent: %s\nModel: %s" % (opts.item, agent, model))
+        return 0
+    if opts.command == "review":
+        path, record, error = review(project, opts.item, opts.role, opts.by, opts.model,
+                                     opts.stage, opts.base, opts.timeout)
+        if error:
+            sys.stderr.write("review: %s\n" % error)
+            return 2
+        print("review saved: %s" % path)
+        print("  reviewer  %s / %s" % (record["reviewer_agent"], record["reviewer_model"]))
+        print("  author    %s / %s" % (record["author_agent"], record["author_model"]))
+        print("  %s; verdict: %s" % (record["independence"], record["verdict"]))
         return 0
     if opts.command == "bite":
         if opts.restore:

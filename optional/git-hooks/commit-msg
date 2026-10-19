@@ -23,6 +23,14 @@ if [ -f .ai-sdlc/profile.json ]; then
 fi
 [ -n "$prefix" ] || exit 0
 
+# A Work-Item trailer is the 4.0 form. Its value must be an ID: a trailer that names
+# nothing ("Work-Item: none") is refused rather than taken as compliance.
+trailer=$(printf '%s\n' "$msg" | sed -n 's/^[[:space:]]*Work-Item:[[:space:]]*\([^[:space:]"'"'"']*\).*/\1/p' | tail -1)
+if [ -n "$trailer" ]; then
+  printf '%s' "$trailer" | grep -Eiq "^(${prefix}-[0-9]+|#[0-9]+|GH-[0-9]+|[A-Za-z][0-9]+(\.[0-9]+)*)$" && exit 0
+  printf '%s\n' "nuhut: work item ID: the Work-Item trailer names no ID ($trailer); write Work-Item: ${prefix}-###." >&2; exit 1
+fi
+# The 3.x form, still accepted: the ID anywhere in the message.
 if printf '%s' "$msg" | grep -Eiq "(^|[^A-Za-z0-9])(${prefix}-[0-9]+|#[0-9]+|GH-[0-9]+)([^A-Za-z0-9]|$)"; then
   exit 0
 fi

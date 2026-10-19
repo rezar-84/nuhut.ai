@@ -168,6 +168,26 @@ than not reviewing — it launders the problem into a document that looks like d
 
 ---
 
+## Independent review
+
+A review written by the same model family that wrote the change shares its blind spots.
+For Tier 1, and for Tier 2 when the charter's **Independent review required for** says
+so, at least one review must come from a different family:
+
+```sh
+python3 .ai-sdlc/bin/sdlc.py review <ID> --role security --by codex
+python3 .ai-sdlc/bin/sdlc.py review <ID> --role qa --by cmd:"./my-reviewer"
+```
+
+It sends the reviewer only the role's playbook, the item's diff, the relevant charter
+rows and the tier, runs it headless, and saves the result in the review format with the
+reviewer's agent and model and the author's (from the commit trailers,
+`05-change-control.md`). A review whose family matches the author's, or where either is
+unknown, is labelled **self-check**. It is kept as a record, but it cannot clear the
+gate. `sdlc.py doctor` fails a built Tier 1 item, once its commits carry identity
+trailers, until an independent review exists. If the harness you name is not installed,
+the command says so and writes nothing.
+
 ## Record format
 
 One file per review: `project/reviews/{{PREFIX}}-###-<design|ship>.md`, from
