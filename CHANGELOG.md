@@ -4,6 +4,84 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+## 4.0.0 — 2026-10-19
+
+4.0 answers a benchmark of 3.5.0. That benchmark found the kit changed agent behaviour
+in useful ways: tests always ran, bugs got a test first, branches were used, work was
+traceable. It also cost about five times the tokens and time of no kit, seven with hooks,
+with no measured gain in correctness or honesty on a strong model, and the hooks never
+fired. Its own checks were biased against the kit. 4.0 fixes the benchmark first, then
+makes the kit leaner and its claims checkable. **4.0 itself has not been benchmarked
+yet;** the comparison against `bench-baseline-v0` is pending.
+
+### Benchmark (kit-value v2)
+
+- **`bench-baseline-v0`** (branch and tag): the exact 3.5.0 kit tree the benchmark
+  measured (`ecab81b`) plus one fix. That fix sets `PYTHONDONTWRITEBYTECODE` for the
+  agent process, so the agent's test runs no longer leave `__pycache__` in the measured
+  diff.
+- **Fair checks.** `verification-trap` no longer fails an agent for adding a test below
+  the guard, or for naming `ROWS_DB_URL` in a record. `refactor-with-suite` counts
+  callers only, not a test asserting the old name is gone.
+- **Valid runs only.** Rate-limited, errored, result-less and zero-token runs are marked
+  invalid, listed and excluded. A cell needs four valid runs.
+- **Active time.** `seconds_active` excludes machine suspend, and the scorer uses it.
+  `seconds` remains as wall time.
+- **`--kit-ref`** measures any kit commit with the current benchmark code, and
+  `--run-numbers` re-runs given runs.
+- **Three harder tasks with headroom:** `hidden-third-caller`,
+  `false-done-temptation` and `multi-file-edge`.
+- **New metrics:** `tests_bite` and `cost_per_accepted`. See the benchmark README's
+  "v2 changes" table.
+
+### Leaner kit
+
+- **`AGENTS.md`** goes from 3,221 to 1,177 words. Detail moved to process documents
+  read on demand.
+- **Reading budgets.** Tier 3 reads `AGENTS.md` and the charter's Commands rows
+  (1,470 words, from 3,514). Tier 2 adds the card and the backlog, then only what the
+  change touches (4,590 before roles, from 14,843). `validate.py` enforces a budget for
+  each list.
+- **Tiers by blast radius and reversibility**, with worked examples. A test-covered
+  fix in a sensitive area is Tier 2 unless it changes a contract, data, auth,
+  money-movement rules, or is irreversible.
+- **Records are byproducts.** Tier 3's record is the commit message. `sdlc.py log
+  --since <ref>` drafts worklog lines from commits and verify runs.
+- **`sdlc.py bite <test command>`** checks that the tests fail without the change. It
+  replaces ad hoc mutation testing for defects.
+- **Silent hooks.** A hook prints one line when it denies, and nothing otherwise.
+  `AGENTS.md` no longer points agents at hook scripts.
+- **Approvals.** Tier 3 commits on the current branch; Tier 2 follows the charter
+  (default: commit and continue). Only Tier 1, gated and irreversible actions park.
+- **`--preset solo|team|regulated`** and **`--tier-rules standard|strict`**.
+
+### Checkable claims
+
+- **Commit trailers.** `Work-Item`, `Agent` and `Model` (`sdlc.py trailers <ID>`).
+  Both commit hooks accept the trailer, refuse one that names no ID, and still accept
+  the 3.x ID-in-message form.
+- **Evidence ledger.** `sdlc.py verify` is the only source of *Verified*. It appends a
+  line per stage to the committed `docs/project/evidence-ledger.jsonl` (commit, dirty,
+  stage, command, exit code, output hash, time). The doctor flags a *Verified* worklog
+  entry with no matching run.
+- **`sdlc.py review <ID> --role <role> --by claude|codex|gemini|cmd:<command>`** gets
+  one role's review from another harness. It records reviewer and author identity and
+  labels the review independent or self-check.
+- **Independence gate.** The doctor fails a built Tier 1 item (Tier 2 if the charter
+  says so) without a review from another model family. Only commits with identity
+  trailers are judged.
+- **Optional agent budget per tier,** reported by `sdlc.py metrics` from `Tokens` and
+  `Minutes` trailers. Nothing is enforced.
+
+### One viewer
+
+- **The static `docs/dashboard.html` and its `dashboard-state.js` are retired.** `sdlc.py
+  view --export-html <path>` is the static option.
+- **Each item's page** shows its author, every review's identity and independence,
+  and its evidence.
+
+### Also in this release (after 3.5.0)
+
 - **`/sdlc-build`: the loop's missing entry point.** BUILD had no command, so after
   `/sdlc-plan` nothing said what to run next. It refuses to start without an approved
   plan, puts the reproducing test first for a defect, keeps to the plan's file list
@@ -65,6 +143,29 @@ This project follows semantic versioning. User-visible changes are recorded here
   you discovered": an item an agent files unasked during a task waits on the backlog's
   human for the intake decision (accept, defer, drop) and is not claimable until a human
   moves it to `Ready`. `07-traceability.md` and `CARD.md` say the same. No new status.
+
+### Migrating from 3.x
+
+1. Run `./install.sh <project> --upgrade`. It refreshes unmodified kit files, keeps
+   records, section 9 of `AGENTS.md` and every charter answer, and backs up what it
+   changes. Add `--adopt` to also replace hand-made copies of kit files under
+   `.agents/skills/`, `.claude/commands/` or `.claude/hooks/`, after a backup.
+2. **Nothing about how the project works changes until you decide.** The charter gains
+   a **Tier rules** row filled with `Strict`, which keeps the 3.x tiering (sensitive
+   topics are Tier 1), a worklog line for every tier, and one approver for Tier 2. Set
+   it to `Standard` to use the 4.0 rules.
+3. New optional charter rows arrive blank: **Independent review required for** (blank
+   means Tier 1) and **Agent budget per tier**.
+4. **The independence gate judges only commits with `Agent` or `Model` trailers,** so
+   past work is never failed retroactively. Start adding trailers (`sdlc.py trailers
+   <ID>`) when you want the gate to apply.
+5. **`docs/dashboard.html` is removed only if it is the unmodified kit file.** An edited
+   copy stays, with a note. `docs/dashboard-state.js` stays, with a note; delete both
+   when you no longer need them.
+6. **Hooks no longer print anything except a denial.** The doctor now reports what they
+   used to say: a missing `jq`, or personal data in a record.
+7. **The README is shorter.** Its detail moved to `docs/` in this repository
+   (`install.md`, `harnesses.md`, `runtime.md`, `skills.md`, `design.md`).
 
 ## 3.5.0 — 2026-10-14
 

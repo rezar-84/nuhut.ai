@@ -20,7 +20,7 @@ VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 def markdown_files():
     yield ROOT / "README.md"
-    for base in (ROOT / "template", ROOT / "optional"):
+    for base in (ROOT / "template", ROOT / "optional", ROOT / "docs"):
         for path in sorted(base.rglob("*.md")):
             yield path
 
