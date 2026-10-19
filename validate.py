@@ -263,12 +263,60 @@ def dashboard_fidelity(errors):
                       "truth for the charter")
 
 
+# Each tier's reading list, as AGENTS.md section 3 states it, and its budget in words.
+# Words, not tokens: a stable measure that needs no tokenizer. The lists are measured on
+# the template files, so a document that grows past its tier's budget fails here.
+AGENTS_MAX_WORDS = 1200
+TIER_BUDGETS = {"3": 1500, "2": 5500, "1": 22000}
+DEFAULT_ROLES = ("product-manager", "architect", "security", "qa")
+
+
+def charter_section(text, heading):
+    part = text.split("\n## %s\n" % heading, 1)
+    return part[1].split("\n## ", 1)[0] if len(part) == 2 else ""
+
+
+def reading_lists():
+    """{tier: [(label, words)]} for the three tiers' reading lists."""
+    docs = ROOT / "template" / "docs"
+
+    def words(path):
+        return len(path.read_text(encoding="utf-8").split())
+    charter = (docs / "project" / "charter.md").read_text(encoding="utf-8")
+    tier3 = [("AGENTS.md", words(ROOT / "template" / "AGENTS.md")),
+             ("charter Commands rows", len(charter_section(charter, "Commands").split()))]
+    tier2 = tier3 + [("CARD.md", words(docs / "CARD.md")),
+                     ("project/backlog.md", words(docs / "project" / "backlog.md"))]
+    tier1 = list(tier2) + [("project/charter.md (rest)",
+                            words(docs / "project" / "charter.md") - tier3[1][1])]
+    for rel in ("process/00-operating-model.md", "process/03-ready-and-done.md",
+                "process/05-change-control.md", "templates/plan.md", "templates/adr.md",
+                "templates/role-review.md"):
+        tier1.append((rel, words(docs / rel)))
+    for role in DEFAULT_ROLES:
+        tier1.append(("roles/%s.md" % role, words(docs / "roles" / ("%s.md" % role))))
+    return {"3": tier3, "2": tier2, "1": tier1}
+
+
 def reading_budget(errors):
-    """AGENTS.md quotes the size of the docs tree so an agent can bound its reading.
-    The figure is load-bearing and nothing keeps it honest, so measure it. Four
-    characters per token is rough on purpose — this catches drift, not accuracy."""
+    """AGENTS.md is read on every change, so it has a hard ceiling; each tier's list has a
+    budget; and the docs-tree size AGENTS.md quotes stays within 10% of the files (four
+    characters per token, rough on purpose: this catches drift, not accuracy)."""
     text = (ROOT / "template" / "AGENTS.md").read_text(encoding="utf-8")
-    m = re.search(r"is around ([0-9,]+)\ntokens", text) or re.search(r"is around ([0-9,]+) tokens", text)
+    count = len(text.split())
+    if count > AGENTS_MAX_WORDS:
+        errors.append("AGENTS.md is %d words; the ceiling is %d. Move detail to a process "
+                      "document read on demand." % (count, AGENTS_MAX_WORDS))
+    for tier, items in sorted(reading_lists().items()):
+        total = sum(n for _, n in items)
+        if total > TIER_BUDGETS[tier]:
+            errors.append("Tier %s reading list is %d words; its budget is %d (%s)"
+                          % (tier, total, TIER_BUDGETS[tier],
+                             ", ".join("%s %d" % item for item in items)))
+    for rel in ("project/charter.md", "CARD.md", "project/backlog.md"):
+        if rel not in text:
+            errors.append("AGENTS.md's reading list no longer names %s" % rel)
+    m = re.search(r"is around\s+([0-9,]+)\s+tokens", text)
     if not m:
         errors.append("AGENTS.md no longer states the size of the docs tree")
         return
@@ -278,11 +326,21 @@ def reading_budget(errors):
     actual = chars / 4.0
     if abs(actual - stated) > 0.1 * actual:
         errors.append("AGENTS.md says the docs tree is ~%s tokens; it measures ~%d. "
-                      "Update the figure (and the per-tier totals under it)."
-                      % (m.group(1), round(actual, -2)))
+                      "Update the figure." % (m.group(1), round(actual, -2)))
+
+
+def print_reading_lists():
+    for tier, items in sorted(reading_lists().items(), reverse=True):
+        print("Tier %s: %d words (budget %d)" % (tier, sum(n for _, n in items),
+                                                 TIER_BUDGETS[tier]))
+        for label, n in items:
+            print("  %6d  %s" % (n, label))
 
 
 def main():
+    if sys.argv[1:] == ["--reading-lists"]:
+        print_reading_lists()
+        return 0
     errors = []
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     if not VERSION_RE.match(version):

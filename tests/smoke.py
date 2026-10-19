@@ -673,8 +673,8 @@ def test_hooks():
         check("the gate list itself is denied", '"permissionDecision":"deny"' in out, out)
         o = fire("approval-gate.sh", {"tool_input": {"command": "make deploy ENV=prod"}},
                  AI_SDLC_APPROVAL="CHG-42")
-        check("an approval passes the gate and is announced",
-              "deny" not in o and "CHG-42" in o, o)
+        check("an approval passes the gate, silently (a hook speaks only to deny)",
+              o.strip() == "", o)
         o = fire("approval-gate.sh", {"tool_input": {"command": "make deploy ENV=prod"}},
                  cwd=os.path.join(d, "src"))
         check("a gate holds when the call comes from a subdirectory",
@@ -715,16 +715,17 @@ def test_hooks():
         check("a placeholder connection string is allowed, with no warning", out.strip() == "", out)
         out = fire("doc-leak-guard.sh", write_payload("docs/project/backlog.md",
                                                        "ask jane.doe@acme-corp.io"))
-        check("an email in a record warns and does not deny",
-              "personal data" in out and "deny" not in out, out)
-        check("the warning never echoes the address", "acme-corp" not in out, out)
+        check("an email in a record is neither denied nor announced (the doctor reports it)",
+              out.strip() == "", out)
         out = fire("doc-leak-guard.sh", write_payload("src/app.py", "ask jane.doe@acme-corp.io"))
         check("an email in code is left alone", out.strip() == "", out)
         out = fire("doc-leak-guard.sh", write_payload("docs/a.md", "ask me@example.com"))
         check("an example address is left alone", out.strip() == "", out)
         out = fire("doc-leak-guard.sh", {"tool_input": {"file_path": "docs/a.md", "edits": [
-            {"old_string": "x", "new_string": "card 4111 1111 1111 1111"}]}})
-        check("a MultiEdit is scanned", "personal data" in out, out)
+            {"old_string": "x", "new_string": "key AKIA" + "Q" * 16}]}})
+        check("a MultiEdit is scanned", '"permissionDecision":"deny"' in out, out)
+        check("a denial is one line", len([l for l in out.splitlines() if l.strip()]) == 1
+              and "\\n" not in out, out)
     else:
         check("jq present for hook behaviour tests", True, "skipped: jq not installed")
 
@@ -847,7 +848,9 @@ def test_git_hooks():
     check("git hooks are in the manifest", ".ai-sdlc/git-hooks/pre-commit" in manifest.get("files", {}), str(manifest)[:200])
     subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
     code, out = commit(d, "no id here")
-    check("a commit with no work item ID is refused by git itself", code != 0 and "no work item ID" in out, out)
+    check("a commit with no work item ID is refused by git itself, in one line",
+          code != 0 and "nuhut: work item ID:" in out
+          and len([l for l in out.splitlines() if l.startswith("nuhut:")]) == 1, out)
     check("the existing hook still ran first", "existing-hook" in out, out)
     code, out = commit(d, "GHT-1 first")
     check("a commit with the ID passes", code == 0, out)
@@ -1535,6 +1538,166 @@ def test_kit_value_checks():
     sys.path.remove(bench)
     for path in scratch:
         shutil.rmtree(path, ignore_errors=True)
+
+
+def test_upgrade_from_350():
+    """A 3.5.0 install (ecab81b, the kit the 3.5.0 benchmark measured) upgrades with this
+    installer: it succeeds, keeps the project's records and settings, and does not change
+    how the project works unless the project says so."""
+    print("upgrade from a real 3.5.0 install")
+    ref = subprocess.run(["git", "rev-parse", "--verify", "--quiet", "ecab81b^{commit}"], cwd=ROOT,
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if ref.returncode != 0:
+        print("  skip  ecab81b is not in this clone (CI fetches full history)")
+        return
+    scratch = tempfile.mkdtemp(prefix="sdlc-350-")
+    old = os.path.join(scratch, "kit-350")
+    subprocess.check_call(["git", "worktree", "add", "--detach", "--quiet", old, "ecab81b"], cwd=ROOT)
+    try:
+        d = os.path.join(scratch, "project")
+        os.makedirs(d)
+        subprocess.call(["git", "init", "-q", d])
+        p = subprocess.Popen([sys.executable, os.path.join(old, "install.py"), d, "OLD", "-y",
+                              "--harness", "claude,cursor", "--hooks", "--effort-mode", "lean",
+                              "--decision-style", "ask"], cwd=old,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out = p.communicate()[0].decode("utf-8", "replace")
+        check("3.5.0 installs", p.returncode == 0, out[-300:])
+        manifest = json.loads(read(d, ".ai-sdlc/manifest.json"))
+        check("the fixture really is 3.5.0", manifest.get("kit_version") == "3.5.0", str(manifest)[:200])
+        write(d, "docs/project/worklog.md", read(d, "docs/project/worklog.md")
+              + "\n## OLD-001 — first item\n\n**Date:** 2026-10-01\n**Status:** Done\n")
+        agents_before = read(d, "AGENTS.md")
+        section9 = agents_before[agents_before.index("## 9. Project overrides"):] + "\nPROJECT RULE 350\n"
+        write(d, "AGENTS.md", agents_before[:agents_before.index("## 9. Project overrides")] + section9)
+        charter_before = read(d, "docs/project/charter.md")
+
+        code, out = run([d, "OLD", "--upgrade"])
+        check("the 3.5.0 install upgrades", code == 0 and "Done:" in out, out[-600:])
+        charter = read(d, "docs/project/charter.md")
+        check("its explicit settings survive",
+              "| **Default effort mode** | Lean |" in charter and "| **Decision style** | Ask |" in charter,
+              "\n".join(l for l in charter.splitlines() if "effort" in l or "Decision" in l))
+        check("records are untouched", "OLD-001" in read(d, "docs/project/worklog.md"))
+        check("a 3.x project keeps the 3.x tier rules: Tier rules is set to Strict",
+              re.search(r"^\| \*\*Tier rules\*\* \| `Strict`", charter, re.M) is not None
+              and "Tier rules set to Strict" in out,
+              "\n".join(l for l in charter.splitlines() if "Tier rules" in l) + out[-300:])
+        check("section 9 is kept", "PROJECT RULE 350" in read(d, "AGENTS.md"))
+        check("every charter row it had is still there",
+              all(line in charter for line in charter_before.splitlines() if line.startswith("| **")),
+              "")
+        code, out = run([d, "OLD", "--upgrade"])
+        check("a second upgrade changes nothing", code == 0 and "Done: 0 updated" in out, out[-300:])
+        doctor = subprocess.Popen([sys.executable, os.path.join(d, ".ai-sdlc", "bin", "sdlc.py"), "doctor", "--strict"],
+                                  cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        text = doctor.communicate()[0].decode("utf-8", "replace")
+        check("the upgraded project passes the doctor", doctor.returncode == 0, text[-600:])
+    finally:
+        subprocess.call(["git", "worktree", "remove", "--force", old], cwd=ROOT)
+        subprocess.call(["git", "worktree", "prune"], cwd=ROOT)
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_lean_kit():
+    print("lean kit: log, bite, presets, tier rules")
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-lean-"))
+    subprocess.call(["git", "init", "-q", d])
+    shutil.rmtree(d)
+    shutil.copytree(os.path.join(ROOT, "benchmarks", "kit-value", "tasks", "shared-caller-bug", "repo"), d)
+    subprocess.call(["git", "init", "-q", d])
+    write(d, ".gitignore", "__pycache__/\n")
+    code, out = run([d, "LNK", "-y", "--preset", "solo"])
+    check("solo preset installs", code == 0, out[-300:])
+    charter = read(d, "docs/project/charter.md")
+    check("solo preset fills its four rows",
+          all(row in charter for row in ("| **Default effort mode** | Lean |", "| **Decision style** | Guide |",
+                                         "| **Development method** | Item |", "| **Tier rules** | Standard |")),
+          "\n".join(l for l in charter.splitlines() if "Tier rules" in l or "effort" in l))
+    subprocess.call(git + ["add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "baseline"], cwd=d)
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.Popen([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        text = p.communicate()[0].decode("utf-8", "replace")
+        return p.returncode, text
+
+    # bite: the fix plus a test that catches it bites; the test file is never reverted.
+    write(d, "pricing.py", read(d, "pricing.py").replace("total * percent, 2)", "total * percent / 100, 2)"))
+    test = ("import unittest\nfrom pricing import apply_discount\n\n\nclass P(unittest.TestCase):\n"
+            "    def test_ten(self):\n        self.assertEqual(apply_discount(50.0, 10), 45.0)\n")
+    write(d, "tests/test_pricing.py", test)
+    cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests"]
+    code, out = sdlc("bite", *cmd)
+    check("bite passes when the test fails without the change", code == 0 and "bite PASS" in out, out)
+    check("bite restores the change", "/ 100" in read(d, "pricing.py"))
+    check("bite reverts product files only", "reverted to     HEAD: pricing.py" in out, out)
+    check("bite writes an evidence record",
+          any(n.endswith("-bite") for n in os.listdir(os.path.join(d, ".ai-sdlc", "evidence"))))
+    write(d, "tests/test_pricing.py", test.replace("apply_discount(50.0, 10), 45.0", "apply_discount(50.0, 0), 50.0"))
+    code, out = sdlc("bite", *cmd)
+    check("bite fails when the test passes without the change",
+          code == 1 and "bite FAIL" in out and "do not test it" in out, out)
+    write(d, "tests/test_pricing.py", test)
+    # An interrupted bite is recoverable and blocks the next one until restored.
+    write(d, ".ai-sdlc/bite/active.json", json.dumps({"base": "HEAD", "backup": ".ai-sdlc/bite/x",
+                                                       "command": "x", "files": [{"path": "pricing.py", "existed": True}]}))
+    write(d, ".ai-sdlc/bite/x/pricing.py", read(d, "pricing.py"))
+    write(d, "pricing.py", "BROKEN\n")
+    code, out = sdlc("bite", *cmd)
+    check("a leftover bite blocks the next one", code == 2 and "--restore" in out, out)
+    code, out = sdlc("doctor")
+    check("the doctor reports a leftover bite", "interrupted `sdlc.py bite`" in out, out)
+    code, out = sdlc("bite", "--restore")
+    check("bite --restore puts the files back", code == 0 and "/ 100" in read(d, "pricing.py"), out)
+
+    # log: drafts from commits, Tier 3 needs no worklog edit, --write is idempotent.
+    subprocess.call(git + ["add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "LNK-1 fix percent discount"], cwd=d)
+    subprocess.call(git + ["commit", "-q", "--allow-empty", "-m", "Tidy wording", "-m", "Work-Item: LNK-2"], cwd=d)
+    code, out = sdlc("verify", "--stage", "unit")
+    code, out = sdlc("log", "--since", "HEAD~2")
+    lines = [l for l in out.splitlines() if l.startswith("- ")]
+    check("log drafts one line per work item, from IDs in subjects or trailers",
+          len(lines) == 2 and " · LNK-1 · fix percent discount · " in lines[0] and " · LNK-2 · " in lines[1], out)
+    check("log lists product files, not kit files", "pricing.py" in lines[0] and ".ai-sdlc" not in lines[0], out)
+    code, out = sdlc("log", "--since", "HEAD~2", "--write")
+    worklog = read(d, "docs/project/worklog.md")
+    check("log --write puts drafts under the marker, newest first",
+          worklog.index("· LNK-2 ·") < worklog.index("· LNK-1 ·")
+          and worklog.index("New entries go here") < worklog.index("· LNK-2 ·"), worklog[-500:])
+    code, out = sdlc("log", "--since", "HEAD~2", "--write")
+    check("log --write is idempotent", "wrote 0 line(s)" in out and read(d, "docs/project/worklog.md") == worklog, out)
+
+    # Standard tier rules: a commit ID that is in no record is a Tier 3 record, not a finding.
+    subprocess.call(git + ["commit", "-q", "--allow-empty", "-m", "LNK-9 fix a typo"], cwd=d)
+    code, out = sdlc("doctor")
+    check("Standard: an ID only in a commit is not a traceability finding", "LNK-9" not in out, out)
+    write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
+        "| **Tier rules** | Standard |", "| **Tier rules** | Strict |"))
+    code, out = sdlc("doctor")
+    check("Strict: the 3.x traceability rule applies", "LNK-9" in out, out)
+    write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
+        "| **Tier rules** | Strict |", "| **Tier rules** | Loose |"))
+    code, out = sdlc("doctor", "--strict")
+    check("an invalid Tier rules value fails", code == 1 and "Tier rules" in out, out)
+    shutil.rmtree(d, ignore_errors=True)
+
+    d = tempfile.mkdtemp(prefix="sdlc-preset-")
+    code, out = run([d, "PRS", "-y", "--preset", "regulated", "--decision-style", "autopilot"])
+    charter = read(d, "docs/project/charter.md")
+    check("an explicit flag wins over the preset",
+          "| **Decision style** | Autopilot |" in charter and "| **Tier rules** | Strict |" in charter, out[-200:])
+    code, out = run([d, "PRS", "--upgrade", "--preset", "solo"])
+    check("--upgrade ignores a preset and says so",
+          code == 0 and "apply to new installs" in out
+          and "| **Tier rules** | Strict |" in read(d, "docs/project/charter.md"), out[-300:])
+    code, out = run([tempfile.mkdtemp(prefix="sdlc-preset-bad-"), "PRS", "-y", "--preset", "huge"])
+    check("an unknown preset is refused", code != 0 and "--preset requires" in out, out[-200:])
+    shutil.rmtree(d, ignore_errors=True)
 
 
 def test_dashboard():
@@ -2356,6 +2519,7 @@ def main():
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_git_hooks,
                  test_runtime, test_view, test_kit_value_benchmark, test_kit_value_checks,
+                 test_upgrade_from_350, test_lean_kit,
                  test_dashboard,
                  test_domain_detection,
                  test_role_and_skill_selection, test_profile,

@@ -1,7 +1,8 @@
 <!-- Copy this block to the TOP of docs/project/worklog.md. Newest first. -->
 
-For Tier 3, use this compact form unless the change uncovers risk, a durable decision,
-or unresolved work:
+Tier 3 needs no entry: its commit message is the record. Under the charter's `Strict`
+tier rules, or when the change uncovers risk, a durable decision or unresolved work, use
+this compact form (`sdlc.py log --since <ref>` drafts it):
 
 ```markdown
 - YYYY-MM-DD · {{PREFIX}}-### · <request> · effort: Lean|Normal|Beast · changed: <files> · verified: <command/result>

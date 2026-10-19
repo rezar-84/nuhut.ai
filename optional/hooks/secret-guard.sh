@@ -39,4 +39,4 @@ found=$(hook_secret_kinds "$added")
 [ -n "$found" ] || exit 0
 
 # The reason names the kind, never the value: the value is what must not travel further.
-hook_deny "The staged changes add what looks like a credential ($found). Secrets never enter the repository: move it to the environment or the secret store the charter names, unstage it, and rotate it if it was ever pushed. A deliberate fake in a test fixture passes if its line contains EXAMPLE."
+hook_deny "no secrets in the repo: the staged changes add a $found; unstage it, keep it in the environment, rotate it if it was pushed (a fixture line containing EXAMPLE passes)."

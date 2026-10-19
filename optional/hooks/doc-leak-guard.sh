@@ -29,7 +29,7 @@ rel=$(hook_rel_path "$payload")
 found=$(hook_secret_kinds "$content")
 if [ -n "$found" ]; then
   # The reason names the kind, never the value: the value is what must not travel further.
-  hook_deny "This write would put what looks like a credential ($found) into ${rel:-a file}. Do not write the value anywhere: name it and say where it is stored (the secret store the charter names), and if a person pasted it, tell them to rotate it. A deliberate fake passes if its line contains EXAMPLE. See {{DOCS_DIR}}/process/12-sensitive-data-in-records.md."
+  hook_deny "no secrets in files: this write holds a $found; name the secret and where it is stored instead of its value (a fixture line containing EXAMPLE passes)."
 fi
 
 case "$rel" in

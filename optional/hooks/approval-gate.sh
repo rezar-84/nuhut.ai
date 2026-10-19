@@ -23,7 +23,7 @@ payload=$(cat)
 # The gate list is the human's: removing a gate is itself a change that needs approval.
 rel=$(hook_rel_path "$payload")
 if [ -n "$rel" ]; then
-  [ "$rel" = "$list" ] && hook_deny "$list lists the commands that need a named human's approval. Changing that list is the human's decision: propose the edit instead of making it."
+  [ "$rel" = "$list" ] && hook_deny "gated commands are the human's list: propose the change to $list instead of making it."
   exit 0
 fi
 
@@ -39,7 +39,7 @@ while IFS= read -r pattern || [ -n "$pattern" ]; do
         hook_note "ai-sdlc: gated command allowed under approval $AI_SDLC_APPROVAL (matched $pattern). Record the approval in the worklog entry."
         exit 0
       fi
-      hook_deny "This command matches $pattern in .ai-sdlc/gates.txt: it needs a named human's approval (AGENTS.md section 9). Do not look for another route to the same effect. Stop, and hand the human the exact command, what it will change, and the rollback. They run it themselves, or restart the session with AI_SDLC_APPROVAL=<ticket or ID>."
+      hook_deny "human-gated command ($pattern in .ai-sdlc/gates.txt): stop and hand the human the exact command, its effect and its rollback."
       ;;
   esac
 done < "$list"

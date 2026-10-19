@@ -246,6 +246,7 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | **Default effort mode** | `Lean` · `Normal` · `Beast` _(default: Normal; changes breadth above the risk-tier floor, never the floor itself)_ |
 | **Development method** | `Item` · `Epic` _(default: Item. Epic plans several items together and stops at the checkpoints its plan chooses; it never removes a tier's checks or approvals. See `process/11-epics.md`)_ |
 | **Decision style** | `Ask` · `Guide` · `Autopilot` _(default: Guide. How much the agent decides for the person and how much it says in chat; it never lifts a Tier 1 stop or a gated command, and never thins a record. See `process/14-decision-style.md`)_ |
+| **Tier rules** | `Standard` · `Strict` _(default on a new install: Standard — tier by blast radius and reversibility; Tier 3's record is the commit; Tier 2 commits and continues. Strict keeps the 3.x rules, and an upgrade from 3.x sets it so nothing changes silently. See `../CARD.md`, "Tiers")_ |
 | **Acquisition profile** | `Standard` · `Advanced` _(advanced tools require an owned or explicitly authorised target and never grant permission)_ |
 | **Always Tier 1 here** | _(the surfaces that are high-risk in this project specifically)_ |
 | **Never Tier 1 here** | _(surfaces from the `AGENTS.md` Tier 1 list that genuinely do not apply — e.g. "no PII: this project holds no personal data, see Data categories held". Without this, "when in doubt, tier up" makes almost everything Tier 1.)_ |

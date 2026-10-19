@@ -14,7 +14,7 @@ rel=$(hook_rel_path "$(cat)")
 [ -n "$rel" ] || exit 0
 
 if [ "$rel" = "$list" ]; then
-  hook_deny "$list lists the single-writer paths protected in this repository. Changing that list is a human decision: propose the edit instead of making it."
+  hook_deny "protected paths are the human's list: propose the change to $list instead of making it."
 fi
 
 while IFS= read -r pattern || [ -n "$pattern" ]; do
@@ -22,7 +22,7 @@ while IFS= read -r pattern || [ -n "$pattern" ]; do
   # shellcheck disable=SC2254  # the glob is the point
   case "$rel" in
     $pattern)
-      hook_deny "$rel is listed in .ai-sdlc/protected.txt as single-writer: it is owned by a managed platform, generated, or held by another agent. Hand-editing it is what the charter forbids, and the edit would be overwritten or would break the owner. Change the thing that generates it, or take the file up with its owner."
+      hook_deny "single-writer path ($rel in .ai-sdlc/protected.txt): change what generates it, or ask its owner."
       ;;
   esac
 done < "$list"

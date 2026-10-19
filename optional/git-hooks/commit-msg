@@ -37,10 +37,5 @@ if [ -f "$backlog" ]; then
   done
 fi
 
-cat >&2 <<MSG
-nuhut: commit refused. The message carries no work item ID. AGENTS.md section 6 requires
-${prefix}-### in the branch, the commit and the worklog entry: that string is the only join
-key between the code and the record of why it changed. Add it to the message, or create
-the backlog item first ({{DOCS_DIR}}/process/07-traceability.md). (--no-verify bypasses this hook.)
-MSG
+printf '%s\n' "nuhut: work item ID: put ${prefix}-### in the commit message (or a Work-Item: trailer); create the backlog item first if there is none." >&2
 exit 1

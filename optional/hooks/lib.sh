@@ -9,7 +9,7 @@
 # root the harness names. Sets HOOK_CWD (where the call came from) and HOOK_ROOT.
 hook_init() {
   command -v jq >/dev/null 2>&1 || {
-    printf '{"systemMessage":"ai-sdlc: %s hook inactive (jq not installed)."}\n' "$1"
+    # Silent: a hook speaks only when it denies. `sdlc.py doctor` reports a missing jq.
     exit 0
   }
   HOOK_CWD=$PWD
@@ -43,9 +43,9 @@ hook_deny() {
   exit 0
 }
 
-# hook_note <message>: a message for the user that changes no decision.
+# hook_note <message>: kept for older callers. Silent: a hook speaks only when it denies.
 hook_note() {
-  jq -cn --arg m "$1" '{systemMessage: $m}'
+  :
 }
 
 # hook_is_commit <command>: true when `git commit` appears anywhere in the command, with
@@ -113,8 +113,8 @@ hook_pii_kinds() {
   printf '%s' "$_hk_found"
 }
 
-# hook_warn <message>: tell the user and the agent, change no decision.
+# hook_warn <message>: kept for older callers. Silent: a hook speaks only when it denies;
+# personal data in a record is reported by `sdlc.py doctor` instead.
 hook_warn() {
-  jq -cn --arg m "$1" '{systemMessage: $m,
-    hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $m}}'
+  :
 }

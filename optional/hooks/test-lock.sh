@@ -18,7 +18,7 @@ rel=$(hook_rel_path "$(cat)")
 [ -n "$rel" ] || exit 0
 
 if [ "$rel" = "$list" ]; then
-  hook_deny "$list is the list of tests locked for a defect fix. Adding a lock is done from the shell when the reproducing test is committed; releasing one is a human decision, taken after the fix is verified. Ask for it."
+  hook_deny "the test-lock list is the human's: add a lock from the shell after committing the reproducing test; ask a human to release one."
 fi
 
 while IFS= read -r pattern || [ -n "$pattern" ]; do
@@ -26,7 +26,7 @@ while IFS= read -r pattern || [ -n "$pattern" ]; do
   # shellcheck disable=SC2254  # the glob is the point
   case "$rel" in
     $pattern)
-      hook_deny "$rel is locked in .ai-sdlc/test-lock.txt: it is the reproducing test for a defect being fixed. Make it pass by changing the code under test, not the test. If the test itself is wrong, stop and say why; a human releases the lock."
+      hook_deny "locked reproducing test ($rel): make it pass by changing the code under test, not the test; if the test is wrong, stop and say why."
       ;;
   esac
 done < "$list"

@@ -21,10 +21,5 @@ added=$(printf '%s\n' "$diff" | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -v 'E
 found=$(hook_secret_kinds "$added")
 [ -n "$found" ] || exit 0
 
-cat >&2 <<MSG
-nuhut: commit refused. The staged changes add what looks like a credential ($found).
-Secrets never enter the repository: move it to the environment or the secret store the
-charter names, unstage it, and rotate it if it was ever pushed. A deliberate fake in a
-test fixture passes if its line contains EXAMPLE. (--no-verify bypasses this hook.)
-MSG
+printf '%s\n' "nuhut: no secrets in the repo: the staged changes add a $found; unstage it, keep it in the environment, rotate it if it was pushed (a fixture line containing EXAMPLE passes)." >&2
 exit 1

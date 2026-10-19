@@ -111,9 +111,11 @@ Tier 3 → skipped.
 
 For Tier 1 and Tier 2, append an entry to `project/worklog.md`, filling in every section
 of `templates/worklog-entry.md`; `07-traceability.md` explains why each section exists.
-For Tier 3, append the compact entry defined at the end of that template: date, ID,
-request, changed files, verification result, and anything deferred. Expand to the full
-template if the change uncovers risk, a durable decision, or unresolved work.
+For Tier 3, the commit message carrying the ID is the record, and no worklog edit is
+required. Under the charter's `Strict` tier rules, append the compact entry from that
+template instead. Either way, expand to a full entry if the change uncovers risk, a
+durable decision, or unresolved work. `python3 .ai-sdlc/bin/sdlc.py log --since <ref>`
+drafts entries from commits and `sdlc.py verify` runs: start from its draft.
 
 The worklog is prose and can be long; the backlog is a table and stays terse. Never fold
 narrative into the backlog.
@@ -133,11 +135,12 @@ narrative into the backlog.
 
 ## Waiting on a human
 
-Parts of this kit require a person: two approvers for Tier 1 and one for Tier 2
-(`05-change-control.md`), a named human for any waiver (`02-role-reviews.md`),
-authorisation for anything irreversible or outward-facing. An agent running unattended
-will reach those points with nobody to ask. A pull request awaiting its reviewer is one
-of them — the work is `Parked`, not `Done`.
+Parts of this kit require a person: two approvers for Tier 1, one for Tier 2 when the
+charter's tier rules are `Strict` (`05-change-control.md`), a named human for any waiver
+(`02-role-reviews.md`), a gated command, authorisation for anything irreversible or
+outward-facing. An agent running unattended will reach those points with nobody to ask.
+A Tier 1 pull request awaiting its reviewers is one of them: the work is `Parked`, not
+`Done`. Tier 3, and Tier 2 under `Standard` rules, commit and continue; they do not park.
 
 **That is a stopping condition, not an obstacle to route around.** Say so plainly rather
 than downgrading the tier, splitting the work until no piece looks Tier 1, or recording
@@ -238,10 +241,15 @@ context propagates.
 
 Ask, in order:
 
-1. **Can this hurt someone or something?** (money, data, privacy, availability,
-   reputation, legal exposure) → Tier 1, no exceptions.
-2. **Does it change behaviour a user or another system depends on?** → Tier 2.
-3. **Is it reversible in one commit with no consequence?** → Tier 3.
+1. **Is it hard to reverse, or does it change a contract others consume, stored data,
+   auth, money-movement rules or a release pipeline?** → Tier 1, no exceptions.
+2. **Does it change behaviour, in a way tests can cover and a revert undoes?** → Tier 2,
+   even in a sensitive area: a one-line arithmetic fix in pricing, with a failing test
+   first, is Tier 2.
+3. **Is it reversible in one commit with no behaviour change?** → Tier 3.
+
+Under the charter's `Strict` tier rules, question 1 also catches any change that touches
+auth, payments, personal data or public copy.
 
 Two failure modes are equally bad, and the second is the more common with agents:
 

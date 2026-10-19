@@ -19,19 +19,37 @@ amendment.
 FRAME → PLAN → DESIGN REVIEW → BUILD → VERIFY → SHIP REVIEW → LOG → CLOSE
 ```
 
-Depth scales with tier. Never skip LOG. An undocumented change is unfinished.
+Depth scales with tier. Never skip LOG: for Tier 3 the commit message with the ID is the
+log, and `sdlc.py log --since <ref>` drafts the rest from commits and verify runs.
 
 ## Tiers
 
-| Tier | Any one of | Required |
+| Tier | When | Required |
 | --- | --- | --- |
-| **1** | auth · authorisation · tenancy · payments · PII or regulated data · migration, deletion, or backfill · public brand/legal copy · infrastructure or release pipeline · a model/prompt/retrieval change on any of those, or in a system that acts · a contract others consume · anything hard to reverse | plan · role review · design + ship review · ADR · 2 human approvals · rollback plan |
-| **2** | new feature or user-visible behaviour · schema addition · new dependency · refactor across boundaries · **any** prompt, model, retrieval, eval-threshold, or published-dataset change | plan · role review of touched surfaces · tests · worklog entry · 1 human approval |
-| **3** | copy/typo · patch bump · comment · formatting · adding a test · doc edit | one-line plan · no ship review · short worklog entry · no ADR |
+| **1** | changes a contract others consume · stored data or its schema (migration, deletion, backfill) · authentication or authorisation · rules that move money · a release pipeline or infrastructure · a prompt or model in a system that acts · anything hard to reverse | plan · design + ship review · ADR · 2 human approvals · rollback plan |
+| **2** | new or changed behaviour that tests can cover and a revert undoes · a new dependency · a refactor across boundaries · a prompt, retrieval or eval-threshold change | short plan · review of touched surfaces · tests · worklog entry · merge as the charter says |
+| **3** | copy/typo · patch bump · comment · formatting · adding a test · doc edit | the commit message with the ID · current branch · no review file |
 
-Tier by **surface**, never by line count. A one-line change to an authorisation check —
-or to a prompt governing one — is Tier 1. Splitting a Tier 1 item until no piece looks
-Tier 1 violates the contract. When in doubt, tier up.
+Tier by **blast radius and reversibility**, never by topic or line count. When in doubt,
+tier up. Splitting a Tier 1 item until no piece looks Tier 1 violates the contract.
+
+Worked examples:
+
+| Change | Tier | Because |
+| --- | --- | --- |
+| One-line arithmetic fix in pricing, failing test first | 2 | sensitive area, but test-covered and reverted by one commit; no rule about money movement changes |
+| One-line change to an authorisation check | 1 | authorisation |
+| Fixing a typo in a payment error message | 3 | copy only |
+| Adding a nullable column | 1 | stored data's schema |
+| A new optional API field read by no other service yet | 2 | behaviour, reversible, no consumer bound to it |
+| Changing what a public API returns for an existing field | 1 | a contract others consume |
+| Bumping a dependency's patch version with the suite green | 3 | reversible, no behaviour change intended |
+
+The charter's **Tier rules** row decides which rules apply. `Standard` (the default on a
+new install) is this table. `Strict` keeps the 3.x rules, which an upgrade from 3.x sets
+so nothing changes silently: any change touching auth, payments, personal data or
+public copy is Tier 1, every tier writes a worklog line, and Tier 2 waits for one human
+approver.
 
 ---
 
@@ -177,13 +195,13 @@ Backlog row, positional: `| ID | Task | Tier | Owner role | Depends on | Status 
 Status: `Ready` · `Blocked` (never started) · `In progress` · `In review` (includes
 holding a Block) · `Parked` (waiting on a named human; also where an item you discovered
 and filed unasked enters, never `Ready`) · `Done` (worklog entry exists) · `Deferred` ·
-`Dropped`.
+`Dropped`. A Tier 3 change needs no backlog row: its commit is its record.
 
 **Keep the backlog terse — narrative goes in the worklog.** This is the most-broken
 formatting rule in the kit.
 
 Review records: Tier 1 → a file per review. Tier 2 → the worklog entry's Reviews section.
-Tier 3 → one line there.
+Tier 3 → none.
 
 ---
 

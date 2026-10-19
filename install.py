@@ -329,6 +329,14 @@ USAGE = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      core.hooksPath directory gets a one-line call appended, never
                      replaced. With pre-commit.com or lefthook the entry to add is
                      printed instead. Never implied by another flag.
+  --preset <name>    solo, team or regulated: sets effort mode, decision style,
+                     development method and tier rules together (solo: lean, guide,
+                     item, standard; team: normal, guide, item, standard; regulated:
+                     normal, ask, item, strict). Any of those flags given as well wins.
+                     New installs only; --upgrade keeps the project's charter.
+  --tier-rules <standard|strict>
+                     standard (default): tier by blast radius, Tier 3's record is the
+                     commit, Tier 2 commits and continues. strict: the 3.x rules.
   --profile <name>   full (default) or compact. compact installs the operating card,
                      roles, templates and project records but omits the numbered
                      process/ documents: the same rules from one source, about 8k of
@@ -410,6 +418,9 @@ class Options(object):
         self.decision_given = False
         self.acquisition_given = False
         self.hooks = False
+        self.preset = ""
+        self.tier_rules = "standard"
+        self.tier_rules_given = False
         self.git_hooks = ""        # "", "all" or "secrets"
         self.native_harnesses = []
         self.lang = "en"
@@ -485,6 +496,18 @@ def parse_args(argv):
                 usage()
             o.decision_style, o.decision_given = argv[i + 1], True
             i += 1
+        elif arg == "--preset":
+            if i + 1 >= len(argv) or argv[i + 1] not in PRESETS:
+                sys.stderr.write("--preset requires one of %s\n" % ", ".join(sorted(PRESETS)))
+                usage()
+            o.preset = argv[i + 1]
+            i += 1
+        elif arg == "--tier-rules":
+            if i + 1 >= len(argv) or argv[i + 1] not in ("standard", "strict"):
+                sys.stderr.write("--tier-rules requires standard or strict\n")
+                usage()
+            o.tier_rules, o.tier_rules_given = argv[i + 1], True
+            i += 1
         elif arg == "--acquisition-profile":
             if i + 1 >= len(argv) or argv[i + 1] not in ("standard", "advanced"):
                 sys.stderr.write("--acquisition-profile requires standard or advanced\n")
@@ -547,6 +570,7 @@ def parse_args(argv):
             sys.stderr.write("error: work item prefix %r: %s\n" % (positional[1], t("err.prefix")))
             sys.exit(2)
         o.prefix = prefix
+    apply_preset(o)
     return o
 
 
@@ -2142,6 +2166,33 @@ DEV_METHOD_KEYS = {"i": "Item", "e": "Epic"}
 DECISION_KEYS = {"a": "Ask", "g": "Guide", "p": "Autopilot"}
 
 
+# Presets set four charter rows together. An explicit flag always wins over the preset,
+# whatever the order on the command line. Presets apply to new installs only: --upgrade
+# keeps whatever the project's charter already says.
+PRESETS = {
+    "solo": {"effort_mode": "lean", "decision_style": "guide", "dev_method": "item",
+             "tier_rules": "standard"},
+    "team": {"effort_mode": "normal", "decision_style": "guide", "dev_method": "item",
+             "tier_rules": "standard"},
+    "regulated": {"effort_mode": "normal", "decision_style": "ask", "dev_method": "item",
+                  "tier_rules": "strict"},
+}
+
+
+def apply_preset(o):
+    if not o.preset:
+        return
+    for field, given in (("effort_mode", "effort_given"), ("decision_style", "decision_given"),
+                         ("dev_method", "dev_method_given"), ("tier_rules", "tier_rules_given")):
+        if not getattr(o, given):
+            setattr(o, field, PRESETS[o.preset][field])
+            setattr(o, given, True)
+
+
+def selected_tier_rules(w):
+    return {"standard": "Standard", "strict": "Strict"}.get(w.o.tier_rules, "Standard")
+
+
 def selected_effort(w):
     raw = w.a.get("effort") or {"lean": "l", "normal": "n", "beast": "x"}.get(
         w.o.effort_mode, "n")
@@ -2873,6 +2924,11 @@ def add_missing_charter_rows(installed, template):
 
 def _cell(value):
     return plain_text(value).replace("|", "\\|")
+
+
+TIER_RULES_UPGRADE = ("`Strict` _(set by the upgrade from 3.x: the 3.x tier rules still apply. "
+                      "Change to `Standard` to tier by blast radius; see `../CARD.md`, "
+                      "\"Tiers\")_")
 
 
 def fill_row(text, label, value):
@@ -3912,6 +3968,8 @@ class Installer(object):
             text = fill_row(text, "**Development method**", selected_dev_method(self.w))
         if self.o.decision_given:
             text = fill_row(text, "**Decision style**", selected_decision(self.w))
+        if self.o.tier_rules_given:
+            text = fill_row(text, "**Tier rules**", selected_tier_rules(self.w))
         return text
 
     def platform_row(self, text):
@@ -3956,6 +4014,8 @@ class Installer(object):
         text = fill_row(text, "**Default effort mode**", selected_effort(w))
         text = fill_row(text, "**Acquisition profile**", selected_acquisition(w))
         text = fill_row(text, "**Development method**", selected_dev_method(w))
+        if self.o.tier_rules_given:
+            text = fill_row(text, "**Tier rules**", selected_tier_rules(w))
         text = fill_row(text, "**Decision style**", selected_decision(w))
         if a.get("access_model"):
             text = fill_row(text, "**Access level model**", a.get("access_model"))
@@ -4154,6 +4214,9 @@ def find_docs(target, preferred):
 
 
 def upgrade(target, o):
+    if o.preset or o.tier_rules_given:
+        print("note: --preset and --tier-rules apply to new installs. An upgrade keeps the "
+              "project's charter; edit its rows to change them.")
     docs = find_docs(target, o.docs_dir)
     if not docs:
         sys.stderr.write("error: no installed kit found under %s/%s -- nothing to "
@@ -4259,6 +4322,16 @@ def upgrade(target, o):
                                  .read_text(encoding="utf-8"), inst.ctx)
         merged, added_rows, unplaced = add_missing_charter_rows(
             (target / charter_rel).read_text(encoding="utf-8"), kit_charter)
+        if "Tier rules" in added_rows:
+            # A project from before 4.0 worked under the 3.x tier rules. Keep them, and
+            # say how to move: an upgrade must not change how a project works silently.
+            merged = fill_row(merged, "**Tier rules**", TIER_RULES_UPGRADE)
+            added_rows = [r for r in added_rows if r != "Tier rules"]
+            extra[charter_rel] = merged
+            notes.append("Tier rules set to Strict, which keeps this project's 3.x tiering "
+                         "(sensitive topics are Tier 1, every tier writes a worklog line, "
+                         "Tier 2 waits for one approver). Set the charter's Tier rules row to "
+                         "Standard to tier by blast radius instead (CARD.md, \"Tiers\").")
         if added_rows:
             extra[charter_rel] = merged
             notes.append("The charter gained blank rows for: %s. Fill them in; a blank row "

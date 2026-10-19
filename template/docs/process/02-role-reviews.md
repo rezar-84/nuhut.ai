@@ -174,7 +174,8 @@ One file per review: `project/reviews/{{PREFIX}}-###-<design|ship>.md`, from
 `templates/role-review.md`. Findings carry S0–S4 severity per `04-quality-gates.md`.
 
 **Tier 1 only.** For Tier 2 the same content goes in the response and, durably, in the
-worklog entry's **Reviews** section — no file. For Tier 3 it is one line in that section.
+worklog entry's **Reviews** section — no file. Tier 3 has no review record (`Strict` tier
+rules: one line in that section).
 Add a row to the index in `project/reviews/README.md` for each file you create.
 
 ---

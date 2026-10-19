@@ -75,8 +75,8 @@ approved on trust, which defeats the purpose.
 
 | Change | Approval |
 | --- | --- |
-| Tier 3 | Self-merge permitted if all checks pass. |
-| Tier 2 | **One human approver.** |
+| Tier 3 | Commit on the current branch once the checks pass. No approval, no parking. |
+| Tier 2 | As the charter's **Tier rules** say: `Standard`, commit and continue; `Strict`, **one human approver**. |
 | Tier 1 | **Two human approvers**, at least one with domain ownership of the affected surface. |
 | Anything named under "Human approval required for" in `AGENTS.md` | As named there, regardless of tier. |
 | Tier 2 or 3 items inside an epic | Merged into the epic branch by the agent once checks pass and no review holds a Block. The approval above is given once per checkpoint, when the epic branch is proposed for the default branch (`11-epics.md`). A Tier 1 item inside an epic is approved on its own. |

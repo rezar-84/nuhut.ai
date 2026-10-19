@@ -70,7 +70,8 @@ A leak that has reached a committed file, or may have, is an S0 under
 | `sdlc.py doctor` | Reports credential and personal-data shapes already in the docs, by kind and file, never value | Prove a file is clean |
 | `checks.scan` in CI | Scans the repository, history included, with the project's own scanner | Undo a leak |
 
-The hooks are Claude Code only. On another agent tool, the rule and `doctor` are what is
-left, so run `doctor` before every commit that touches a record. None of this replaces a
+The tool-call hooks run under Claude Code, Gemini CLI and Cursor; `secret-guard` also
+exists as a git `pre-commit` hook for every tool (`--git-hooks`). Elsewhere, the rule and
+`doctor` are what is left, so run `doctor` before every commit that touches a record. None of this replaces a
 dedicated secret scanner in CI. A pattern list is a guard rail for an agent trying to
 comply, not a proof of absence.

@@ -39,6 +39,4 @@ if [ -f "$backlog" ]; then
   done
 fi
 
-hook_deny "This commit carries no work item ID. AGENTS.md section 6 requires ${prefix}-### in the branch, the commit and the worklog entry, because that string is the only join key between the code and the record of why it changed.
-
-Add it to the commit message. If this work genuinely has no backlog item, create one first ({{DOCS_DIR}}/process/07-traceability.md: the next ID is the highest anywhere under project/, including Dropped rows and the archive, plus one)."
+hook_deny "work item ID: put ${prefix}-### in the commit message (or a Work-Item: trailer); create the backlog item first if there is none."

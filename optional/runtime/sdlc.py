@@ -11,6 +11,8 @@ markdown commands that call this.
     python3 .ai-sdlc/bin/sdlc.py plan-check ACME-12 [--base main] [--json] [--strict]
     python3 .ai-sdlc/bin/sdlc.py view [--no-open] [--json] [--serve [--port 8765]]
     python3 .ai-sdlc/bin/sdlc.py metrics [--json]
+    python3 .ai-sdlc/bin/sdlc.py log --since main [--write]
+    python3 .ai-sdlc/bin/sdlc.py bite [--base REF] <test command> | --restore
 
 Standard library only. Installed and upgraded by the kit, so a local edit blocks
 `--upgrade` rather than being lost; change the kit instead.
@@ -26,6 +28,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -41,6 +45,7 @@ EFFORT = ("Lean", "Normal", "Beast")
 ACQUISITION = ("Standard", "Advanced")
 DEV_METHOD = ("Item", "Epic")
 DECISION_STYLE = ("Ask", "Guide", "Autopilot")
+TIER_RULES = ("Standard", "Strict")
 WORKLOG_ROTATE_LINES = 1000
 DEFAULT_STALENESS_DAYS = 90
 KNOWN_MISTAKES_LINES = 30
@@ -381,6 +386,12 @@ def check_charter(project, out):
     if cell is not None and choice(cell, DECISION_STYLE)[1] in ("invalid", "blank"):
         out.add("fail", "charter", "%s Decision style" % where,
                 "must be exactly one of %s" % ", ".join(DECISION_STYLE))
+    # Added in 4.0. Missing, blank or undecided means Standard on a new install; an
+    # upgrade from 3.x fills it with Strict. Only a value that is neither is wrong.
+    cell = labelled(text, "Tier rules")
+    if cell is not None and choice(cell, TIER_RULES)[1] == "invalid":
+        out.add("fail", "charter", "%s Tier rules" % where,
+                "must be exactly one of %s" % ", ".join(TIER_RULES))
     active = dict((name, on) for name, on, _ in roles(text))
     undecided = [name for name, on, reason in roles(text) if not on and unfilled(reason)]
     if undecided:
@@ -457,6 +468,12 @@ def check_staleness(project, out, today):
                     "last reviewed %d days ago; the window is %d" % (days, window))
 
 
+def tier_rules(project):
+    """'Strict' or 'Standard' (the default) from the charter's Tier rules row."""
+    picked, state = choice(labelled(project.charter, "Tier rules") or "", TIER_RULES)
+    return picked if state == "decided" else "Standard"
+
+
 def check_traceability(project, out):
     prefix = project.prefix
     legacy_prefixes = getattr(project, "legacy_prefixes", None)
@@ -485,8 +502,11 @@ def check_traceability(project, out):
     for item in sorted(logged - known, key=id_sort_key):
         out.add("warn", "traceability", "%s/project/worklog.md %s" % (project.docs, item),
                 "in the worklog but not in the backlog")
-    mentioned = ids_in(project.git("log", "-50", "--format=%B"), prefix, known) | \
-        ids_in(project.git("branch", "--format=%(refname:short)"), prefix, known)
+    # Under Standard tier rules a Tier 3 change's commit message is its whole record, so
+    # an ID seen only in a commit is expected. A branch means work worth a record.
+    mentioned = ids_in(project.git("branch", "--format=%(refname:short)"), prefix, known)
+    if tier_rules(project) == "Strict":
+        mentioned |= ids_in(project.git("log", "-50", "--format=%B"), prefix, known)
     for item in sorted(mentioned - known - logged, key=id_sort_key):
         out.add("warn", "traceability", "git",
                 "%s is in a recent commit or branch and in neither the backlog nor the "
@@ -790,9 +810,28 @@ def check_dependencies(project, out):
             dfs(node, [node])
 
 
+def check_hook_dependency(project, out):
+    """The hooks stay silent unless they deny, so a missing jq -- which makes every hook
+    allow every call -- is reported here instead."""
+    hooks = project.path(os.path.join(".claude", "hooks"))
+    if os.path.isdir(hooks) and any(n.endswith(".sh") for n in os.listdir(hooks)) \
+            and shutil.which("jq") is None:
+        out.add("warn", "hooks", ".claude/hooks",
+                "installed, but jq is not on PATH, so every hook allows every call")
+
+
+def check_bite_leftover(project, out):
+    if os.path.exists(project.path(os.path.join(BITE_DIR, "active.json"))):
+        out.add("fail", "bite", BITE_DIR,
+                "an interrupted `sdlc.py bite` left product files reverted; run "
+                "`sdlc.py bite --restore`")
+
+
 def doctor(project, today=None):
     out = Findings()
     today = today or datetime.date.today()
+    check_bite_leftover(project, out)
+    check_hook_dependency(project, out)
     check_placeholders(project, out)
     check_pointer(project, out)
     check_charter(project, out)
@@ -825,9 +864,9 @@ def print_findings(items):
 
 # ---------------------------------------------------------------- verify
 
-def evidence_dir(project):
+def evidence_dir(project, suffix=""):
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base = project.path(os.path.join(".ai-sdlc", "evidence", stamp))
+    base = project.path(os.path.join(".ai-sdlc", "evidence", stamp + suffix))
     path, n = base, 1
     while os.path.exists(path):
         n += 1
@@ -920,6 +959,243 @@ def verify(project, selected, timeout, parallel=False):
     with open(os.path.join(folder, "summary.md"), "w", encoding="utf-8") as handle:
         handle.write(text)
     return summary, text
+
+
+def evidence_runs(project):
+    """Every verify run on disk, oldest first: (folder name, summary dict)."""
+    runs = []
+    base = project.path(os.path.join(".ai-sdlc", "evidence"))
+    if not os.path.isdir(base):
+        return runs
+    for name in sorted(os.listdir(base)):
+        try:
+            with open(os.path.join(base, name, "summary.json"), encoding="utf-8") as handle:
+                runs.append((name, json.load(handle)))
+        except (IOError, OSError, ValueError):
+            continue
+    return runs
+
+
+# ---------------------------------------------------------------- log
+
+def log_entries(project, since):
+    """Draft worklog lines from the commits since <since>, one per work item, in the
+    worklog's compact form. Verification comes from verify runs recorded on one of the
+    item's commits; with none, it says so. Returns (lines, commits without an ID)."""
+    prefix = project.prefix
+    out = project.git("log", "--reverse", "--format=%H%x01%cs%x01%s%x01%b%x00",
+                      "%s..HEAD" % since)
+    items, order, orphans = {}, [], []
+    for record in out.split("\x00"):
+        parts = record.strip("\n").split("\x01")
+        if len(parts) < 4 or not parts[0].strip():
+            continue
+        sha, date, subject, body = parts[0].strip(), parts[1], parts[2], parts[3]
+        trailer = re.search(r"^Work-Item:\s*(\S+)", body, re.M)
+        found = sorted(ids_in(subject + "\n" + body, prefix)) if prefix else []
+        item = trailer.group(1) if trailer else (found[0] if found else None)
+        if not item:
+            orphans.append("%s %s" % (sha[:7], subject))
+            continue
+        if item not in items:
+            items[item] = {"date": date, "subjects": [], "shas": [], "files": []}
+            order.append(item)
+        entry = items[item]
+        entry["date"] = date
+        entry["subjects"].append(subject)
+        entry["shas"].append(sha)
+        for path in project.git("show", "--name-only", "--format=", sha).splitlines():
+            if path.strip() and path not in entry["files"] and not KIT_PATH.match(path) \
+                    and not NOISE_PATH.search(path):
+                entry["files"].append(path)
+    runs = evidence_runs(project)
+    lines = []
+    for item in order:
+        entry = items[item]
+        request = re.sub(r"\b%s\b[:\s-]*" % re.escape(item), "", entry["subjects"][0]).strip()
+        shown = entry["files"][:3]
+        changed = ", ".join(shown) + (" (+%d)" % (len(entry["files"]) - 3)
+                                      if len(entry["files"]) > 3 else "")
+        verified = "not run"
+        for name, summary in reversed(runs):
+            if summary.get("git_head") in entry["shas"]:
+                ran = [e for e in summary.get("stages", [])
+                       if str(e.get("result", "")).startswith("Verified")]
+                failed = [e["stage"] for e in ran if "fail" in e["result"]]
+                verified = ("%s: %s" % (name, "fail " + ",".join(failed) if failed
+                                        else "pass " + ",".join(e["stage"] for e in ran))
+                            if ran else "%s: nothing ran" % name)
+                break
+        lines.append("- %s · %s · %s · changed: %s · verified: %s · commits: %s"
+                     % (entry["date"], item, request or entry["subjects"][0], changed or "none",
+                        verified, " ".join(sha[:7] for sha in entry["shas"])))
+    return lines, orphans
+
+
+ID_TOKEN = r"[A-Z]+[-0-9.]*[0-9]\b"
+NOISE_PATH = re.compile(r"(^|/)__pycache__/|\.py[co]$")
+
+
+def write_log(project, lines):
+    """Insert drafted lines above the newest worklog entry, skipping any item the worklog
+    already names. Returns the lines written."""
+    path = project.path(os.path.join(project.docs, "project", "worklog.md"))
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except (IOError, OSError):
+        return []
+    new = [line for line in lines if line.split(" · ")[1] not in text]
+    if not new:
+        return []
+    rows = text.split("\n")
+    marker = next((i for i, row in enumerate(rows) if "New entries go here" in row), None)
+    if marker is not None:
+        at = marker + 1
+    else:
+        at = next((i for i, row in enumerate(rows)
+                   if re.match(r"^## %s" % ID_TOKEN, row)
+                   or re.match(r"^- [0-9]{4}-[0-9]{2}-[0-9]{2} ·", row)), len(rows))
+    # Newest first, like every other entry.
+    rows[at:at] = [""] + list(reversed(new))
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(rows))
+    return new
+
+
+# ---------------------------------------------------------------- bite
+
+TEST_PATH = re.compile(r"(^|/)(tests?|__tests__|specs?)/|(^|/)test_[^/]*$|_test\.[A-Za-z]+$|"
+                       r"\.(test|spec)\.[A-Za-z]+$|Tests?\.(java|cs|kt)$")
+KIT_PATH = re.compile(r"^(\.ai-sdlc/|\.claude/|\.agents/|AGENTS\.md$|CLAUDE\.md$)")
+BITE_DIR = os.path.join(".ai-sdlc", "bite")
+
+
+def bite_files(project, base):
+    """Product files that differ between <base> and the working tree."""
+    names = set(project.git("diff", "--name-only", base).splitlines())
+    names |= set(project.git("ls-files", "--others", "--exclude-standard").splitlines())
+    docs = project.docs.rstrip("/") + "/"
+    return sorted(n for n in names if n and not TEST_PATH.search(n) and not KIT_PATH.match(n)
+                  and not NOISE_PATH.search(n) and not n.startswith(docs))
+
+
+def bite_restore(project):
+    """Put back every file an interrupted bite reverted. Returns the paths restored."""
+    marker = project.path(os.path.join(BITE_DIR, "active.json"))
+    if not os.path.exists(marker):
+        return []
+    with open(marker, encoding="utf-8") as handle:
+        state = json.load(handle)
+    restored = []
+    for item in state["files"]:
+        target = project.path(item["path"])
+        if item["existed"]:
+            folder = os.path.dirname(target)
+            if folder and not os.path.isdir(folder):
+                os.makedirs(folder)
+            shutil.copy2(project.path(os.path.join(state["backup"], item["path"])), target)
+        elif os.path.exists(target):
+            os.remove(target)
+        restored.append(item["path"])
+    shutil.rmtree(project.path(state["backup"]), ignore_errors=True)
+    os.remove(marker)
+    return restored
+
+
+def bite(project, command, base=None, timeout=1800):
+    """Does the test command catch the change? Run it on the working tree, then with the
+    product files put back to <base> (tests stay as they are), then restore. It bites
+    when it passes with the change and fails without it. Returns (result, error)."""
+    if os.path.exists(project.path(os.path.join(BITE_DIR, "active.json"))):
+        return None, ("an earlier bite was interrupted and left files reverted; run "
+                      "`sdlc.py bite --restore` first")
+    if not project.git("rev-parse", "HEAD").strip():
+        return None, "not a git repository with a commit"
+    if base is None:
+        base = "HEAD" if bite_files(project, "HEAD") else "HEAD~1"
+    if not project.git("rev-parse", "--verify", "--quiet", base + "^{commit}").strip():
+        return None, "base %r is not a commit" % base
+    files = bite_files(project, base)
+    if not files:
+        return None, ("no product change between %s and the working tree to revert "
+                      "(test files and the kit's own paths are left alone)" % base)
+
+    def run():
+        try:
+            return subprocess.run(command, shell=True, cwd=project.root, stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                  timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            return None
+
+    with_change = run()
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup = os.path.join(BITE_DIR, stamp)
+    os.makedirs(project.path(backup))
+    ignore = project.path(os.path.join(BITE_DIR, ".gitignore"))
+    if not os.path.exists(ignore):
+        with open(ignore, "w", encoding="utf-8") as handle:
+            handle.write("*\n!.gitignore\n")
+    state = {"base": base, "backup": backup, "command": command, "files": []}
+    for rel in files:
+        existed = os.path.exists(project.path(rel))
+        if existed:
+            dest = project.path(os.path.join(backup, rel))
+            if not os.path.isdir(os.path.dirname(dest)):
+                os.makedirs(os.path.dirname(dest))
+            shutil.copy2(project.path(rel), dest)
+        state["files"].append({"path": rel, "existed": existed})
+    with open(project.path(os.path.join(BITE_DIR, "active.json")), "w", encoding="utf-8") as handle:
+        json.dump(state, handle, indent=2)
+
+    previous = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+    try:
+        for rel in files:
+            original = subprocess.run(["git", "show", "%s:%s" % (base, rel)], cwd=project.root,
+                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            target = project.path(rel)
+            if original.returncode == 0:
+                if not os.path.isdir(os.path.dirname(target) or "."):
+                    os.makedirs(os.path.dirname(target))
+                with open(target, "wb") as handle:
+                    handle.write(original.stdout)
+            elif os.path.exists(target):
+                os.remove(target)
+        without_change = run()
+    finally:
+        bite_restore(project)
+        signal.signal(signal.SIGTERM, previous)
+
+    result = {"command": command, "base": base, "files": files,
+              "with_change": with_change, "without_change": without_change,
+              "bites": with_change == 0 and without_change not in (0, None),
+              "git_head": project.git("rev-parse", "HEAD").strip(),
+              "dirty": bool(project.git("status", "--porcelain").strip()),
+              "generated": datetime.datetime.now(datetime.timezone.utc).strftime(
+                  "%Y-%m-%dT%H:%M:%SZ")}
+    folder = evidence_dir(project, "-bite")
+    with open(os.path.join(folder, "bite.json"), "w", encoding="utf-8") as handle:
+        json.dump(result, handle, indent=2)
+    result["evidence"] = os.path.relpath(folder, project.root)
+    return result, None
+
+
+def print_bite(result):
+    verdict = ("bites: the tests pass with the change and fail without it"
+               if result["bites"] else
+               "does not bite: " + ("the tests fail with the change too; fix them first"
+                                    if result["with_change"] != 0 else
+                                    "the tests still pass without the change, so they do not "
+                                    "test it"))
+    print("bite %s" % ("PASS" if result["bites"] else "FAIL"))
+    print("  command         %s" % result["command"])
+    print("  reverted to     %s: %s" % (result["base"], ", ".join(result["files"])))
+    print("  with change     exit %s" % result["with_change"])
+    print("  without change  exit %s" % result["without_change"])
+    print("  %s" % verdict)
+    print("  evidence        %s" % result["evidence"])
 
 
 def summary_markdown(summary, folder):
@@ -1279,6 +1555,20 @@ def main(argv):
                     help="export the standalone dashboard HTML file (default: dashboard.html)")
     met = sub.add_parser("metrics", help="process measures from the records and git")
     met.add_argument("--json", action="store_true", help="print as JSON")
+    lg = sub.add_parser("log", help="draft worklog lines from commits and verify runs")
+    lg.add_argument("--since", required=True, help="git ref to start after, e.g. main or HEAD~5")
+    lg.add_argument("--write", action="store_true", help="insert the drafts into the worklog "
+                    "(items it already names are skipped)")
+    bt = sub.add_parser("bite", help="check that a test command fails without the change "
+                        "and passes with it")
+    bt.add_argument("test_command", nargs=argparse.REMAINDER,
+                    help="the test command, e.g. python3 -m unittest discover -s tests")
+    bt.add_argument("--base", help="ref to revert product files to (default: HEAD when "
+                    "there are uncommitted product changes, else HEAD~1)")
+    bt.add_argument("--timeout", type=int, default=1800, help="seconds per test run")
+    bt.add_argument("--restore", action="store_true",
+                    help="put back files an interrupted bite left reverted")
+    bt.add_argument("--json", action="store_true", help="print the result as JSON")
     opts = parser.parse_args(argv)
     if not opts.command:
         parser.print_help()
@@ -1298,6 +1588,40 @@ def main(argv):
         if opts.command == "metrics":
             return view.print_metrics(sys.modules[__name__], project, opts)
         return view.run(sys.modules[__name__], project, opts)
+    if opts.command == "log":
+        if not project.git("rev-parse", "--verify", "--quiet", opts.since + "^{commit}").strip():
+            sys.stderr.write("log: %r is not a commit\n" % opts.since)
+            return 2
+        lines, orphans = log_entries(project, opts.since)
+        if opts.write:
+            written = write_log(project, lines)
+            print("wrote %d line(s) to %s/project/worklog.md" % (len(written), project.docs))
+            lines = written
+        for line in lines:
+            print(line)
+        for orphan in orphans:
+            print("no work item ID: %s" % orphan, file=sys.stderr)
+        return 0
+    if opts.command == "bite":
+        if opts.restore:
+            restored = bite_restore(project)
+            print("restored %d file(s)%s" % (len(restored), (": " + ", ".join(restored))
+                                             if restored else ""))
+            return 0
+        command = " ".join(opts.test_command).strip()
+        if command.startswith("-- "):
+            command = command[3:]
+        if not command:
+            parser.error("bite needs a test command")
+        result, error = bite(project, command, opts.base, opts.timeout)
+        if error:
+            sys.stderr.write("bite: %s\n" % error)
+            return 2
+        if opts.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print_bite(result)
+        return 0 if result["bites"] else 1
     if opts.command == "plan-check":
         result, error = plan_check(project, opts.item, opts.base)
         if error:
