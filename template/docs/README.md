@@ -74,24 +74,6 @@ titles, documents and headings; press `?` for keyboard shortcuts; the browser's 
   `{{PREFIX}}-###`, for example) are listed on the Map page under "could not read", so
   they can be fixed.
 
-## `dashboard.html` — the static status page
-
-The smaller, older summary: settings, open items and stale documents on one page. For
-day-to-day work the viewer above shows everything this does and more.
-
-Open it from the filesystem; there is no server. It reads `dashboard-state.js`, which is
-generated from these files — the charter's roles and commands, the backlog rows, the
-frontmatter of every `project/` artifact — and shows what is open, what is stale, which
-roles nobody decided about, and which check stages have no command.
-
-**Read-only on purpose.** A page that could edit the charter would be a second source of
-truth, and every rule here depends on there being one. Where the page and a file disagree,
-the file is right and the page is the defect.
-
-Regenerate the state by re-running the installer or with `/sdlc-doctor`. The page shows
-its own generation date and flags itself when that date is past the charter's staleness
-window, because a confidently wrong status page is worse than none.
-
 ## `process/` — how work is done
 
 Portable standards. Identical in every project that installs this kit. Do not add

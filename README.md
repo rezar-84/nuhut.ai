@@ -135,8 +135,8 @@ install.
 belongs to the harness itself (such as a terminal, an IDE integration, or Claude Code
 Remote Control). What a repository-level kit needs is a way for the human to *see* the
 work while the agents do it, so that is what the kit ships: [the viewer](#seeing-the-work)
-(`sdlc.py view`, live with `--serve`), and the smaller static `docs/dashboard.html`. Both
-are read-only. Neither can change a record, start an agent, or approve anything.
+(`sdlc.py view`, live with `--serve`, or a single static file with `--export-html`). It
+is read-only: it cannot change a record, start an agent, or approve anything.
 
 ## Install as a Claude Code plugin
 
@@ -595,8 +595,6 @@ template/
       README.md + 16 role playbooks
     templates/               Blank artifacts to copy when a project needs one.
     CARD.md                  the operating card: the whole standard on one page
-    dashboard.html           static status page (state in dashboard-state.js); the
-                             full view is `sdlc.py view` from .ai-sdlc/bin/
     project/                 WHERE this project's filled-in reality lives.
       charter.md  backlog.md  worklog.md  assumptions-and-risks.md
       adr/  reviews/  plans/  defects/  epics/  postmortems/  worklog-archive/

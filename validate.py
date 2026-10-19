@@ -228,39 +228,21 @@ def card_fidelity(errors):
             errors.append("AGENTS.md no longer names %s as escalation" % rel)
 
 
-def dashboard_fidelity(errors):
-    """The status page restates the backlog's status values and reads the charter's role
-    and command tables. Like CARD.md it can drift from the standard it displays, and a
-    status page that is confidently wrong is the failure this kit exists to prevent."""
-    page = ROOT / "template" / "docs" / "dashboard.html"
-    if not page.is_file():
-        errors.append("template/docs/dashboard.html is missing")
-        return
-    html = page.read_text(encoding="utf-8")
-    trace = (ROOT / "template" / "docs" / "process" / "07-traceability.md").read_text(
-        encoding="utf-8")
-
-    # Only the Status values table defines statuses; 07 has other tables of bold terms.
-    section = trace.split("### Status values", 1)[-1].split("\n## ", 1)[0].split("\n### ", 1)[0]
-    statuses = set(re.findall(r"^\| \*\*([A-Z][a-z ]+)\*\* \|", section, re.M))
-    if not statuses:
-        errors.append("07-traceability.md no longer has a parseable Status values table")
-    declared = set(re.findall(r'"([A-Z][a-z]+(?: [a-z]+)?)":\s*"b?-?[a-z-]*"', html))
-    for status in sorted(declared - statuses):
-        errors.append("dashboard.html knows backlog status %r, absent from "
-                      "07-traceability.md" % status)
-    for status in sorted(statuses):
-        if status not in html:
-            errors.append("dashboard.html does not handle backlog status %r" % status)
-
-    if "dashboard-state.js" not in html:
-        errors.append("dashboard.html no longer loads its state file")
-    for marker in ("staleness_days", "SDLC_STATE", "AGENTS.md"):
-        if marker not in html:
-            errors.append("dashboard.html no longer references %s" % marker)
+def single_viewer(errors):
+    """4.0 has one viewer. The retired static page must not come back, and the viewer's
+    export must stay self-contained (no external scripts, nothing that edits records)."""
+    if (ROOT / "template" / "docs" / "dashboard.html").exists():
+        errors.append("template/docs/dashboard.html is back; sdlc.py view --export-html is "
+                      "the static option")
+    html = (ROOT / "optional" / "runtime" / "view.html").read_text(encoding="utf-8")
+    if re.search(r"<script[^>]+src=", html):
+        errors.append("view.html loads an external script; the export must be self-contained")
     if "contenteditable" in html or "<form" in html:
-        errors.append("dashboard.html must stay read-only: it is not a second source of "
-                      "truth for the charter")
+        errors.append("view.html must stay read-only")
+    for doc in (ROOT / "README.md", ROOT / "template" / "docs" / "README.md",
+                ROOT / "optional" / "claude-commands" / "sdlc-doctor.md"):
+        if "dashboard-state.js" in doc.read_text(encoding="utf-8"):
+            errors.append("%s still describes the retired dashboard-state.js" % doc.relative_to(ROOT))
 
 
 # Each tier's reading list, as AGENTS.md section 3 states it, and its budget in words.
@@ -471,7 +453,7 @@ def main():
 
     cross_references(errors)
     card_fidelity(errors)
-    dashboard_fidelity(errors)
+    single_viewer(errors)
     reading_budget(errors)
 
     if errors:

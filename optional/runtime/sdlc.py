@@ -1037,6 +1037,24 @@ def model_family(name):
     return "unknown"
 
 
+def commit_index(project, known=None):
+    """{item: [(sha, parent, trailers)]} for every commit, from one `git log` -- the same
+    matching as item_commits, for callers that need every item at once."""
+    out = project.git("log", "--all", "--format=%H%x01%P%x01%B%x00")
+    index = {}
+    for record in out.split("\x00"):
+        parts = record.strip("\n").split("\x01")
+        if len(parts) < 3 or not parts[0].strip():
+            continue
+        tags = trailers(parts[2])
+        found = set(ids_in(parts[2], project.prefix, known)) if project.prefix or known else set()
+        if tags.get("Work-Item"):
+            found.add(tags["Work-Item"])
+        for item in found:
+            index.setdefault(item, []).append((parts[0].strip(), (parts[1].split() or [""])[0], tags))
+    return index
+
+
 def item_commits(project, item):
     """[(sha, parent, trailers)] for commits naming <item> in a Work-Item trailer or in
     the message, newest first."""
@@ -1095,10 +1113,10 @@ def ledger(project):
     return rows
 
 
-def evidence_matches(project, item, rows=None):
+def evidence_matches(project, item, rows=None, commits=None):
     """Ledger rows that verify <item> (the usual order is verify, then commit)."""
     rows = ledger(project) if rows is None else rows
-    commits = item_commits(project, item)
+    commits = item_commits(project, item) if commits is None else commits
     heads = set(sha for sha, _, _ in commits)
     parents = set(parent for _, parent, _ in commits if parent)
     # A clean run on one of the item's commits, or a run on the parent of one with the

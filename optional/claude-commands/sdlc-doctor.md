@@ -128,25 +128,11 @@ against the charter. **The charter is the source of truth**; report any differen
 drift to be corrected in the profile, never the other way round. Report a `kit_version`
 older than `.ai-sdlc/manifest.json` as an incomplete upgrade.
 
-## 8. Refresh the status page
-
-If `{{DOCS_DIR}}/dashboard.html` exists, rewrite `{{DOCS_DIR}}/dashboard-state.js` from
-what you just read, keeping the shape that is already in the file: `generated` (today),
-`project`, `prefix`, `kit_version`, `docs_dir`, `profile`, `effort_mode`,
-`acquisition_profile`, `wired`, `staleness_days`, and
-the arrays `roles` (`name` · `active` · `reason`), `commands` (`stage` · `command`),
-`items` (`id` · `task` · `tier` · `owner` · `depends` · `status`), `artifacts` (`file` ·
-`status` · `owner` · `last_reviewed`), and `budgets`.
-
-It is a generated project record, not a kit file — overwrite it whole rather than editing
-around the edges, and set `generated` to today so the page stops declaring itself stale.
-Never write a value you did not read from a file: the page inherits this kit's evidence
-rules, and a status page that states something nobody verified is the exact failure the
-rest of these documents exist to prevent.
+## 8. Point at the viewer
 
 When you report back, tell the human they can see the same records joined up with
-`python3 .ai-sdlc/bin/sdlc.py view` (add `--serve` to keep it live). Do not run a
-server on their behalf.
+`python3 .ai-sdlc/bin/sdlc.py view` (add `--serve` to keep it live, or `--export-html
+<path>` for one static file to share). Do not run a server on their behalf.
 
 ## Output
 

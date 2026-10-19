@@ -1572,8 +1572,16 @@ def test_upgrade_from_350():
         write(d, "AGENTS.md", agents_before[:agents_before.index("## 9. Project overrides")] + section9)
         charter_before = read(d, "docs/project/charter.md")
 
+        check("fixture: 3.5.0 shipped the static dashboard",
+              os.path.isfile(os.path.join(d, "docs", "dashboard.html"))
+              and os.path.isfile(os.path.join(d, "docs", "dashboard-state.js")))
         code, out = run([d, "OLD", "--upgrade"])
         check("the 3.5.0 install upgrades", code == 0 and "Done:" in out, out[-600:])
+        check("the unmodified dashboard.html is removed",
+              not os.path.exists(os.path.join(d, "docs", "dashboard.html")) and "remove" in out, out[-600:])
+        check("the generated state file is left, with a note",
+              os.path.isfile(os.path.join(d, "docs", "dashboard-state.js"))
+              and "dashboard-state.js fed the retired" in out, out[-600:])
         charter = read(d, "docs/project/charter.md")
         check("its explicit settings survive",
               "| **Default effort mode** | Lean |" in charter and "| **Decision style** | Ask |" in charter,
@@ -1593,6 +1601,20 @@ def test_upgrade_from_350():
                                   cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         text = doctor.communicate()[0].decode("utf-8", "replace")
         check("the upgraded project passes the doctor", doctor.returncode == 0, text[-600:])
+
+        # A second 3.5.0 project whose dashboard was edited keeps it.
+        d2 = os.path.join(scratch, "edited")
+        os.makedirs(d2)
+        subprocess.call(["git", "init", "-q", d2])
+        subprocess.call([sys.executable, os.path.join(old, "install.py"), d2, "OLD", "-y"], cwd=old,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        write(d2, "docs/dashboard.html", read(d2, "docs/dashboard.html") + "<!-- ours -->\n")
+        code, out = run([d2, "OLD", "--upgrade"])
+        check("an edited dashboard.html is kept, with a note, and does not stop the upgrade",
+              code == 0 and "<!-- ours -->" in read(d2, "docs/dashboard.html")
+              and "was changed here, so it was left in place" in out, out[-600:])
+        manifest = json.loads(read(d2, ".ai-sdlc/manifest.json"))
+        check("and the kit stops managing it", "docs/dashboard.html" not in manifest.get("files", {}))
     finally:
         subprocess.call(["git", "worktree", "remove", "--force", old], cwd=ROOT)
         subprocess.call(["git", "worktree", "prune"], cwd=ROOT)
@@ -1810,6 +1832,18 @@ def test_separation():
     commit("Wire it", "Work-Item: SEP-1\nAgent: claude-code\nModel: claude-opus-5-5")
     code, out = sdlc("doctor", "--strict")
     check("the charter can extend the rule to Tier 2", code == 1 and "SEP-1" in out and "Tier 2" in out, out)
+    code, out = sdlc("view", "--json")
+    try:
+        item = json.loads(out)["items"]["SEP-4"]
+    except (ValueError, KeyError):
+        item = {}
+    check("the viewer shows the author, each review's identity and independence",
+          item.get("author") == "claude-code / claude-opus-5-5"
+          and sorted(r["independent"] for r in item.get("reviews", [])) == [False, True]
+          and any("gpt-5" in r["reviewer"] for r in item.get("reviews", [])), str(item)[:500])
+    check("the viewer shows the item's evidence, and Verify is done from it",
+          any(e["stage"] == "unit" and "pass" in e["result"] for e in item.get("evidence", []))
+          and item.get("steps", {}).get("Verify") == "done", str(item.get("evidence")))
     if shutil.which("codex") is None:
         code, out = sdlc("review", "SEP-4", "--role", "security", "--by", "codex")
         check("a missing harness CLI fails with a clear message", code == 2 and "codex is not installed" in out, out)
@@ -1826,72 +1860,23 @@ def test_separation():
 
 
 def test_dashboard():
-    print("status page and its generated state")
+    print("one viewer: no static page, a self-contained export")
     d = fixture("next")
-    code, out = run([d, "DSH", "-y", "--scaffold-tests"])
+    code, out = run([d, "DSH", "-y"])
     check("exit 0", code == 0, out[-300:])
-    page = read(d, "docs/dashboard.html")
-    check("the page is installed", "SDLC_STATE" in page, page[:120])
-    check("the page carries no placeholders", "{{" not in page, page[:200])
-    raw = read(d, "docs/dashboard-state.js")
-    check("the state file is generated", raw.startswith("//") and "SDLC_STATE" in raw,
-          raw[:120])
-    try:
-        state = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
-    except (ValueError, IndexError):
-        state = {}
-
-    # The page must agree with the files, not with the answers.
-    charter = read(d, "docs/project/charter.md")
-    roles = [r["name"] for r in state.get("roles", [])]
-    on_disk = sorted(f[:-3] for f in os.listdir(os.path.join(d, "docs", "roles"))
-                     if f.endswith(".md") and f != "README.md")
-    check("every role in the charter is in the state", sorted(roles) == on_disk,
-          "%s vs %s" % (sorted(roles), on_disk))
-    check("active roles match the charter's ticks",
-          sum(1 for r in state.get("roles", []) if r["active"]) ==
-          len(re.findall(r"^\| [a-z-]+ \| \u2611 \|", charter, re.M)),
-          str([r["name"] for r in state.get("roles", []) if r["active"]]))
-    check("check stages come from the charter",
-          sorted(c["stage"] for c in state.get("commands", [])) ==
-          sorted(re.findall(r"^\| `(checks\.[a-z0-9]+)` \|", charter, re.M)),
-          str([c["stage"] for c in state.get("commands", [])]))
-    check("artifact frontmatter is read",
-          any(a["file"] == "test-plan.md" and a["last_reviewed"]
-              for a in state.get("artifacts", [])), str(state.get("artifacts")))
-    check("the state records what was wired",
-          "CLAUDE.md" in state.get("harnesses", state.get("wired", [])),
-          str(state.get("wired")))
-    check("the state is dated today",
-          state.get("generated") == installer.today(), str(state.get("generated")))
-    check("the state uses safe mode defaults for an untailored charter",
-          state.get("effort_mode") == "Normal" and
-          state.get("acquisition_profile") == "Standard", str(state))
-
-    # The state is a project record: an upgrade must not manage or replace it.
+    check("no static dashboard is installed",
+          not os.path.exists(os.path.join(d, "docs", "dashboard.html"))
+          and not os.path.exists(os.path.join(d, "docs", "dashboard-state.js")))
     manifest = json.loads(read(d, ".ai-sdlc/manifest.json") or "{}")
-    files = manifest.get("files", {})
-    check("dashboard.html is upgrade-managed", "docs/dashboard.html" in files,
-          str(sorted(files)[:4]))
-    check("the state file is never upgrade-managed",
-          "docs/dashboard-state.js" not in files, str(sorted(files)[-4:]))
-    shutil.rmtree(d, ignore_errors=True)
-
-    # It must survive a project with nothing in it, and a compact install.
-    d = tempfile.mkdtemp(prefix="sdlc-dash-compact-")
-    run([d, "DSH", "-y", "--profile", "compact"])
-    raw = read(d, "docs/dashboard-state.js")
-    check("compact installs still get a status page",
-          os.path.exists(os.path.join(d, "docs", "dashboard.html")) and "SDLC_STATE" in raw,
-          raw[:80])
-    try:
-        state = json.loads(raw[raw.index("{"):raw.rindex("}") + 1])
-    except (ValueError, IndexError):
-        state = {}
-    check("an empty backlog yields no items", state.get("items") == [],
-          str(state.get("items")))
-    check("the profile is recorded", state.get("profile") == "compact",
-          str(state.get("profile")))
+    check("the manifest does not manage a dashboard",
+          not any("dashboard" in f for f in manifest.get("files", {})), str(sorted(manifest.get("files", {}))[:4]))
+    target = os.path.join(d, "out", "status.html")
+    p = subprocess.Popen([sys.executable, os.path.join(d, ".ai-sdlc", "bin", "sdlc.py"), "view",
+                          "--export-html", target], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    text = p.communicate()[0].decode("utf-8", "replace")
+    page = read(os.path.join(d, "out"), "status.html")
+    check("view --export-html writes one self-contained file", p.returncode == 0 and "<html" in page.lower()
+          and "/*NUHUT_MODEL*/" not in page and not re.search(r"<script[^>]+src=", page), text[-300:])
     shutil.rmtree(d, ignore_errors=True)
 
 

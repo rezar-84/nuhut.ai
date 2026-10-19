@@ -428,6 +428,35 @@ def build(rt, project):
     for i, found in commits.items():
         if i in model["items"]:
             model["items"][i]["commits"] = found[:50]
+    # Who reviewed each item, and what the evidence ledger holds for it.
+    try:
+        ledger_rows = rt.ledger(project)
+        index = rt.commit_index(project, set(model["items"]))
+    except Exception:
+        ledger_rows, index = [], {}
+    for item_id, it in model["items"].items():
+        reviews = []
+        for rec in rt.review_records(project, item_id):
+            f = rec["fields"]
+            if not f:
+                continue
+            reviews.append({"file": rec["file"],
+                            "stage": "design" if "-design-" in rec["file"] or rec["file"].endswith("-design.md") else "ship",
+                            "reviewer": "%s / %s" % (f.get("Reviewer agent", "?"), f.get("Reviewer model", "?")),
+                            "author": f.get("Author", ""),
+                            "independent": f.get("Independence", "").startswith("independent")})
+        if reviews:
+            it["reviews"] = reviews
+        commits = index.get(item_id)
+        if commits and ledger_rows:
+            rows = rt.evidence_matches(project, item_id, ledger_rows, commits)
+            if rows:
+                it["evidence"] = [{"stage": r.get("stage"), "result": r.get("result"),
+                                   "commit": (r.get("commit") or "")[:7], "time": r.get("time"),
+                                   "dirty": bool(r.get("dirty"))} for r in rows[-20:]]
+        author = next((tags for _, _, tags in (commits or []) if tags.get("Model") or tags.get("Agent")), None)
+        if author:
+            it["author"] = "%s / %s" % (author.get("Agent", "?"), author.get("Model", "?"))
     for it in model["items"].values():
         for dep in it.get("depends", []):
             if dep in model["items"]:
@@ -461,15 +490,19 @@ def lifecycle(it, model):
     done = it.get("column") == "Done"
     started = it.get("column") in ("Now", "Done")  # before work starts, nothing is owed yet
 
+    verified = verified or any(str(e.get("result", "")).startswith("Verified: pass")
+                               for e in it.get("evidence", []))
+    stages = set(r["stage"] for r in it.get("reviews", []))
+
     def need(present, required=True):
         return "done" if present else ("missing" if required else "n/a")
     return {
         "Frame": need(bool(it.get("row"))),
         "Plan": need(("plans", "") in kinds, tier == "1" and started),
-        "Design review": need(("reviews", "design") in kinds, tier == "1" and started),
+        "Design review": need(("reviews", "design") in kinds or "design" in stages, tier == "1" and started),
         "Build": need(bool(it.get("commits")), done),
         "Verify": need(verified, done),
-        "Ship review": need(("reviews", "ship") in kinds, tier == "1" and done),
+        "Ship review": need(("reviews", "ship") in kinds or "ship" in stages, tier == "1" and done),
         "Log": need(bool(entries), done),
         "Close": need(done, False) if not done else "done",
     }

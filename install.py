@@ -32,7 +32,9 @@ SRC = Path(__file__).resolve().parent
 VERSION = (SRC / "VERSION").read_text(encoding="utf-8").strip()
 MANIFEST_REL = Path(".ai-sdlc") / "manifest.json"
 PROFILE_REL = Path(".ai-sdlc") / "profile.json"
-STATE_REL = "dashboard-state.js"
+# Retired in 4.0: the static status page. `sdlc.py view --export-html` replaces it.
+RETIRED_DOCS = ("dashboard.html",)
+RETIRED_STATE = "dashboard-state.js"
 # The mechanical half of /sdlc-doctor and /sdlc-verify. Kit-managed: --upgrade refreshes it.
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
@@ -2650,7 +2652,7 @@ def installed_profile(target):
 def managed_source_texts(target, docs, ctx, profile="full"):
     """Return portable kit-owned destination paths and their rendered content."""
     planned = {}
-    for name in ("README.md", "CARD.md", "dashboard.html"):
+    for name in ("README.md", "CARD.md"):
         src = SRC / "template" / "docs" / name
         planned[(Path(docs) / name).as_posix()] = substitute(src.read_text(encoding="utf-8"), ctx)
     for sub in ("process", "roles", "templates"):
@@ -2838,7 +2840,7 @@ def is_managed_rel(rel, docs):
                 (".claude", "hooks"), (".ai-sdlc", "bin"), (".ai-sdlc", "git-hooks"),
                 (".agents", "skills"))
     return path.parts in ((str(docs), "README.md"), (str(docs), "CARD.md"),
-                          (str(docs), "dashboard.html")) or any(
+                          ) + tuple((str(docs), name) for name in RETIRED_DOCS) or any(
         path.parts[:2] == prefix for prefix in prefixes)
 
 
@@ -3459,117 +3461,6 @@ class Installer(object):
                     print("  git-exclude    .ai-sdlc/ (added to %s)" % self.rel(ex_path))
             elif not self.o.dry_run:
                 sys.stderr.write("warning: --git-exclude requested but %s is not a git repository\n" % self.target)
-
-    # -- the dashboard's state ------------------------------------------------
-    def read_installed(self, rel):
-        path = self.target / self.docs / rel
-        try:
-            return path.read_text(encoding="utf-8", errors="replace")
-        except (IOError, OSError):
-            return ""
-
-    def dashboard_state(self):
-        """Read the installed files back and describe them. Deliberately derived from the
-        files rather than from the answers: the answers were true at install time, the
-        files are true now, and a status page that reports the wrong one is worse than no
-        status page."""
-        charter = self.read_installed("project/charter.md")
-        state = {
-            "generated": today(),
-            "project": self.ctx.get("PROJECT_NAME", ""),
-            "prefix": self.ctx.get("PREFIX", ""),
-            "kit_version": VERSION,
-            "docs_dir": self.docs,
-            "profile": self.o.profile,
-            "effort_mode": "Normal",
-            "acquisition_profile": "Standard",
-            "dev_method": "Item",
-            "decision_style": "Guide",
-            "wired": sorted(self.wired),
-            "staleness_days": 90,
-            "roles": [], "commands": [], "items": [], "artifacts": [], "budgets": [],
-        }
-
-        m = re.search(r"^\| \*\*Staleness threshold\*\* \| ([^|]*)\|", charter, re.M)
-        if m:
-            n = re.search(r"(\d+)", m.group(1))
-            if n:
-                state["staleness_days"] = int(n.group(1))
-
-        for field, key, allowed, fallback in (
-                ("Default effort mode", "effort_mode", ("Lean", "Normal", "Beast"), "Normal"),
-                ("Acquisition profile", "acquisition_profile", ("Standard", "Advanced"), "Standard"),
-                ("Development method", "dev_method", ("Item", "Epic"), "Item"),
-                ("Decision style", "decision_style", ("Ask", "Guide", "Autopilot"), "Guide")):
-            m = re.search(r"^\| \*\*%s\*\* \| ([^|]*)\|" % re.escape(field), charter, re.M)
-            if m:
-                cell = plain_text(m.group(1)).strip()
-                matches = [value for value in allowed if value in cell]
-                state[key] = matches[0] if len(matches) == 1 else fallback
-
-        for name, tick, active_if, reason in re.findall(
-                r"^\| ([a-z][a-z-]+) \| ([\u2611\u2610]) \|([^|]*)\|([^|]*)\|", charter, re.M):
-            state["roles"].append({"name": name, "active": tick == "\u2611",
-                                   "reason": plain_text(reason).strip()})
-
-        for stage, command in re.findall(r"^\| `(checks\.[a-z0-9]+)` \|([^|]*)\|",
-                                         charter, re.M):
-            value = plain_text(command).strip()
-            if value.startswith("_(") or value.endswith(")_"):
-                value = ""
-            state["commands"].append({"stage": stage, "command": value})
-
-        for what, budget, method, baseline in re.findall(
-                r"^\|([^|]+)\|([^|]*)\|([^|]*)\|([^|]*)\|$", charter, re.M):
-            cells = [plain_text(c).strip() for c in (what, budget, method, baseline)]
-            if cells[0].startswith("_(e.g.") and any(cells[1:]):
-                state["budgets"].append(dict(zip(("what", "budget", "method", "baseline"),
-                                                 cells)))
-
-        prefix = self.ctx.get("PREFIX", "")
-        row = re.compile(
-            r"^\| (%s-\d+|[A-Za-z]\d+(?:\.\d+)*(?:-[a-z0-9]+)?|#?\d+) \|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|"
-            % re.escape(prefix)) if prefix else None
-        if row:
-            for line in self.read_installed("project/backlog.md").splitlines():
-                m = row.match(line)
-                if not m:
-                    continue
-                cells = [plain_text(c).strip() for c in m.groups()]
-                state["items"].append(dict(zip(
-                    ("id", "task", "tier", "owner", "depends", "status"), cells)))
-
-        base = self.target / self.docs / "project"
-        if base.is_dir():
-            for path in sorted(base.glob("*.md")):
-                text = path.read_text(encoding="utf-8", errors="replace")
-                if not text.startswith("---"):
-                    continue
-                head = text.split("---", 2)[1] if text.count("---") >= 2 else ""
-                def field(key):
-                    m = re.search(r"^%s:\s*(.*)$" % key, head, re.M)
-                    return plain_text(m.group(1)).strip().strip('"') if m else ""
-                state["artifacts"].append({
-                    "file": path.name, "status": field("status"),
-                    "owner": field("owner"), "last_reviewed": field("last-reviewed")})
-        return state
-
-    def write_dashboard_state(self):
-        rel = "%s/%s" % (self.docs, STATE_REL)
-        if self.o.dry_run:
-            print("  would add      %s" % rel)
-            return
-        dest = ensure_inside(self.target, self.target / self.docs / STATE_REL)
-        if not (self.target / self.docs / "dashboard.html").exists():
-            return
-        payload = json.dumps(self.dashboard_state(), indent=2, sort_keys=True)
-        atomic_write_text(dest,
-                          "// Generated from the installed files on %s. Regenerate with the\n"
-                          "// installer or /sdlc-doctor -- a stale status page is worse than\n"
-                          "// none, and dashboard.html says so when this date is old.\n"
-                          "// This is a project record, not a kit file: it is not upgraded.\n"
-                          "window.SDLC_STATE = %s;\n" % (today(), payload))
-        print("  %s         %s" % ("write ", rel))
 
     def note_profile(self):
         """A reader must be able to tell a deliberate absence from a broken install."""
@@ -4281,14 +4172,30 @@ def upgrade(target, o):
     for rel in unadopted:
         del planned[rel]
 
-    modified = []
+    modified, retired_kept, retired_notes = [], [], []
+    retired = set((Path(docs) / name).as_posix() for name in RETIRED_DOCS)
     if previous:
         for rel, old_hash in previous_files.items():
             if sha256_file(target / rel) != old_hash:
+                if rel in retired:
+                    # A retired file someone changed is theirs now: keep it, stop managing it.
+                    if (target / rel).is_file():
+                        retired_kept.append(rel)
+                    continue
                 modified.append(rel)
+    for rel in retired_kept:
+        previous_files = dict(previous_files)
+        previous_files.pop(rel, None)
+        retired_notes.append("%s is no longer part of the kit (`sdlc.py view --export-html <path>` "
+                     "replaces it). It was changed here, so it was left in place; delete it "
+                     "when you no longer need it." % rel)
+    state_rel = (Path(docs) / RETIRED_STATE).as_posix()
+    if (target / state_rel).is_file():
+        retired_notes.append("%s fed the retired static status page and is no longer read. It is a "
+                     "project record, so the upgrade left it; delete it." % state_rel)
 
     # Files the kit owns only part of: AGENTS.md sections 1-8, and rows the charter lacks.
-    extra, notes, regions = {}, [], {}
+    extra, notes, regions = {}, list(retired_notes), {}
     agents_path = target / AGENTS_REL
     kit_agents = substitute((SRC / "template" / "AGENTS.md").read_text(encoding="utf-8"),
                             inst.ctx)
@@ -4637,7 +4544,6 @@ def main(argv):
         inst.install_git_hooks()
         inst.apply_git_ignores()
         inst.record_manifest()
-        inst.write_dashboard_state()
         inst.write_profile()
     except (IOError, OSError, RuntimeError) as exc:
         sys.stderr.write("error: installation failed: %s\n" % exc)

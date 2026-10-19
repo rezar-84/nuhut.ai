@@ -73,6 +73,11 @@
   th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; }
   th { background: var(--panel); }
   .wrap { overflow-x: auto; }
+  /* item proof: author, reviews, evidence */
+  .proof { margin: 6px 0 10px; font-size: 13px; display: grid; gap: 4px; }
+  .proof .chip.ok { background: var(--okbg); color: var(--c-Done); }
+  .proof .chip.warn { background: var(--warnbg); color: var(--warn); }
+
   /* charts */
   .chart { padding: 4px 0; }
   .chart-svg { width: 100%; max-width: 960px; height: auto; display: block; }
@@ -3849,6 +3854,33 @@
         title: st === "missing" ? "Expected for this tier and status, but no record of it was found" : st }));
     });
     main.appendChild(steps);
+    // Who wrote it, who reviewed it, and what the evidence ledger holds: read-only facts
+    // from commit trailers, review files and docs/project/evidence-ledger.jsonl.
+    var proof = el("div", { cls: "proof" });
+    if (it.author) proof.appendChild(el("div", null, [el("span", { cls: "muted", text: "Author: " }), it.author]));
+    (it.reviews || []).forEach(function (r) {
+      proof.appendChild(el("div", null, [
+        el("span", { cls: "muted", text: (r.stage === "design" ? "Design" : "Ship") + " review: " }),
+        r.reviewer + " ",
+        el("span", { cls: "chip " + (r.independent ? "ok" : "warn"),
+          text: r.independent ? "independent" : "self-check",
+          title: r.independent ? "A different model family from the author" :
+            "Same model family as the author, or unknown: recorded, cannot clear a gate" }),
+        el("span", { cls: "muted", text: "  " + r.file })]));
+    });
+    if ((it.evidence || []).length) {
+      var ev = el("div", null, [el("span", { cls: "muted", text: "Evidence: " })]);
+      it.evidence.forEach(function (e, n) {
+        if (n) ev.appendChild(document.createTextNode(" · "));
+        ev.appendChild(el("span", { cls: "chip " + (/pass/.test(e.result) ? "ok" : "warn"),
+          text: e.stage + " " + (/pass/.test(e.result) ? "pass" : "fail"),
+          title: e.result + " at " + e.commit + (e.dirty ? " (uncommitted change)" : "") + ", " + e.time }));
+      });
+      proof.appendChild(ev);
+    } else if (it.steps && it.steps.Verify === "missing") {
+      proof.appendChild(el("div", { cls: "muted", text: "Evidence: no sdlc.py verify run recorded for this item's commits" }));
+    }
+    if (proof.childNodes.length) main.appendChild(proof);
     var rel = el("div");
     function rels(label, list) {
       if (!list || !list.length) return;
