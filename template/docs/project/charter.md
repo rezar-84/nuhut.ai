@@ -115,6 +115,9 @@ repeating this table.
 | **Default branch** | _(name)_ |
 | **Direct commits to it** | _(allowed / not allowed — `../process/05-change-control.md` forbids them unless this says otherwise)_ |
 | **Deployment platforms** | _(where each environment runs — a PaaS, a cloud, a container host, or a server you operate. A platform with a checklist in `../platforms/` names its file; `none` if nothing is deployed from here)_ |
+| **Versioning** | _(`semver`, `calver`, or `none` — a deploy is identified by its commit. Blank means `none`; an agent never introduces a version scheme on its own. See `../process/05-change-control.md`, "Versions")_ |
+| **Changelog** | _(the file and its format — e.g. `CHANGELOG.md`, Keep a Changelog, with an `Unreleased` section — or `none`)_ |
+| **Who bumps and tags** | _(default: an agent adds `Unreleased` lines and proposes the bump; a named human or the release pipeline sets the version and creates the tag)_ |
 
 ### Managed platform
 

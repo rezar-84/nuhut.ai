@@ -28,7 +28,12 @@ happens — not a report after.
    deploy, not discovered by a crash after it.
 5. **Rollback.** Written down and actually possible: the command, the artifact to roll back
    to, the data implications, and how long it takes. "Roll forward" is not a rollback plan.
-6. **Authorisation.** The charter says who may deploy this environment. Get explicit
+6. **Version.** If the charter's Versioning row names a scheme, derive the bump from the
+   changelog's `Unreleased` lines in the range (`{{DOCS_DIR}}/process/05-change-control.md`,
+   "Versions") and have the person the charter's Who bumps and tags row names confirm it.
+   Where Versioning is `none` or blank, the release is identified by its commit; do not
+   invent a version.
+7. **Authorisation.** The charter says who may deploy this environment. Get explicit
    approval from a named human before triggering anything outward-facing.
 
 ## During
@@ -40,8 +45,9 @@ to alter. "The pipeline is green" is not verification of a release.
 ## After
 
 Record in the worklog what shipped, the range, who approved, what was verified and how, what
-is being watched, and the rollback that stays valid. Anything that went wrong feeds
-`sdlc-postmortem`.
+is being watched, and the rollback that stays valid. Where the charter versions releases,
+the annotated tag goes on the verified commit that shipped, never on a later one. Anything
+that went wrong feeds `sdlc-postmortem`.
 
 ## Managed platforms
 

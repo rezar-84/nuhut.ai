@@ -1591,6 +1591,11 @@ def test_upgrade_from_350():
               re.search(r"^\| \*\*Tier rules\*\* \| `Strict`", charter, re.M) is not None
               and "Tier rules set to Strict" in out,
               "\n".join(l for l in charter.splitlines() if "Tier rules" in l) + out[-300:])
+        check("the versioning rows arrive unanswered, after Deployment platforms",
+              all(re.search(r"^\| \*\*%s\*\* \| _\(" % label, charter, re.M)
+                  for label in ("Versioning", "Changelog", "Who bumps and tags"))
+              and charter.index("| **Deployment platforms** |") < charter.index("| **Versioning** |"),
+              "\n".join(l for l in charter.splitlines() if "Versioning" in l or "bumps" in l))
         check("section 9 is kept", "PROJECT RULE 350" in read(d, "AGENTS.md"))
         check("every charter row it had is still there",
               all(line in charter for line in charter_before.splitlines() if line.startswith("| **")),

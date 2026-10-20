@@ -61,7 +61,7 @@ Details: `{{DOCS_DIR}}/process/14-decision-style.md`, `{{DOCS_DIR}}/process/11-e
 ## 3. What to read — the whole list, by tier
 
 Reading more than your tier's list is cost, not diligence: `{{DOCS_DIR}}/` is around
-87,000 tokens.
+97,000 tokens.
 
 - **Tier 3:** this file and the charter's Commands rows
   (`{{DOCS_DIR}}/project/charter.md`). Nothing else.

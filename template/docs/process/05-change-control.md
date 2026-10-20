@@ -156,6 +156,19 @@ Follow `project/release-runbook.md`. Every release states:
 - the rollback procedure, which must have been executed at least once in a non-production
   environment.
 
+**Versions.** The charter's Versioning, Changelog and Who bumps and tags rows decide.
+Where Versioning is `none` or blank, do not introduce one.
+
+- Under `semver` the bump follows what a consumer sees, not the tier: a breaking change
+  to a contract others consume is major (and already Tier 1), new behaviour is minor, a
+  fix is patch. Before 1.0 the charter says what a breaking change bumps.
+- A user-visible change adds its changelog line, with its work item ID, under
+  `Unreleased` in the same commit as the change.
+- A tag is annotated and points at a commit `sdlc.py verify` passed on. A pushed tag is
+  shared history: never moved or deleted. A bad release gets a new version.
+- An agent never bumps the version or tags as a side effect of other work; doing so is
+  part of a release, under the release's approval.
+
 **Migrations:** forward and reverse paths, both tested. Expand-then-contract for schema
 changes so that old and new code can run simultaneously. Never hand-edit a production
 datastore — a manual fix that is not a migration is invisible to every other environment

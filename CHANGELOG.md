@@ -4,6 +4,15 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Versioning and release numbering.** The charter gains three rows, Versioning
+  (`semver`, `calver` or `none`; blank means `none`), Changelog, and Who bumps and tags.
+  `05-change-control.md` says what follows: the bump follows what a consumer sees, a
+  user-visible change adds its changelog line in the same commit, a tag goes only on a
+  verified commit and is never moved, and an agent never bumps or tags as a side effect.
+  The release runbook and the `sdlc-release` skill gain the matching steps, and
+  `data-model-api.md`'s empty versioning section now has prompts. `--upgrade` adds the
+  rows blank, so nothing changes until a project fills them in.
+
 ## 4.0.0 — 2026-10-19
 
 4.0 answers a benchmark of 3.5.0. That benchmark found the kit changed agent behaviour

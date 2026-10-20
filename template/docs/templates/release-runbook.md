@@ -37,6 +37,8 @@ runbook. A platform with no checklist is reviewed against `../roles/devops-sre.m
 - [ ] Configuration and secrets present in the target environment, validated at startup.
 - [ ] Dependent teams or consumers notified of anything breaking.
 - [ ] Rollback procedure below re-read and known to work for this change.
+- [ ] Version set as `charter.md` → Versioning says, and the changelog's `Unreleased`
+      lines moved under it (skip both where the charter says `none`).
 
 ## Procedure
 
@@ -98,6 +100,7 @@ The minimum set proving the release is alive. Run every time; automate where pos
 
 ## Post-release
 
+- [ ] Annotated tag on the verified release commit, pushed (where the charter versions releases).
 - [ ] Backlog IDs in the release marked `Done`.
 - [ ] Worklog entry written, including what was verified in production.
 - [ ] Metrics baselined for anything the measurement plan tracks.

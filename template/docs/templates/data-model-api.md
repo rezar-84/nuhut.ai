@@ -71,8 +71,16 @@ Per operation, specify:
 
 ## Versioning & compatibility
 
-_(How a breaking change is made without breaking consumers, and how consumers are told.
-A contract with no versioning story will be broken by accident.)_
+A contract with no versioning story will be broken by accident. Additive and breaking
+changes follow `data-contract.md`, "Additive changes" and "Breaking changes".
+
+- **Where the version lives:** _(URL path, header, media type, schema field, or package
+  version)_
+- **What counts as breaking here:** _(removed or renamed fields, narrowed types, changed
+  meanings, new required inputs, changed error codes)_
+- **Deprecation window:** _(how long the old version keeps working after the new one ships)_
+- **How consumers are told:** _(changelog, deprecation header, direct notice to named
+  consumers)_
 
 ## Authorisation matrix
 
