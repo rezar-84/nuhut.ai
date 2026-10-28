@@ -14,6 +14,9 @@ it runs when the pull request opens.
 | WP3 | `1d58492` | 9 | +623 / −2 |
 | WP4 | `9fc6de9` | 10 | +178 / −522 |
 | WP5 | `a92f2a8` | 11 | +863 / −663 |
+| WP6 | `2df6343` | 11 | versioning and release numbering rows, change-control & release runbook |
+| WP7 | `6fadaea` | 8 | +2,253 / −263 (guided arrow-key installer `install_ui.py`, upgrade report, `--explain`, `--list`) |
+| WP8 | `02ee8d2` | 7 | +2,162 / −33 (Action Threads view, Kit & Control panel, Token-Saving mode, `sdlc.py config` / `fix`) |
 
 ## WP0: freeze the baseline
 
@@ -299,6 +302,24 @@ python3 benchmarks/effort-modes/score.py --selftest -> effort-mode scorer self-t
 python3 benchmarks/kit-value/score.py --selftest    -> kit-value scorer self-test passed
 python3 benchmarks/kit-value/measure.py --selftest  -> kit-value measure self-test passed
 ```
+
+## WP6–WP8: versioning, guided installer, action threads & kit control panel
+
+**Changed.**
+
+- **WP6 (`2df6343`) — Versioning and release numbering.** Charter rows (`Versioning`,
+  `Changelog`, `Who bumps and tags`), `05-change-control.md` rules, release runbook, and
+  `sdlc-release` skill steps.
+- **WP7 (`6fadaea`) — Guided arrow-key installer (`install_ui.py`).** Dependency-free
+  terminal menus, checkboxes, folds, inline `?` explanations, pre-install file preview,
+  replayable `-y` command summary, plain/screen-reader fallback (`--plain`), upgrade
+  reports, `--explain <topic>`, and `--list <what>`.
+- **WP8 (`02ee8d2`) — Action Threads & Kit Control panel (`sdlc.py view`, `sdlc.py
+  config`, `sdlc.py fix`).** Chat-like per-item chronological action streams (`Threads`
+  tab with `Threads | Mind Map` switcher and live `plan-check` scope inspector), a
+  **Kit & Control** tab and CLI subcommands (`config`, `fix`) for constraint tuning,
+  **Token-Saving Mode** (`Lean` + `Independent review required for: none` + compact
+  reading/token budgets), installed kit inventory, and safe 1-click repairs.
 
 ## Risks for existing users
 

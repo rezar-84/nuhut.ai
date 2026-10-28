@@ -584,6 +584,7 @@ How the agent works  (all project defaults, changeable later in the charter)
   --decision-style <n>   ask | guide | autopilot -- how much it decides for you
   --dev-method <name>    item | epic             -- one work item, or a planned group
   --tier-rules <name>    standard | strict       -- how heavy each risk tier is
+  --independent-review   none | tier1 | tier1-2  -- when a second model family is required
 
 Which AI tools read it
   --harness <list>       claude, cursor, copilot, gemini, windsurf, cline, roo, amp,
@@ -677,6 +678,9 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --tier-rules <standard|strict>
                      standard (default): tier by blast radius, Tier 3's record is the
                      commit, Tier 2 commits and continues. strict: the 3.x rules.
+  --independent-review <none|tier1|tier1-2>
+                     when a review from a different model family is required: tier1
+                     (default), tier1-2, or none (single-agent / token-saving setup).
   --profile <name>   full (default) or compact. compact installs the operating card,
                      roles, templates and project records but omits the numbered
                      process/ documents: the same rules from one source, about 8k of
@@ -765,6 +769,8 @@ class Options(object):
         self.preset = ""
         self.tier_rules = "standard"
         self.tier_rules_given = False
+        self.independent_review = "tier1"
+        self.independent_review_given = False
         self.git_hooks = ""        # "", "all" or "secrets"
         self.native_harnesses = []
         self.lang = "en"
@@ -925,6 +931,12 @@ def parse_args(argv):
             if i + 1 >= len(argv) or argv[i + 1] not in ("standard", "strict"):
                 bad_value("--tier-rules requires standard or strict")
             o.tier_rules, o.tier_rules_given = argv[i + 1], True
+            i += 1
+        elif arg == "--independent-review":
+            if i + 1 >= len(argv) or argv[i + 1] not in ("none", "off", "tier1", "tier1-2"):
+                bad_value("--independent-review requires none, tier1, or tier1-2")
+            o.independent_review = "none" if argv[i + 1] == "off" else argv[i + 1]
+            o.independent_review_given = True
             i += 1
         elif arg == "--acquisition-profile":
             if i + 1 >= len(argv) or argv[i + 1] not in ("standard", "advanced"):
@@ -3096,6 +3108,11 @@ def selected_tier_rules(w):
     return {"standard": "Standard", "strict": "Strict"}.get(raw, "Standard")
 
 
+def selected_independent_review(w):
+    raw = w.o.independent_review
+    return {"none": "none", "tier1": "Tier 1", "tier1-2": "Tier 1 and 2"}.get(raw, "Tier 1")
+
+
 def harness_options():
     return [HARNESS_TITLES[n] for n in HARNESS_ORDER] + [
         "Codex, Jules, Zed, Factory, opencode, Antigravity (read AGENTS.md directly)"]
@@ -4809,6 +4826,7 @@ class Installer(object):
             "acquisition_profile": selected_acquisition(w).lower(),
             "dev_method": selected_dev_method(w).lower(),
             "decision_style": selected_decision(w).lower(),
+            "independent_review": selected_independent_review(w),
             "harnesses": sorted(self.wired),
             "platform": w.a.get("platform", "") if w.a.get("platform", "none") != "none" else "",
             "deploy_platforms": installed_platforms(self.target, self.docs, self.platforms),
@@ -5015,6 +5033,9 @@ class Installer(object):
             text = fill_row(text, "**Decision style**", selected_decision(self.w))
         if self.o.tier_rules_given:
             text = fill_row(text, "**Tier rules**", selected_tier_rules(self.w))
+        if self.o.independent_review_given:
+            text = fill_row(text, "**Independent review required for**",
+                            "`%s`" % selected_independent_review(self.w))
         return text
 
     def platform_row(self, text):
@@ -5061,6 +5082,9 @@ class Installer(object):
         text = fill_row(text, "**Development method**", selected_dev_method(w))
         if self.o.tier_rules_given or a.get("tier"):
             text = fill_row(text, "**Tier rules**", selected_tier_rules(w))
+        if self.o.independent_review_given:
+            text = fill_row(text, "**Independent review required for**",
+                            "`%s`" % selected_independent_review(w))
         text = fill_row(text, "**Decision style**", selected_decision(w))
         if a.get("access_model"):
             text = fill_row(text, "**Access level model**", a.get("access_model"))

@@ -22,6 +22,10 @@ It decides from the files what does not need judgment: sections 1, 2, 4 (dates),
 and 7 below, and in section 3 the blank rows, the modes and the roles with no reason.
 **Report its findings as they are; do not redo those checks by reading the files
 yourself.** A script that reads every row is more reliable than a model that skims them.
+For mechanical setup drift (`profile.json` out of sync with the charter, a missing
+`AGENTS.md` pointer file, an interrupted `bite` run, or stale test locks), recommend
+`python3 .ai-sdlc/bin/sdlc.py fix <sync-profile|wire-pointer|restore-bite|unlock-tests|all>`
+(or `sdlc.py config` to set charter constraints or check commands).
 Your part is what it cannot decide:
 - the severity of each finding;
 - in section 3, deployment platforms against `{{DOCS_DIR}}/platforms/`, blank Model & data

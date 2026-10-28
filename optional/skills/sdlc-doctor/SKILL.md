@@ -43,7 +43,9 @@ about the specific artifact you are about to trust, stays with you.
 ## What to do with a finding
 
 - **Fix what is mechanically fixable** in the same change: a stale date you can verify, a
-  missing worklog entry for work that is plainly done, a profile row that drifted.
+  missing worklog entry for work that is plainly done, or setup drift that
+  `python3 .ai-sdlc/bin/sdlc.py fix <sync-profile|wire-pointer|restore-bite|unlock-tests|all>`
+  (or `sdlc.py config --set-check <stage>=<cmd>`) can repair directly.
 - **Never invent the answer.** A blank approver, an undecided role, an unwritten check
   command: mark it, log it in `{{DOCS_DIR}}/project/assumptions-and-risks.md`, and say who
   can settle it.

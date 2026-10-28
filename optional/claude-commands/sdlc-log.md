@@ -12,10 +12,20 @@ $ARGUMENTS
    unmet is either fixed now or becomes a tracked follow-up named in the entry — never
    an unstated gap.
 
-2. **Write the worklog entry** at the top of `{{DOCS_DIR}}/project/worklog.md`, using every
-   section of `{{DOCS_DIR}}/templates/worklog-entry.md`. Leave none of them out — **Not done**
-   and **Discovered** are the two future readers need most and the two most often
-   omitted. If either is genuinely empty, say so explicitly rather than deleting it.
+2. **Draft or write the worklog entry** in `{{DOCS_DIR}}/project/worklog.md`:
+   - For **Tier 3** under `Standard` tier rules, the commit message carrying the ID is the
+     record — no worklog entry is required unless the change uncovered risk, a durable
+     decision, or unresolved work. (Under `Strict` tier rules or `Lean` mode, run
+     `python3 .ai-sdlc/bin/sdlc.py log --since <ref> --write` to insert the 1-line
+     compact entry.)
+   - For **Tier 1 and Tier 2**, start by running
+     `python3 .ai-sdlc/bin/sdlc.py log --since <ref>` to draft lines from commits and
+     `sdlc.py verify` runs, then expand at the top of `{{DOCS_DIR}}/project/worklog.md`
+     using every section of `{{DOCS_DIR}}/templates/worklog-entry.md`. Leave none of them
+     out — **Not done** and **Discovered** are the two future readers need most and the
+     two most often omitted. If either is genuinely empty, say so explicitly rather than
+     deleting it. (In `Lean` mode on a clean Tier 2 item with no open risks, the 1-line
+     `sdlc.py log --write` entry suffices.)
 
 3. **Update the backlog** — status change with a pointer, never a bare status flip.
    Create rows for every follow-up, each a single line

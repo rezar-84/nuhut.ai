@@ -28,6 +28,8 @@ python3 .ai-sdlc/bin/sdlc.py log --since main   # draft worklog lines from commi
 python3 .ai-sdlc/bin/sdlc.py bite <test command> # do the tests fail without the change?
 python3 .ai-sdlc/bin/sdlc.py trailers ACME-12   # print the Work-Item / Agent / Model trailers
 python3 .ai-sdlc/bin/sdlc.py review ACME-12 --role security --by codex  # independent review
+python3 .ai-sdlc/bin/sdlc.py config --token-saving on  # toggle Lean + single-agent review + compact budget
+python3 .ai-sdlc/bin/sdlc.py fix all            # sync profile, repair harness pointers, unlock stale guards
 ```
 
 | Command | Key Flags | Description |
@@ -35,12 +37,14 @@ python3 .ai-sdlc/bin/sdlc.py review ACME-12 --role security --by codex  # indepe
 | **`doctor`** | `--strict` | Audits project records, active roles, check commands, staleness windows, and validates the dependency graph (flags self-dependencies, non-existent backlog IDs, and circular dependency loops). Ages the backlog against the same window: an `In progress` or `In review` row nothing has named since the window passed is a zombie claim; a `Ready`, `Blocked` or `Parked` row older than the window needs a decision. |
 | **`verify`** | `--parallel` (`-j`), `--stage`, `--timeout` | Runs the charter's check pipeline in order, writing immutable test evidence (`summary.md`, `summary.json`, and stage `.log` files) to `.ai-sdlc/evidence/<timestamp>/`. `--parallel` runs independent steps concurrently using a worker pool. |
 | **`plan-check <ID>`** | | Compares branch changes against the approved plan (`docs/project/plans/<ID>.md` or `.sdlc/specs/<ID>/spec.md`). Highlights unapproved file modifications and planned files left untouched with ANSI terminal colors. |
-| **`view`** | `--serve`, `--port`, `--interval`, `--export-html <file>`, `--svg`, `--no-open` | Generates the rich interactive developer dashboard. The Board opens with a cumulative-flow chart of backlog columns over time, rebuilt from the backlog's git history; the home page shows a pass/fail grid of the last verify runs per stage. `--serve` runs a reactive local server on `127.0.0.1`. `--export-html` bundles an offline single-file report for CI/CD artifacts or PR previews. |
+| **`view`** | `--serve`, `--port`, `--interval`, `--export-html <file>`, `--svg`, `--no-open` | Generates the rich interactive developer dashboard. Opens with per-item **Action Threads** (chat-like chronological timelines), a project Mind Map, Kanban Board with cumulative-flow chart, Activity, Blockages & Flow, Git Graph, Documents, and a **Kit & Control** panel. `--serve` runs a reactive local server on `127.0.0.1` with live constraint and repair controls. `--export-html` bundles an offline read-only single-file report for CI/CD artifacts or PR previews. |
 | **`metrics`** | `--json` | Calculates quantitative project health metrics: work-in-progress (WIP), verification pass rate, cycle time, lead time, time waiting on humans, lifecycle record gaps, and usage against the charter's optional agent budget per tier. |
 | **`log`** | `--since <ref>`, `--write` | Drafts worklog lines, one per work item, from the commits since `<ref>` (IDs from subjects or `Work-Item` trailers) and the verify runs recorded on them. `--write` inserts them under the worklog's marker, newest first, skipping items the worklog already names. Records become byproducts, not essays. |
 | **`bite`** | `--base`, `--timeout`, `--restore`, `--json` | Puts the changed product files (never tests, never the kit's paths) back to the base, runs the test command, and restores them. It passes only when the tests pass with the change and fail without it. A backup and marker under `.ai-sdlc/bite/` make an interrupted run recoverable with `--restore`, and the doctor flags one. |
 | **`trailers <ID>`** | `--agent`, `--model` | Prints the `Work-Item`, `Agent` and `Model` commit trailers, from flags, `AI_SDLC_AGENT` / `AI_SDLC_MODEL`, or what the harness exposes. |
 | **`review <ID>`** | `--role`, `--by claude\|codex\|gemini\|cmd:<command>`, `--model`, `--stage` | Sends one role's playbook, the item's diff, the relevant charter rows and the tier to another harness, headless, and saves the review with the reviewer's and author's identity, labelled independent or self-check. |
+| **`config`** | `--effort`, `--independent-review`, `--tier-rules`, `--decision-style`, `--dev-method`, `--reviewer`, `--token-saving`, `--set-check`, `--json` | Inspects or atomically updates kit constraints in `docs/project/charter.md` and syncs `.ai-sdlc/profile.json`. `--token-saving on` switches to `Lean` effort, `Independent review required for: none`, `Standard` tier rules, and compact tier budgets in one step. |
+| **`fix`** | `<sync-profile\|wire-pointer\|restore-bite\|unlock-tests\|all>`, `--harness`, `--json` | Repairs safe, non-destructive setup drift: syncs `.ai-sdlc/profile.json` from the charter, restores missing `AGENTS.md` pointer lines (`CLAUDE.md`, `.cursor/rules/`, etc.), restores interrupted `bite` backups, and clears stale test locks. Never modifies SHA-256-tracked kit files in `.ai-sdlc/manifest.json`. |
 
 **Evidence.** `verify` and `bite` also append one line per stage to
 `docs/project/evidence-ledger.jsonl`: commit, whether the tree was dirty, stage, command,
@@ -67,8 +71,9 @@ it and opens one comprehensive, navigable page joined by work item ID:
   <img src="../assets/viewer-preview.svg" alt="Nuhut SDLC Interactive Viewer Dashboard: Git Graph, Blockages & Flow, Lifecycle Inspector, and Map" width="100%">
 </p>
 
-The viewer organizes project reality across six dedicated views:
+The viewer organizes project reality across eight dedicated views:
 
+- **Threads:** a chat-like chronological and causal action stream per work item (`Frame` ➔ `Plan` ➔ `Design Review` ➔ `Build` commits with `Agent`/`Model`/`Tokens` trailers ➔ `Verify` stage gates ➔ `Ship Review` ➔ `Worklog`), paired with a searchable left work-item rail, a live Plan-vs-Actual file scope inspector on the right, and a 1-click `Threads | Mind Map` switcher.
 - **Map:** the whole project as a mind map (status, owner role, documents), folding and
   unfolding, with clipped titles, child count badges, doctor findings, and a quick-jump
   `Blockages & Flow` button.
@@ -88,6 +93,7 @@ The viewer organizes project reality across six dedicated views:
   - Uncommitted working tree summary banner and local branches overview.
 - **Documents:** every project artifact with frontmatter status (`draft`, `approved`, `stale`),
   accountable owner, and age. Click to open with interactive outlines and cross-linked IDs.
+- **Kit & Control:** an interactive control panel for adjusting kit constraints (`Default effort mode`, `Independent review required for`, `Tier rules`, `Decision style`, `Development method`, `Default reviewer`), toggling **Token-Saving Mode** (`Lean` + single-agent review + compact budgets), inspecting installed harnesses/hooks/CLI tools and per-tier reading budgets, and running 1-click safe repairs (`sync-profile`, `wire-pointer`, `restore-bite`, `unlock-tests`).
 
 #### Item Lifecycle Stepper
 
@@ -104,18 +110,23 @@ fault.
 | --- | --- |
 | **`⌘K`** or **`Ctrl+K`** | Open Command Palette to search all work items, documents, and headings. |
 | **`?`** | Toggle the Keyboard Shortcuts & Help modal. |
-| **`1` - `6`** | Switch views instantly: `1` Map, `2` Board, `3` Activity, `4` Blockages, `5` Git Graph, `6` Documents. |
-| **`/`** | Focus the header search input. |
+| **`1` - `8`** | Switch views instantly: `1` Threads, `2` Map, `3` Board, `4` Activity, `5` Blockages, `6` Git Graph, `7` Documents, `8` Kit & Control. |
+| **`t`** | Toggle Dark / Light theme. |
+| **`/`** | Open the Command Palette search input. |
 | **`Esc`** | Close open modal, commit drawer, or clear active search filter. |
 
-**A daily routine that works:** open **Blockages & Flow** first to clear bottlenecks, then
-**Activity**. Before calling an item done, open its inspector and check that no step is amber.
+**A daily routine that works:** open **Threads** or **Blockages & Flow** first to clear bottlenecks, then
+**Activity**. Before calling an item done, open its thread or inspector and check that no step is amber.
 
 With `--serve` the page is live: leave it open while agents work, and it redraws
 within a couple of seconds of any record changing or a new commit, keeping your place, folds
-and filters. It serves only on 127.0.0.1, refuses requests addressed to any other host,
-and has no way to write. Ctrl+C stops it; `--port` and `--interval` tune it. Rows the view
-cannot read are listed on the page rather than dropped.
+and filters. It serves only on 127.0.0.1 and refuses requests addressed to any other host.
+In `--serve` mode, the **Kit & Control** tab can apply charter constraint changes and safe kit
+repairs directly via session-token-protected (`X-Action-Token`) local endpoints (`/api/config`
+and `/api/fix`); in static HTML exports (`--export-html`), those controls automatically copy
+the equivalent `sdlc.py config` or `sdlc.py fix` CLI command to your clipboard. Ctrl+C stops
+the server; `--port` and `--interval` tune it. Rows the view cannot read are listed on the
+page rather than dropped.
 
 With `--export-html <path>`, `sdlc.py view` generates a standalone, self-contained single-file
 HTML bundle embedding the entire data model. It runs offline without a local server, making

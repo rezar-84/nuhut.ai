@@ -4,6 +4,20 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Action Threads & Kit Control panel (`sdlc.py view`, `sdlc.py config`, `sdlc.py fix`).**
+  The viewer gains a chat-like **Threads** tab that renders a per-item chronological and
+  causal timeline (`Frame` → `Plan` → `Design Review` → `Build` commits with `Agent`,
+  `Model`, `Tokens`, and `Minutes` trailers → `Verify` stage gates → `Ship Review` →
+  `Worklog`), paired with a live Plan-vs-Actual file scope inspector and a 1-click
+  `Threads | Mind Map` switcher. A new **Kit & Control** tab and matching CLI subcommands
+  (`sdlc.py config` and `sdlc.py fix`) let you adjust kit constraints (`Default effort
+  mode`, `Independent review required for` including `none`, `Tier rules`, `Decision
+  style`, `Development method`, `Default reviewer`), toggle **Token-Saving Mode** (`Lean`
+  effort + single-agent review + compact reading/token budgets), inspect installed
+  harnesses, hooks, CLI binaries, and reading budgets, and run safe 1-click repairs
+  (`sync-profile`, `wire-pointer`, `restore-bite`, `unlock-tests`). In `view --serve`
+  mode, controls apply immediately via session-token-protected (`X-Action-Token`) local
+  endpoints; in static HTML exports, they copy the exact CLI command.
 - **Guided installer.** The setup runs on arrow keys: menus, checklists ticked with
   space, yes/no toggles, `?` opening the explanation in place, and each answered question
   folding to one line. It needs no dependency (`install_ui.py`, standard library). After

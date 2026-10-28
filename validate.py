@@ -239,6 +239,25 @@ def single_viewer(errors):
         errors.append("view.html loads an external script; the export must be self-contained")
     if "contenteditable" in html or "<form" in html:
         errors.append("view.html must stay read-only")
+    if html.lower().count("</script") != 2:
+        errors.append("view.html must have exactly 2 </script> tags (model + app)")
+    node_bin = shutil.which("node")
+    if node_bin:
+        for idx, block in enumerate(re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)):
+            tmp_js = Path(tempfile.mktemp(suffix=".js", prefix="sdlc-view-"))
+            try:
+                tmp_js.write_text(block, encoding="utf-8")
+                proc = subprocess.run([node_bin, "--check", str(tmp_js)],
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      universal_newlines=True)
+                if proc.returncode:
+                    errors.append("view.html script block #%d failed node --check: %s"
+                                  % (idx + 1, proc.stdout[-300:]))
+            finally:
+                try:
+                    tmp_js.unlink()
+                except OSError:
+                    pass
     for doc in (ROOT / "README.md", ROOT / "template" / "docs" / "README.md",
                 ROOT / "optional" / "claude-commands" / "sdlc-doctor.md"):
         if "dashboard-state.js" in doc.read_text(encoding="utf-8"):
@@ -352,7 +371,8 @@ def main():
         if not market.is_file():
             errors.append(".claude-plugin/plugin.json exists without marketplace.json")
 
-    required_root = ("LICENSE", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md")
+    required_root = ("LICENSE", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md",
+                     "install.py", "install_ui.py")
     for name in required_root:
         if not (ROOT / name).is_file():
             errors.append("missing repository file: %s" % name)

@@ -73,9 +73,12 @@ install.
 **A web UI for driving agents is deliberately not here.** Steering an agent session
 belongs to the harness itself (such as a terminal, an IDE integration, or Claude Code
 Remote Control). What a repository-level kit needs is a way for the human to *see* the
-work while the agents do it, so that is what the kit ships: [the viewer](#seeing-the-work)
-(`sdlc.py view`, live with `--serve`, or a single static file with `--export-html`). It
-is read-only: it cannot change a record, start an agent, or approve anything.
+work while the agents do it, and to tune kit constraints without hand-editing tables, so
+that is what the kit ships: [the viewer](runtime.md#seeing-the-work)
+(`sdlc.py view`, live with `--serve`, or a single static file with `--export-html`).
+Static exports are strictly read-only; live `--serve` mode adds session-authenticated
+controls for charter constraints and safe kit repairs (`sdlc.py config` / `sdlc.py fix`),
+never starting an agent or approving gated work on a human's behalf.
 
 ## The three kinds of file
 

@@ -1766,10 +1766,13 @@ def test_lean_kit():
     shutil.rmtree(d, ignore_errors=True)
 
     d = tempfile.mkdtemp(prefix="sdlc-preset-")
-    code, out = run([d, "PRS", "-y", "--preset", "regulated", "--decision-style", "autopilot"])
+    code, out = run([d, "PRS", "-y", "--preset", "regulated", "--decision-style", "autopilot",
+                     "--independent-review", "none"])
     charter = read(d, "docs/project/charter.md")
     check("an explicit flag wins over the preset",
           "| **Decision style** | Autopilot |" in charter and "| **Tier rules** | Strict |" in charter, out[-200:])
+    check("--independent-review sets charter row on install",
+          "| **Independent review required for** | `none` |" in charter, charter[:1500])
     code, out = run([d, "PRS", "--upgrade", "--preset", "solo"])
     check("--upgrade ignores a preset and says so",
           code == 0 and "apply to new installs" in out

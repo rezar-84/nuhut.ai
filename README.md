@@ -123,7 +123,9 @@ script wrote instead of an agent's memory:
 | `review <ID> --by codex` | gets one role's review from another harness and records who reviewed whom |
 | `trailers <ID>` | prints the `Work-Item`, `Agent` and `Model` commit trailers |
 | `plan-check <ID>` | compares the diff with the approved plan |
-| `view` | opens a read-only page of the records. Add `--serve` for live updates or `--export-html` for a single file. |
+| `config` | inspects or updates charter constraints (`--effort`, `--independent-review`, `--token-saving`, `--set-check`) and syncs `profile.json` |
+| `fix` | repairs setup drift (`sync-profile`, `wire-pointer`, `restore-bite`, `unlock-tests`, `all`) without touching managed kit files |
+| `view` | opens the interactive project viewer (`Threads`, `Map`, `Board`, `Activity`, `Blockages`, `Git`, `Documents`, `Kit & Control`). Add `--serve` for live updates or `--export-html` for a single file. |
 | `metrics` | reports process measures, and agent budgets where recorded |
 
 Everything is in [docs/runtime.md](docs/runtime.md).
