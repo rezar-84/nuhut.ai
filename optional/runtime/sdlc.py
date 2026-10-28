@@ -1981,6 +1981,9 @@ def kit_status(project):
         acq_val = next((o for o in ACQUISITION if o.lower() == str(prof["acquisition_profile"]).lower()), None)
     acq_resolved = acq_val or "Standard"
     budget_cell = UNFILLED.sub("", labelled(charter, "Agent budget per tier") or "").strip()
+    staleness_cell = labelled(charter, "Staleness threshold") or ""
+    staleness_match = re.search(r"[0-9]+", UNFILLED.sub("", staleness_cell))
+    staleness_days = int(staleness_match.group(0)) if staleness_match else DEFAULT_STALENESS_DAYS
 
     has_process_docs = os.path.isfile(
         project.path(os.path.join(project.docs, "process", "00-operating-model.md"))
@@ -2168,6 +2171,7 @@ def kit_status(project):
             "acquisition_profile": acq_resolved,
             "acquisition_state": acq_state,
             "agent_budget": budget_cell,
+            "staleness_days": staleness_days,
         },
         "reading_tokens": {
             "tier3_words": t3_words,
@@ -2297,6 +2301,20 @@ def configure_kit(project, changes):
         ts = changes["token_saving"]
         on = ts in (True, "on", "true", "1", 1)
         if on:
+            prev_effort, _ = choice(labelled(text, "Default effort mode"), EFFORT)
+            prev_ind, _, _ = independent_review_policy(text, project.profile or {})
+            prev_tier, _ = choice(labelled(text, "Tier rules"), TIER_RULES)
+            prev_budget = UNFILLED.sub("", labelled(text, "Agent budget per tier") or "").strip()
+            existing_prev = (project.profile or {}).get("pre_token_saving") or {}
+            if not (project.profile or {}).get("token_saving"):
+                extra_profile["pre_token_saving"] = {
+                    "effort_mode": prev_effort or existing_prev.get("effort_mode") or "Normal",
+                    "independent_review": prev_ind or existing_prev.get("independent_review") or "none",
+                    "tier_rules": prev_tier or existing_prev.get("tier_rules") or "Standard",
+                    "agent_budget": prev_budget or existing_prev.get("agent_budget") or (
+                        "Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h"
+                    ),
+                }
             text = _set_charter_row(text, "Default effort mode", "`Lean`")
             text = _set_charter_row(text, "Independent review required for", "`none`")
             text = _set_charter_row(text, "Tier rules", "`Standard`")
@@ -2311,18 +2329,29 @@ def configure_kit(project, changes):
             extra_profile["profile"] = "compact"
             applied.append("token_saving=on (Lean, single-agent review, Standard tier rules, compact budget)")
         else:
-            text = _set_charter_row(text, "Default effort mode", "`Normal`")
-            text = _set_charter_row(
-                text, "Agent budget per tier",
+            prev = (project.profile or {}).get("pre_token_saving") or {}
+            restored_effort = prev.get("effort_mode") or "Normal"
+            if restored_effort == "Lean":
+                restored_effort = "Normal"
+            restored_ind = prev.get("independent_review") or "none"
+            restored_tier = prev.get("tier_rules") or "Standard"
+            restored_budget = prev.get("agent_budget") or (
                 "Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h"
             )
+            text = _set_charter_row(text, "Default effort mode", "`%s`" % restored_effort)
+            text = _set_charter_row(text, "Independent review required for", "`%s`" % restored_ind)
+            text = _set_charter_row(text, "Tier rules", "`%s`" % restored_tier)
+            text = _set_charter_row(text, "Agent budget per tier", restored_budget)
             has_proc = os.path.isfile(
                 project.path(os.path.join(project.docs, "process", "00-operating-model.md"))
             )
             extra_profile["token_saving"] = False
-            extra_profile["effort_mode"] = "normal"
+            extra_profile["effort_mode"] = restored_effort.lower()
+            extra_profile["independent_review"] = restored_ind
+            extra_profile["tier_rules"] = restored_tier.lower()
             extra_profile["profile"] = "full" if has_proc else "compact"
-            applied.append("token_saving=off (Normal effort restored)")
+            extra_profile["pre_token_saving"] = None
+            applied.append("token_saving=off (%s effort restored)" % restored_effort)
 
     if changes.get("effort"):
         val = next((o for o in EFFORT if o.lower() == str(changes["effort"]).strip().lower()), None)

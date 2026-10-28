@@ -480,9 +480,8 @@ def multiselect(term, title, options, default=(), hint="", help_text="", keys=""
                 focus = shown[-1]
             elif key == "space" and shown:
                 chosen.symmetric_difference_update([focus])
-            elif key.isdigit() and len(key) == 1 and 1 <= int(key) <= len(options):
-                focus = int(key) - 1
-                query = ""
+            elif key.isdigit() and len(key) == 1 and 1 <= int(key) <= len(shown):
+                focus = shown[int(key) - 1]
             elif key == "a":
                 chosen = set(shown) | chosen if query else set(range(len(options)))
             elif key == "n":

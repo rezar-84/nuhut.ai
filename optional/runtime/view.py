@@ -924,7 +924,7 @@ class Live(object):
 
     def __init__(self, rt, project, template, interval):
         self.rt, self.project, self.template, self.interval = rt, project, template, interval
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.refreshing = False
         self.token = hashlib.sha256(os.urandom(32)).hexdigest()[:32]
         self.checked = 0.0
@@ -1067,29 +1067,31 @@ def serve(rt, project, template, opts):
                 return self._send(400, b'{"ok":false,"error":"invalid json"}\n',
                                   "application/json; charset=utf-8")
             if path == "/api/config":
-                res, err = rt.configure_kit(live.project, payload)
-                if err:
-                    body = json.dumps({"ok": False, "error": err}).encode("utf-8")
-                    return self._send(400, body, "application/json; charset=utf-8")
-                live.update_kit(res["kit"])
-                body = json.dumps({
-                    "ok": True,
-                    "applied": res["applied"],
-                    "kit": res["kit"],
-                    "version": live.version,
-                }).encode("utf-8")
+                with live.lock:
+                    res, err = rt.configure_kit(live.project, payload)
+                    if err:
+                        body = json.dumps({"ok": False, "error": err}).encode("utf-8")
+                        return self._send(400, body, "application/json; charset=utf-8")
+                    live.update_kit(res["kit"])
+                    body = json.dumps({
+                        "ok": True,
+                        "applied": res["applied"],
+                        "kit": res["kit"],
+                        "version": live.version,
+                    }).encode("utf-8")
                 return self._send(200, body, "application/json; charset=utf-8")
             if path == "/api/fix":
                 action = payload.get("action") or "all"
-                res = rt.fix_kit(live.project, action, payload)
-                live.update_kit(res["kit"], res.get("findings"))
-                body = json.dumps({
-                    "ok": True,
-                    "repaired": res["repaired"],
-                    "kit": res["kit"],
-                    "alerts": res.get("findings"),
-                    "version": live.version,
-                }).encode("utf-8")
+                with live.lock:
+                    res = rt.fix_kit(live.project, action, payload)
+                    live.update_kit(res["kit"], res.get("findings"))
+                    body = json.dumps({
+                        "ok": True,
+                        "repaired": res["repaired"],
+                        "kit": res["kit"],
+                        "alerts": res.get("findings"),
+                        "version": live.version,
+                    }).encode("utf-8")
                 return self._send(200, body, "application/json; charset=utf-8")
 
         def log_message(self, *args):  # the terminal shows rebuilds, not every poll
@@ -1296,17 +1298,15 @@ def build_map_svg(model, interactive=True):
         full_text = esc(n.get("full") or n.get("label", ""))
         label_text = esc(n.get("label", ""))
 
+        count_span = ('<tspan class="node-count" dx="6" font-size="11px" fill="var(--muted, #57606a)">(%d)</tspan>'
+                      % len(kids)) if (kids and not is_open) else ""
         lines.append('      <g class="map-node" data-key="%s">' % esc(n.get("key", "")))
         lines.append('        <circle class="node-dot" cx="%d" cy="%d" r="%d" fill="%s" stroke="%s" stroke-width="2">'
                      % (n["x"], n["y"], r, fill_val, stroke_val))
         lines.append('          <title>%s</title>' % full_text)
         lines.append('        </circle>')
         lines.append('        <text class="%s" x="%d" y="%d" font-family="system-ui, sans-serif" font-size="13px" fill="var(--text, #1f2328)">'
-                     '%s<title>%s</title></text>' % (label_cls, n["x"] + 10, n["y"] + 4, label_text, full_text))
-        if kids and not is_open:
-            cx = n["x"] + 14 + len(n.get("label", "")) * 7.2
-            lines.append('        <text class="node-count" x="%.1f" y="%d" font-family="system-ui, sans-serif" font-size="11px" fill="var(--muted, #57606a)">(%d)</text>'
-                         % (cx, n["y"] + 4, len(kids)))
+                     '%s%s<title>%s</title></text>' % (label_cls, n["x"] + 10, n["y"] + 4, label_text, count_span, full_text))
         lines.append('      </g>')
 
     lines.append('    </g>')
