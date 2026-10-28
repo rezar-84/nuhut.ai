@@ -4,6 +4,43 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Guided installer.** The setup runs on arrow keys: menus, checklists ticked with
+  space, yes/no toggles, `?` opening the explanation in place, and each answered question
+  folding to one line. It needs no dependency (`install_ui.py`, standard library). After
+  the destination it shows **what it detected and what it would set up**, then offers
+  three paths: **Use these settings** (asks the four things it cannot detect), **Customise**
+  (tick the sections to go through) or **Every question**. `--quick`, `--full` and
+  `--sections <list>` skip that question. Every question now has a one-line hint with an
+  example, and every one has `?` help. *Change some* on a detected table asks which rows
+  to correct, so fixing one check command is one question. The facts and the skills are
+  checklists. The review screen can **show the files** the install would add, from the
+  same code path as `--dry-run`. `q` asks before throwing answers away. Ctrl-C before the
+  review says nothing was written. Options that were flag-only are now questions: AI tools
+  (pre-ticked from the repository), working-style preset, tier rules, docs size, hooks and
+  git hooks, whether to commit `.ai-sdlc/`, starter test plan and CI. The review screen
+  and the final report print the same install as a `-y` command line. The report checks
+  for leftover `{{…}}` placeholders itself, summarises what was added by folder, lists
+  the charter rows still blank, says how to start working, and offers to open the live
+  viewer. `-y` ends with a table of the defaults it took and the flag that changes each.
+  `--plain` (or `NUHUT_PLAIN=1`) keeps numbered, typed prompts for screen readers and
+  logs. They are also used automatically without a terminal. `NO_COLOR` and ASCII-only
+  terminals are respected.
+- **Upgrade report.** `--upgrade` says in plain words what it refreshes and what it
+  never touches. When nothing changed it says the install is already up to date. It names
+  the kit skills the project does not have, and says how to add them: rerun the guided
+  setup, which only adds missing files. The managed-platform question is now a menu
+  (Lovable, Replit, Bolt, Firebase Studio, Glitch, CodeSandbox, other). A target
+  directory that does not exist now suggests `--create`.
+- **Help.** `--help` is one grouped page with examples. `--help full` keeps the detailed
+  text, and `--list harnesses|platforms|presets|types|skills|sections` prints the valid
+  values with their meaning. `--explain <topic>` (tiers, presets, effort, decision, hooks,
+  profile, skills, roles, charter, harnesses) explains a concept and how to choose. A bad flag value prints one error line and where to look, not the whole
+  help.
+- **Fixes.** The slash-command prompt said "five" while six ship. The fact-edit
+  prompt for deployment showed the "Where does it deploy?" text because of a duplicated
+  message key. The deploy question had no visible default and no way to answer "none".
+  The facts table misaligned on long labels, and the review cut long paths at the wrong end.
+
 - **Versioning and release numbering.** The charter gains three rows, Versioning
   (`semver`, `calver` or `none`; blank means `none`), Changelog, and Who bumps and tags.
   `05-change-control.md` says what follows: the bump follows what a consumer sees, a

@@ -72,8 +72,18 @@ As a Claude Code plugin, for the `/sdlc-*` commands everywhere:
 Into a project, for the contract, the documents, the charter and the per-project skills:
 
 ```sh
-./install.sh /path/to/project ACME --preset team --harness claude,codex,cursor
+./install.sh                          # guided, arrow keys: shows what it detected first
+./install.sh /path/to/project ACME --quick
+./install.sh /path/to/project ACME -y --preset team --harness claude,codex,cursor
+./install.sh --help                   # every option on one page; --explain tiers, --list <what>
 ```
+
+The guided setup first shows what it found in the project and what it would set up. You
+can take that as it is, customise some sections, or answer every question. Each question
+has a hint and an example, and `?` explains it. Nothing is written until you confirm the
+review screen. That screen can list every file the install would add, and it prints the
+same install as a command line you can rerun with `-y`. `--plain` gives numbered, typed
+prompts instead.
 
 - **`--preset solo|team|regulated`** sets effort mode, decision style, development
   method and tier rules together. Any flag given as well wins.

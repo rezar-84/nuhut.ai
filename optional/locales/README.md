@@ -34,6 +34,11 @@ Rules that keep a catalogue safe to load:
   reads from the keyboard, and translating the *prompt* is enough — do not promise a
   keystroke the code does not accept.
 - Line length matters: prompts print inside a two-space indent on an 80-column terminal.
+- Key prefixes: `q.` is a question, `x.` the one-line hint under it, `h.` the `?` help,
+  `l.` its label on the review screen, `.rich` a shorter title for the arrow-key menus
+  (no "e.g. 1,3"), `keys.` the key legends, and `explain.` the `--explain` topics. In
+  `keys.` and `intro.rich`, keep `{up}`, `{down}`, `{left}`, `{right}` and `{dot}`:
+  they become arrows, or ASCII on a terminal that cannot print them.
 
 No locale is shipped with the kit yet, so there is nothing here to copy from — only this
 file and the English source in `install.py`.

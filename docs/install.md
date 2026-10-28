@@ -13,18 +13,54 @@ how it complements the installer: [`.claude-plugin/README.md`](../.claude-plugin
 ./install.sh /path/to/your-project
 ```
 
-Run in a terminal, that opens a guided setup — ten short sections, every question with a
-default, **Enter** to take it:
+Run in a terminal, that opens a guided setup driven by the arrow keys. After the
+destination, it shows **what it detected and what it would set up**: project name and ID
+prefix, what you are building, the AI tools it found, the stack, the check commands, the
+reviewer roles and skills those imply, and what it will add. Then it asks how you want to
+continue:
 
-| Key | Does |
-| --- | --- |
-| `Enter` | accept the value in brackets |
-| `-` | leave the field blank |
-| `s` | take the defaults for the rest of this section |
-| `S` | take the defaults for the rest of the setup |
-| `b` | go back to the previous question |
-| `?` | why this question is being asked |
-| `q` | quit without writing anything |
+```
+◆  How do you want to set this up?
+│  › ● Use these settings  asks 4 things it cannot detect, then shows every answer for review  (recommended)
+│    ○ Customise           pick which sections to go through; the rest keep the settings above
+│    ○ Every question      all ten sections, about 40 questions, each one explained
+└  ↑↓ move · enter choose · ? explain · ← back · q quit
+```
+
+- **Use these settings** asks only the one-line description, the work item prefix, the
+  project types and the AI tools, then goes to the review screen.
+- **Customise** shows a checklist of the ten sections; only the ticked ones are asked.
+- **Every question** walks all ten sections (`■  Stack  4 of 10`).
+
+`--quick`, `--full` and `--sections process,install` on the command line skip that
+question (`--list sections` names them). Whichever path you take, the review screen lists
+every answer, defaults included, and any of them can be changed there.
+
+Every question shows a one-line hint with an example under it (`e.g. Next.js on Vercel,
+Postgres on Neon`), and `?` opens a longer explanation in place. A question you have
+answered folds to one line (`◇  AI tools  Claude Code, Cursor`), so the screen shows
+your answers rather than the questions.
+
+| Key | Menus | Checklists | Typed answers |
+| --- | --- | --- | --- |
+| `↑` `↓` (or `j` `k`) | move | move | |
+| a number | jump to that option | jump to that option | |
+| `Space` | | tick or untick | |
+| `a` / `n` | | tick all / none | |
+| `/` | | search a long list (the 18 deploy platforms) | |
+| `Enter` | choose | confirm | keep the value in brackets |
+| `-` | | | leave it blank |
+| `?` | explain | explain | explain |
+| `←`, `b` or `Esc` | back | back | `b` |
+| `s` / `S` | defaults for the rest of the section / the setup | same | same |
+| `q` | quit (asks first) | quit (asks first) | quit (asks first) |
+
+The arrow-key menus need a real terminal on both ends. **`--plain`** (or `NUHUT_PLAIN=1`)
+switches to numbered, typed prompts with the same questions, hints and help. Use it for
+screen readers, logs, or a terminal that mishandles escape codes. It is also chosen
+automatically when stdin or stdout is not a terminal or `TERM=dumb`. `NO_COLOR` turns
+colour off in both modes, and a terminal that cannot print `◆ │ ●` gets ASCII instead.
+Ctrl-C before the review writes nothing and says so.
 
 The first question is where to install. It has no default and is never guessed: the
 installer refuses its own directory (and anything inside it), so running `./install.sh`
@@ -43,8 +79,56 @@ the check commands, and the architecture it read out of the repository for you t
 asks about languages if the project has an interface or public content, and takes approvers
 and risk defaults.
 
-Nothing is written until the **review screen**: every answer listed and numbered, `Enter`
-to write, a number to change that one answer, `q` to quit.
+Choices with fixed options (effort mode, development method, decision style, tier rules,
+access model, MFA, docs size, enforcement, CI) are menus. Each option has a one-line
+meaning, and the recommended one is marked. With `--plain`, type the number or the
+option's name.
+
+Tables the installer detected (the facts, the stack, the check commands) are confirmed
+with **Use these / Change some / Leave blank**. *Change some* asks which rows to correct
+and then only those, so fixing one command is one question rather than eighteen. The
+facts become a checklist, and the skills are a checklist pre-ticked from your answers,
+with the reason for each.
+
+The setup also asks about things that used to be flags only:
+
+| Question | Same as |
+| --- | --- |
+| Which AI coding tools will work in this repository? (tools found in the repo are pre-ticked) | `--harness` |
+| How do you work? Solo / Team / Regulated | `--preset` |
+| Tier rules: Standard / Strict | `--tier-rules` |
+| How much process documentation should the agent read? Full / Compact | `--profile` |
+| Enforce the rules mechanically? None / Agent hooks / Git hooks / Both | `--hooks`, `--git-hooks` |
+| Should the kit's own tools (`.ai-sdlc/`) be committed? Commit / Ignore / Ignore locally | `--gitignore-tools`, `--git-exclude` |
+| Starter test plan? Starter CI workflow? | `--scaffold-tests`, `--scaffold-ci` |
+
+A flag given on the command line answers its question, so that question is not asked.
+
+Nothing is written until the **review screen**. It lists every answer, numbered, then
+offers **Write these files**, **Change an answer**, **Show the files** and **Quit**. (With
+`--plain`: `Enter` writes, a number changes that answer, `f` shows the files, `q` quits.)
+*Show the files* lists every path the install would add, folded by folder, with counts.
+It uses the same code path as `--dry-run`, so the list is exactly what gets written.
+Under the list it prints
+**the same install as a command line** (`./install.sh <dir> <PREFIX> -y --harness … --deploy
+…`). The command does not carry the free-text charter answers, which are already written
+into the charter. The final report prints the command again. The report also checks that
+no `{{…}}` placeholder was left unsubstituted, and says how to start: `/sdlc-plan` in
+Claude Code, or "follow AGENTS.md" in other tools. It also lists the charter rows that
+are still blank, with their line numbers, and in the arrow-key setup it offers to open
+the live project viewer.
+
+To see every option and its valid values without running anything:
+
+```sh
+./install.sh --help              # one page, grouped, with examples
+./install.sh --help full         # every option in detail
+./install.sh --list harnesses    # also: platforms, presets, types, skills, sections
+./install.sh --explain tiers     # what a concept means and how to choose
+```
+
+`--explain` topics: `tiers`, `presets`, `effort`, `decision`, `hooks`, `profile`,
+`skills`, `roles`, `charter` and `harnesses`.
 
 What it writes into the installed files:
 
@@ -73,14 +157,16 @@ For scripts, CI, or a plain copy with no questions:
 ```
 
 `-y` (also implied when stdin is not a terminal) takes every default, tailors nothing, and
-installs only the skills that do not depend on an answer. The target directory is required
+installs only the skills that do not depend on an answer. It ends with a **Defaults
+taken** table listing what it assumed (prefix, AI tools, deploy checklists, working style,
+enforcement) and the flag that changes each. The target directory is required
 in this mode — without a terminal there is nobody to ask. Other flags: `--docs-dir <name>`
 to install the docs under a different directory, `--harness <list>`, `--profile
 <full|compact>`, `--effort-mode <lean|normal|beast>`, `--dev-method <item|epic>`,
 `--decision-style <ask|guide|autopilot>`, `--acquisition-profile <standard|advanced>`,
 `--hooks`, `--git-hooks [all|secrets]`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
 `--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`,
-and `--upgrade`.
+`--plain`, `--sections <list>`, and `--upgrade`.
 
 ### Ignoring runtime tools in Git
 
@@ -273,6 +359,10 @@ A project installed before 3.3 needs one extra run, once:
 `--adopt` takes over the two things older versions left for you to merge by hand —
 sections 1–8 of `AGENTS.md` and the `/sdlc-*` commands — after backing up the current
 copies. A plain `--upgrade` never does this on its own, and says when it is needed.
+
+The upgrade report names the kit skills the project does not have. `--upgrade` never adds
+one. To add the ones that fit, run the guided setup again (`./install.sh
+/path/to/your-project --full`): it adds only missing files.
 
 `--upgrade` manages `docs/README.md`, `docs/process/`, `docs/roles/`, `docs/templates/`,
 `docs/platforms/`, the `/sdlc-*` commands, and any kit skill the project already has. It verifies their recorded checksums first and

@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent
@@ -51,9 +52,43 @@ RTL_LANGS = {"ar", "arc", "ckb", "dv", "fa", "he", "ps", "sd", "ug", "ur", "yi"}
 
 EN = {
     "intro.title": "Nuhut kit v{version} -- guided setup",
-    "intro.keys1": "Enter = the value in brackets   -  = leave blank   ? = why this is asked",
-    "intro.keys2": "b = back one question   s = default the rest of this section   S = default everything",
-    "intro.keys3": "Nothing is written until you confirm at the review screen. q quits.",
+    "intro.what": "Installs the operating contract your AI coding tools follow: AGENTS.md, docs/,\n  slash commands and skills, tailored to what you are building.",
+    "intro.keys1": "Enter = take the value in [brackets]   ? = explain this question   b = back",
+    "intro.keys2": "-  = leave blank   s = defaults for this section   S = defaults for everything   q = quit",
+    "intro.keys3": "Nothing is written until you confirm at the review screen.",
+    "sec.mode": "Setup",
+    "sec.tools": "Your AI tools",
+    "q.mode": "How do you want to set this up?",
+    "h.mode": "Use these settings asks only what cannot be detected (a one-line description, the prefix, what you are building and which AI tools you use) and then shows every answer on the review screen, where any of them can still be changed. Customise lets you pick which sections to go through. Every question walks all ten sections. Nothing is written until you confirm the review screen in every case.",
+    "progress": "{n} of {total}",
+    "recommended": "(recommended)",
+    "err.choice": "type a number from 1 to {max}, or the option's name",
+    "q.other": "Type it",
+    "none.option": "None",
+    "none.word": "none",
+    "q.harness": "Which AI coding tools will work in this repository? e.g. 1,2",
+    "h.harness": "Every tool reads its own instruction file. Each one ticked gets a short pointer to AGENTS.md (an existing file is appended to, never overwritten); without one the tool never sees the kit. Tools already found in the repository are pre-ticked.",
+    "l.harness": "AI tools",
+    "q.preset": "How do you work?",
+    "h.preset": "Sets the defaults for effort, decision style, development method and tier rules together. Full setup still lets you change each one; they are all rows in the charter afterwards.",
+    "l.preset": "Working style",
+    "q.tier": "Tier rules",
+    "h.tier": "Every change gets a risk tier (1 = high blast radius ... 3 = trivial). Standard keeps low-risk changes light; Strict keeps the heavier 3.x records for every tier. Tier 1 always stops for a named human either way.",
+    "l.tier": "Tier rules",
+    "q.profile": "How much process documentation should the agent read?",
+    "h.profile": "Compact installs the operating card, roles, templates and records, but not the numbered process/ documents. Same rules from one source -- for a small context window or a weaker model.",
+    "l.profile": "Docs size",
+    "q.enforce": "Enforce the rules mechanically?",
+    "h.enforce": "Off by default. Agent hooks (Claude Code; also Gemini CLI and Cursor when wired) deny a commit with no work item ID or with a credential, a write holding a credential, and edits to paths in .ai-sdlc/protected.txt. Git hooks apply to every tool and every human: pre-commit refuses staged credentials, commit-msg refuses a message without an ID. Existing hooks are chained, never replaced.",
+    "l.enforce": "Enforcement",
+    "q.git_tools": "Should the kit's own tools (.ai-sdlc/) be committed?",
+    "q.scaffold_tests": "Write a starter test plan from the detected test tooling?",
+    "h.scaffold_tests": "Creates docs/project/test-plan.md and .ai-sdlc/testing-profile.json, both marked as detected and needing confirmation. Never installs a dependency.",
+    "l.scaffold_tests": "Starter test plan",
+    "q.scaffold_ci": "Write a starter CI workflow?",
+    "h.scaffold_ci": "Built from the check commands above. Jobs are manual-only until you confirm the commands and enable push or pull-request triggers. Refused if there are no commands.",
+    "l.scaffold_ci": "Starter CI",
+    "review.command": "Same install choices without questions (charter answers stay in the charter):",
     "sec.dest": "Destination",
     "sec.project": "Project",
     "sec.build": "What you are building",
@@ -78,15 +113,15 @@ EN = {
     "q.repo": "Repository",
     "q.types": "What kind of project is this? Choose all that apply, e.g. 1,3",
     "h.types": "Most projects are more than one. The selection decides which roles review your work.",
-    "q.facts": "Use these? (y = yes, e = edit each)",
+    "q.facts": "Use these? (y = yes, e = change some)",
     "q.ui": "Is there any interface at all (a CLI counts)?",
     "q.visual": "Is any of it visual (screens, pages, components)?",
     "q.public": "Is any of it publicly discoverable (search, social)?",
-    "q.deploy": "Does it deploy to or run somewhere you operate?",
+    "q.deploys": "Does it deploy to or run somewhere you operate?",
     "q.pii": "Does it hold or process personal data?",
     "q.conv": "Is there a conversion or activation goal to optimise?",
-    "q.stack_ok": "Use these? (y = yes, e = edit each, n = leave the table blank)",
-    "q.cmds_ok": "Use these? (y = yes, e = edit each, n = leave the table blank)",
+    "q.stack_ok": "Use these? (y = yes, e = change some, n = leave the table blank)",
+    "q.cmds_ok": "Use these? (y = yes, e = change some, n = leave the table blank)",
     "q.lang": "Language / runtime",
     "q.pm": "Package manager",
     "q.fw": "Framework(s)",
@@ -132,27 +167,27 @@ EN = {
     "q.approvers": "Approver(s) for Tier 1 work",
     "h.approvers": "Named humans. Tier 1 needs two approvals.",
     "q.staleness": "Treat project docs as stale after",
-    "q.effort": "Default effort mode (l = Lean, n = Normal, x = Beast)",
+    "q.effort": "Default effort mode",
     "h.effort": "Lean minimizes optional work, Normal is balanced, Beast maximizes investigation and verification. Risk-tier requirements never change.",
-    "q.acquisition": "Acquisition profile (s = Standard, a = Advanced)",
-    "q.devmethod": "Development method (i = Item by item, e = Epic)",
+    "q.acquisition": "Acquisition profile",
+    "q.devmethod": "Development method",
     "h.devmethod": "Item runs one work item at a time and stops at each one's approvals. Epic plans several items together, gets one approval for the plan, and stops at the checkpoints it chooses. Checks, reviews and tier approvals never change.",
-    "q.decision": "Decision style (a = Ask, g = Guide, p = Autopilot)",
+    "q.decision": "Decision style -- how much the agent decides for you",
     "h.decision": "How much the agent decides for you. Ask puts every material choice to you with options and trade-offs. Guide recommends in plain language and asks. Autopilot takes the recommended option and logs it for review. Tier 1 surfaces and gated commands always stop for a named human, in every style.",
     "h.acquisition": "Advanced enables more extraction techniques on authorized targets. It never grants permission to bypass access controls.",
     "q.approval": "Human approval required for",
     "q.forbidden": "Forbidden in this project",
     "h.forbidden": "The specific shortcuts that would be tempting here. Blank = fill in later.",
-    "q.deploy": "Where does it deploy? (numbers, comma-separated)",
+    "q.deploy": "Where does it deploy? Numbers, comma-separated, 0 = none",
     "h.deploy": "Each choice installs that platform's checklist into platforms/. Detected ones are pre-selected; pick Other for anything unlisted.",
     "q.platform": "Managed platform co-owning this repo",
     "h.platform": "An AI app builder or cloud IDE that also edits, syncs, or deploys this repo.",
     "q.a11y": "Accessibility target",
     "q.outcome": "Primary outcome success is measured by",
     "h.outcome": "The one user action: sign-up, activation, task completion, purchase.",
-    "q.access_model": "Access level model",
+    "q.access_model": "How is access controlled?",
     "h.access_model": "Role-Based (RBAC), Simple Owner/User, Multi-tenant Workspace-Scoped, ABAC/ReBAC, or None (Public).",
-    "q.mfa_policy": "MFA / OTP policy",
+    "q.mfa_policy": "Second factor (MFA / OTP)",
     "h.mfa_policy": "Optional / User-enabled, Enforced for Admin/Privileged only, Enforced for all users, or Not required.",
     "q.docsdir": "Install the docs under",
 
@@ -189,11 +224,31 @@ EN = {
     "l.mfa_policy": "MFA / OTP policy",
     "l.docsdir": "Docs directory",
     "l.commands": "Slash commands",
-    "q.commands": "Install the five /sdlc-* slash commands?",
+    "q.commands": "Install the {n} /sdlc-* slash commands (plan, build, verify, review, ...)?",
     "q.gitignore_tools": "Ignore AI SDLC runtime tools (.ai-sdlc/) in .gitignore?",
     "h.gitignore_tools": "Appends .ai-sdlc/ to the repository's .gitignore so runtime scripts, manifests, and local viewer caches are not committed to git.",
-    "l.gitignore_tools": "Ignore tools in git",
-    "q.skills": "Install the ticked skills? (y = yes, e = choose each, n = none)",
+    "l.gitignore_tools": "Kit tools (.ai-sdlc/) in git",
+    "q.skills": "Which skills should be installed? e.g. 1,2,5",
+    "l.skills": "Skills",
+    "q.skills.rich": "Which skills should be installed?",
+    "q.types.rich": "What kind of project is this? Tick every one that applies",
+    "q.deploy.rich": "Where does it deploy?",
+    "q.harness.rich": "Which AI coding tools will work in this repository?",
+    "q.pick.rich": "Which ones do you want to change?",
+    "q.facts_pick": "Which of these are true? e.g. 1,4",
+    "q.facts_pick.rich": "Which of these are true?",
+    "h.facts_pick": "Each fact switches reviewer roles and skills on or off. They were worked out from the project types; tick or untick any of them.",
+    "x.facts_pick": "ticked = true for this project",
+    "l.facts_pick": "Facts",
+    "q.facts.rich": "Use these facts?",
+    "q.stack_ok.rich": "Use this stack?",
+    "q.cmds_ok.rich": "Use these check commands?",
+    "k.use": "Use these",
+    "k.use_desc": "as listed above",
+    "k.edit": "Change some",
+    "k.edit_desc": "pick the rows to correct",
+    "k.blank": "Leave blank",
+    "k.blank_desc": "fill it in later in the charter",
 
     "hint.detected": "read from the repository -- confirm, do not assume:",
     "hint.cmds": "agents run these verbatim and report the result as evidence.\n  A wrong command here produces confidently false \"verified\" claims.",
@@ -211,6 +266,7 @@ EN = {
     "err.required": "type a path, e.g. ~/Projects/my-app",
     "err.at_start": "already at the first question",
     "err.no_dir": "no such directory: {path}",
+    "hint.create": "add --create to make it, or check the path",
     "err.is_kit": "refusing: that is the kit's own directory ({path}).",
     "err.in_kit": "refusing: {path} is inside the kit ({src}).",
     "err.kit_copy": "refusing: {path} is a copy of this kit, not a project to install into.",
@@ -218,7 +274,7 @@ EN = {
     "err.no_target": "a destination is required.",
 
     "review.title": "Review -- nothing has been written yet",
-    "review.prompt": "Enter = write these files, a number = change that answer, q = quit",
+    "review.prompt": "Enter = write these files, a number = change that answer, f = list the files, q = quit",
     "review.quit": "Nothing was written.",
     "review.eof": "no answer -- nothing was written.",
     "review.bad": "type a number from the list, Enter to write, or q to quit",
@@ -229,6 +285,239 @@ EN = {
     "exists.docs": "{docs}/ already exists and is not empty; existing files are never overwritten.",
     "keeping.docs": "keeping {docs}/",
     "bad.docs": "not a directory name -- keeping {docs}/",
+
+    # -- the interactive widgets (install_ui.py); {up} {down} {left} {right} {dot} are glyphs
+    "intro.rich": "Use {up} {down} and Enter. ? explains any question, {left} or b goes back, q quits.\n  Typed answers work too: a number picks that option.",
+    "keys.select": "{up}{down} move {dot} enter choose {dot} ? explain {dot} {left} back {dot} q quit",
+    "keys.multi": "{up}{down} move {dot} space tick {dot} a all {dot} n none {dot} / search {dot} enter confirm {dot} ? explain {dot} {left} back",
+    "keys.confirm": "{left}{right} switch {dot} y / n {dot} enter confirm {dot} ? explain {dot} b back",
+    "keys.text": "Enter keeps [the value shown] {dot} - leaves it blank {dot} ? explains {dot} b goes back",
+    "multi.need_one": "tick at least one with space",
+    "multi.no_match": "nothing matches -- backspace to widen the search",
+    "yes": "Yes",
+    "no": "No",
+    "quit.confirm": "Quit without writing anything?",
+    "cancelled": "Cancelled: nothing was written.",
+    "cancelled.partial": "Interrupted while copying: the installation may be partial. It is safe to run again; existing files are never overwritten.",
+
+    # -- the start screen: what was detected, and what would be set up
+    "plan.title": "Here is what I found, and what I would set up",
+    "plan.found": "Detected in {path}",
+    "plan.name": "Project",
+    "plan.types": "Building",
+    "plan.tools": "AI tools",
+    "plan.stack": "Stack",
+    "plan.checks": "Check commands",
+    "plan.checks_value": "{n} found: {names}",
+    "plan.checks_none": "none found -- the charter will say Unknown until you add them",
+    "plan.deploy": "Deploys to",
+    "plan.platform": "Managed platform",
+    "plan.style": "Working style",
+    "plan.roles": "Reviewing roles",
+    "plan.skills": "Skills",
+    "plan.skills_value": "{n} of {total} match these answers",
+    "plan.writes": "Will add",
+    "plan.nothing": "nothing detected",
+    "plan.existing": "An install is already here: only missing files would be added.",
+    "plan.dest_first": "Answer where it goes first; then this shows what was detected there.",
+
+    # -- customise
+    "q.sections": "Which sections do you want to go through?",
+    "h.sections": "Only the ticked sections are asked. Every other answer keeps the detected or recommended value shown at the start, and all of them are listed on the review screen, where any one can still be changed.",
+    "l.sections": "Sections asked",
+    "q.pick": "Which ones do you want to change? e.g. 2,5",
+    "h.pick": "Only the rows you pick are asked; the others keep the value shown.",
+
+    # -- the review screen and the files preview
+    "review.rich_title": "Review -- nothing has been written yet",
+    "review.rich_hint": "Pick a row to change it, or Write to install. Every value below came from your answers, detection, or a recommended default.",
+    "review.write": "Write these files",
+    "review.write_desc": "{new} new; existing files are never changed",
+    "review.files": "Show the files",
+    "review.files_desc": "every path it would add, before anything is written",
+    "review.quit_opt": "Quit",
+    "review.quit_desc": "write nothing",
+    "review.change": "Change an answer",
+    "files.title": "Files that would be written into {path}",
+    "files.summary": "{new} new files. {kept} already exist and stay untouched.",
+    "files.kept": "Already there, left as they are:",
+    "files.more": "... and {n} more",
+    "files.back": "Press Enter to go back to the review.",
+
+    # -- after the install
+    "outro.got": "What you got",
+    "outro.later": "Still to fill in -- an agent reads a blank cell as Unknown, never as 'not applicable':",
+    "outro.later_more": "... and {n} more rows in the same file",
+    "q.viewer": "Open the live project viewer now? (Ctrl-C stops it)",
+    "h.viewer": "Runs `.ai-sdlc/bin/sdlc.py view --serve`: a read-only page of the backlog, worklog, plans and reviews that updates as agents work. You can open it any time later with the same command.",
+
+    # -- one line under every question, so nobody has to press ? to know what it wants
+    "x.dest": "an existing project folder (~ works). The kit is copied into it.",
+    "x.name": "used in the charter and AGENTS.md; the folder name is usually fine",
+    "x.what": "e.g. An online shop for handmade rugs, with accounts and checkout",
+    "x.prefix": "e.g. SHOP gives IDs like SHOP-12 in branches, commits and the backlog",
+    "x.owner": "the one person who approves risky (Tier 1) changes, e.g. Jane Doe",
+    "x.repo": "clone URL or path, e.g. github.com/acme/shop -- blank is fine",
+    "x.types": "pick every kind that applies: it decides which reviewer roles and skills switch on",
+    "x.facts_ok": "derived from the project types; each one switches reviewer roles on or off",
+    "x.harness_pick": "each one ticked gets a small pointer file to AGENTS.md; tools found here are pre-ticked",
+    "x.stack_ok": "agents treat this table as fact, so correct anything that is wrong",
+    "x.cmds_ok": "agents run exactly these commands to prove a change works",
+    "x.shape": "e.g. Next.js on Vercel, Postgres on Neon, a worker on Fly",
+    "x.critical": "e.g. checkout and order history, or the nightly import",
+    "x.expensive": "e.g. the database schema, or the public API's URL format",
+    "x.multilingual": "if yes, the translation and right-to-left rules become binding",
+    "x.languages": "e.g. en, fa, tr -- the first one is the source language",
+    "x.catalog": "e.g. src/locales/ or messages/",
+    "x.translation": "e.g. machine-translated, then reviewed by a native speaker",
+    "x.glossary": "e.g. docs/glossary.md, or: the product owner decides",
+    "x.branch": "where finished work lands, usually main",
+    "x.direct": "No means every change goes through a branch first (recommended)",
+    "x.approvers": "Tier 1 = hard-to-undo changes (auth, stored data, money, releases); two names",
+    "x.staleness": "a project document older than this is re-checked before an agent trusts it",
+    "x.preset": "one choice that sets the next four; you can still change each of them",
+    "x.effort": "how much investigation and review beyond the required minimum",
+    "x.devmethod": "Epic suits a feature made of several related changes",
+    "x.decision": "for choices with trade-offs; risky changes always stop for you",
+    "x.tier": "every change is sorted into a risk tier; this sets how much record each needs",
+    "x.acquisition": "only matters for scrapers and crawlers",
+    "x.approval": "the agent stops and asks before any of these; comma-separated",
+    "x.forbidden": "e.g. no new dependency without an ADR; never edit generated/",
+    "x.platform": "an app builder or cloud IDE that also commits to this repository",
+    "x.deploy_targets": "each one ticked installs its deploy checklist; detected ones are pre-ticked",
+    "x.a11y": "the standard every screen is reviewed against",
+    "x.outcome": "e.g. a visitor completes sign-up, or an order is paid",
+    "x.access_model": "how the product decides who may see or change what",
+    "x.mfa_policy": "who must use a second factor (an app code or a key) to sign in",
+    "x.docsdir": "a folder at the project root; docs is fine unless something else uses it",
+    "x.profile": "Full is the safe choice; Compact suits small models and context windows",
+    "x.commands": "typed commands in Claude Code; other tools get the same steps as skills",
+    "x.enforce": "hooks refuse a bad commit outright instead of trusting the agent",
+    "x.git_tools": "Commit suits teams: everyone runs the same checks",
+    "x.scaffold_tests": "a draft from what was detected, marked for you to confirm",
+    "x.scaffold_ci": "runs the check commands; manual-only until you switch triggers on",
+    "x.skills_pick": "instructions an agent loads only when the situation fits; ticked ones match your answers",
+    "x.sections": "the rest keep the settings shown above",
+
+    # -- help for the questions that had none
+    "h.name": "The human-readable name. It is written into the charter, AGENTS.md and every document title that names the project.",
+    "h.repo": "Where the code lives, so an agent can link commits and pull requests. Blank is fine; the charter cell can be filled later.",
+    "h.facts_ok": "Each fact switches reviewer roles and skills on or off: an interface brings UX and accessibility review, personal data brings privacy review, deploying brings DevOps review. Choose e to correct any of them.",
+    "h.stack_ok": "This becomes the charter's stack table. Agents treat it as fact when choosing libraries and commands, so a wrong entry here leads to wrong code. Choose e to correct single rows, or n to leave the table blank for later.",
+    "h.cmds_ok": "Agents run these exact commands and quote their output as evidence; only a command that ran can make a change Verified. A blank one is reported as not run, never as passing. Choose e to change single rows.",
+    "h.multilingual": "Yes makes the content and translation process binding: a source language, a message catalogue, a translation workflow, and the localisation reviewer role.",
+    "h.glossary": "Where product terms and their approved translations are decided, so every language uses the same words.",
+    "h.branch": "The branch finished work is merged into. Agents never commit to it directly unless the next question allows it.",
+    "h.direct": "No (recommended): every change is made on a branch and reaches the default branch after its checks. Yes: agents may commit to it directly, and the charter's 'Direct commits to it' row says so.",
+    "h.staleness": "After this long without a review, an agent treats a project document as a hypothesis to re-check, not as fact. 90 days suits most projects.",
+    "h.approval": "Actions the agent must stop and get a named human's approval for, whatever the tier. Mirrored into AGENTS.md under Project overrides.",
+    "h.a11y": "The accessibility standard the accessibility reviewer holds every interface to. WCAG 2.2 AA is the common legal and practical baseline.",
+    "h.docsdir": "The folder the process documents, roles, templates and project records go into. Use another name when docs/ already holds something else.",
+    "h.commands": "Claude Code slash commands for each loop step: /sdlc-plan, /sdlc-build, /sdlc-verify, /sdlc-review, /sdlc-log and /sdlc-doctor. Other tools get the same steps as skills when you pick them above.",
+    "h.skills_pick": "A skill is a short instruction file an agent loads only when its situation arises, for example a privacy review when personal data is touched. Ticked skills match your answers; tick or untick any. They install to .claude/skills/ and, for other tools, .agents/skills/.",
+    "h.git_tools": "The .ai-sdlc/ folder holds the kit's runtime (sdlc.py), its manifest and the evidence ledger. Commit it so everyone runs the same checks; ignore it only for a personal experiment.",
+
+    # -- install.sh --explain <topic>
+    "explain.tiers": """Risk tiers -- how heavy the process is for one change
+
+Every change is sorted by blast radius and reversibility, not by topic:
+
+  Tier 1  changes a contract others consume, stored data, auth, money-movement
+          rules or a release pipeline, or is hard to undo. The agent plans, gets a
+          design and a ship review (one from a different model family), writes an
+          ADR, and stops for a named human's approval.
+  Tier 2  new or changed behaviour that tests cover and a revert undoes. A short
+          plan, tests, a worklog line, and a commit as the charter says.
+  Tier 3  a typo, a test, a patch bump. The commit message is the record.
+
+Tier rules: Standard keeps Tier 2 and 3 light. Strict keeps the 3.x rules, where
+every tier writes the full record. Change it later in the charter's Tier rules row.
+Flag: --tier-rules standard|strict""",
+    "explain.presets": """Presets -- four settings in one choice
+
+  solo       one person moving fast: Lean effort, Guide decisions, Item method,
+             Standard tiers
+  team       several people, normal depth (the default): Normal, Guide, Item,
+             Standard
+  regulated  audited or high-stakes work: Normal effort, every material choice
+             asked (Ask), Item, Strict tiers
+
+A flag given as well always wins: --preset solo --decision-style ask. Every value
+is a charter row afterwards and can be edited there.
+Flag: --preset solo|team|regulated   Values: install.sh --list presets""",
+    "explain.effort": """Effort mode -- how far beyond the minimum the agent goes
+
+  Lean    the least optional work: fastest and cheapest
+  Normal  balanced investigation and review (default)
+  Beast   maximum investigation and verification; slowest
+
+It changes breadth above the risk-tier floor, never the floor itself: a Tier 1
+change gets its reviews and approval in every mode. A single request can ask for
+another mode ("do this one in Beast").
+Flag: --effort-mode lean|normal|beast""",
+    "explain.decision": """Decision style -- how much the agent decides for you
+
+  Ask        every material choice is put to you, with options and trade-offs
+  Guide      the agent recommends in plain language, then asks (default)
+  Autopilot  it takes the recommended option and logs it for your review
+
+In every style, Tier 1 surfaces and gated commands stop for a named human, and
+no record is thinned. Development method is separate: Item works one item at a
+time; Epic plans several items together with one plan approval.
+Flags: --decision-style ask|guide|autopilot   --dev-method item|epic""",
+    "explain.hooks": """Enforcement -- rules the tools refuse to break, not just promise
+
+  Agent hooks (--hooks)  Claude Code (and Gemini CLI, Cursor when wired) refuses a
+                         commit with no work item ID or with a credential, a file
+                         write that holds a credential, and edits to paths listed in
+                         .ai-sdlc/protected.txt.
+  Git hooks (--git-hooks) git itself refuses staged credentials (pre-commit) and a
+                         commit message without an ID (commit-msg), for every tool
+                         and every human. --git-hooks secrets installs only the first.
+
+Both are off by default, stay silent unless they refuse something, and chain onto
+hooks you already have instead of replacing them.""",
+    "explain.profile": """Docs profile -- how much an agent reads per change
+
+  Full     every process document; about 22k tokens of reading for a Tier 2 change
+  Compact  the one-page card instead of the numbered process documents; about 8k
+
+Both carry the same rules from one source. Choose Compact for a small context
+window or a weaker model; a Tier 1 change then has no longer document to consult.
+Flag: --profile full|compact""",
+    "explain.skills": """Skills -- instructions loaded only when they apply
+
+A skill is a short file an agent reads when its situation arises: sdlc-intake on
+every request, sdlc-privacy-review when personal data is touched, sdlc-release
+when something deploys. The guided setup ticks the ones your answers call for;
+you can tick or untick any. They install to .claude/skills/, and to
+.agents/skills/ when another AI tool is wired.
+See every skill and its condition: install.sh --list skills   Flag: --no-skills""",
+    "explain.roles": """Roles -- who reviews the work
+
+Role playbooks are reviews an agent runs from a specialist's point of view.
+Four are always on: product-manager, architect, security, qa. Your answers switch
+on the rest: an interface adds ux-designer and accessibility, a visual one adds
+brand-designer, public pages add seo and copywriter, a conversion goal adds
+cro-analyst, personal data adds privacy-legal, deploying adds devops-sre, data or
+scraping adds data-engineer, models add ml-engineer, a backend, data or model
+workload adds performance-engineer, and several languages add localisation.
+The roster is a table in the charter and can be edited there.""",
+    "explain.charter": """The charter -- the project's facts, in one file
+
+docs/project/charter.md holds what an agent cannot guess: what the project is, the
+work item prefix, the stack, the exact check commands, who approves Tier 1 work,
+what is forbidden, the working style, and which roles review. The guided setup
+fills in what it can; everything else stays blank on purpose, and an agent reads
+a blank cell as Unknown rather than 'not applicable'. Edit it like any document.""",
+    "explain.harnesses": """AI tools -- making each one read the kit
+
+Every AI coding tool reads its own instruction file. The installer adds a short
+pointer to AGENTS.md in each one you pick (CLAUDE.md, .cursor/rules/agents.mdc,
+.github/copilot-instructions.md, GEMINI.md, ...). An existing file is appended
+to, never overwritten. Codex, Jules, Zed, Factory, opencode and Antigravity read
+AGENTS.md directly and need nothing.
+Flag: --harness claude,cursor,...   Values: install.sh --list harnesses""",
 }
 
 _CATALOG = {}
@@ -258,45 +547,78 @@ def load_locale(code):
 
 # ---------------------------------------------------------------- terminal
 
-class Term(object):
-    def __init__(self):
-        self.interactive_in = sys.stdin.isatty()
-        tty_out = sys.stdout.isatty() and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
-        self.B = "\033[1m" if tty_out else ""
-        self.D = "\033[2m" if tty_out else ""
-        self.R = "\033[0m" if tty_out else ""
-
-    def say(self, msg=""):
-        print(msg)
-
-    def dim(self, msg):
-        print("  %s%s%s" % (self.D, msg, self.R))
-
-    def head(self, msg):
-        print("\n%s-- %s %s" % (self.B, msg, self.R))
-
-    def err(self, msg):
-        sys.stderr.write("  %s\n" % msg)
-
-    def read(self, prompt, default_hint=""):
-        """Returns None at end of input -- callers must treat that as 'no answer given'."""
-        if default_hint:
-            sys.stdout.write("  %s %s[%s]%s " % (prompt, self.D, default_hint, self.R))
-        else:
-            sys.stdout.write("  %s " % prompt)
-        sys.stdout.flush()
-        line = sys.stdin.readline()
-        if line == "":
-            return None
-        return line.rstrip("\n").rstrip("\r")
-
+# The widgets and the Term that prints them live in install_ui.py, next to this file.
+sys.path.insert(0, str(SRC))
+import install_ui as ui                                # noqa: E402
+from install_ui import Term                            # noqa: E402,F401  (re-exported)
 
 TERM = Term()
 
 
 # ---------------------------------------------------------------- arguments
 
-USAGE = """usage: install.sh <target-project-dir> [PREFIX] [options]
+USAGE = """usage: install.sh [target-project-dir] [PREFIX] [options]
+
+Installs the Nuhut operating contract (AGENTS.md, docs/, slash commands, skills) into
+a project. Run it with no options in a terminal for a guided setup that explains every
+choice; nothing is written until you confirm the review screen.
+
+Examples
+  ./install.sh                                   guided setup: arrow keys, Enter, ? explains
+  ./install.sh ~/code/shop SHOP --quick          use what it detects, ask ~4 things
+  ./install.sh ~/code/shop --sections process    ask only the sections you name
+  ./install.sh ~/code/shop SHOP -y --harness claude,cursor --deploy vercel
+                                                 no questions (CI, scripts)
+  ./install.sh ~/code/shop SHOP --upgrade        refresh the kit's managed files later
+
+Where and who
+  PREFIX                 2-4 letters every work item ID carries, e.g. SHOP-12
+  --create               create the target directory if it does not exist
+  --docs-dir <name>      install the docs somewhere other than docs/
+  --quick | --full       guided setup: detected settings, or every question
+  --sections <list>      ask only these sections, e.g. process,install (--list sections)
+
+How the agent works  (all project defaults, changeable later in the charter)
+  --preset <name>        solo | team | regulated -- sets the four below together
+  --effort-mode <name>   lean | normal | beast   -- how deep it investigates
+  --decision-style <n>   ask | guide | autopilot -- how much it decides for you
+  --dev-method <name>    item | epic             -- one work item, or a planned group
+  --tier-rules <name>    standard | strict       -- how heavy each risk tier is
+
+Which AI tools read it
+  --harness <list>       claude, cursor, copilot, gemini, windsurf, cline, roo, amp,
+                         aider, or all (default: claude). Codex, Jules, Zed, Factory,
+                         opencode and Antigravity read AGENTS.md and need nothing.
+
+Enforcement  (off unless asked for)
+  --hooks                Claude Code hooks that refuse unsafe commits and edits
+  --git-hooks [secrets]  git hooks every agent and human inherits
+
+What gets installed
+  --deploy <list>        platform checklists, e.g. vercel,cloudflare-edge (or none)
+  --profile <name>       full (default) | compact -- shorter docs for small models
+  --no-skills            no skills in .claude/skills/
+  --scaffold-tests       a starter test plan from the detected tooling
+  --scaffold-ci <p>      a starter CI workflow: github | gitlab
+  --gitignore-tools      keep .ai-sdlc/ out of git via .gitignore
+  --git-exclude          ... or via .git/info/exclude (local only)
+  --acquisition-profile  standard | advanced -- for scrapers and crawlers
+
+Running it
+  -y, --yes              no questions, every default (implied without a terminal)
+  --dry-run              list what would be written, write nothing
+  --upgrade [--adopt]    refresh managed files; --adopt once for pre-3.3 installs
+  --plain                numbered, typed prompts instead of arrow-key menus
+  --lang <code>          language for these prompts (default: en)
+
+More
+  --help full            every option in detail
+  --list <what>          harnesses | platforms | presets | types | skills | sections
+  --explain <topic>      tiers | presets | effort | decision | hooks | profile |
+                         skills | roles | charter | harnesses -- what each means
+"""
+
+USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
 
   target dir    the project to install into -- required, and never this directory.
                 Omit it only when a terminal is attached, and setup will ask for it.
@@ -304,6 +626,22 @@ USAGE = """usage: install.sh <target-project-dir> [PREFIX] [options]
 
   --docs-dir <name>  install the docs under a different directory (default: docs)
   --create           create the target directory if it does not exist
+  --quick            guided setup, essentials only: where, name, prefix, project
+                     types, AI tools, working style, deploy platforms. Everything
+                     else takes its default and is shown on the review screen.
+  --full             guided setup, every question. Without either flag the setup
+                     shows what it detected and asks which one you want.
+  --sections <list>  guided setup, asking only the named sections (comma-separated):
+                     project, build, tools, stack, cmds, arch, lang, process,
+                     standards, install. The rest take their defaults.
+  --plain            numbered, typed prompts instead of arrow-key menus. Also chosen
+                     automatically without a terminal, with TERM=dumb, or with
+                     NUHUT_PLAIN=1 set -- for screen readers and logs.
+  --explain <topic>  print what a concept means and how to choose, then exit:
+                     tiers, presets, effort, decision, hooks, profile, skills, roles,
+                     charter or harnesses.
+  --list <what>      print the valid values with their meaning: harnesses,
+                     platforms, presets, types or skills.
   -y, --yes          no questions: take every default (also implied when stdin is not a
                      terminal, so CI and piped runs never hang)
   --no-skills        do not install anything into .claude/skills/
@@ -409,6 +747,10 @@ class Options(object):
         self.git_exclude = False
         self.harnesses = None   # None: not given; [] : only native harnesses named
         self.profile = "full"
+        self.profile_given = False
+        self.mode = None            # None: ask; "quick", "custom" or "full"
+        self.sections = None        # --sections: the section ids to ask, or None
+        self.plain = False
         self.effort_mode = "normal"
         self.acquisition_profile = "standard"
         self.deploy = None          # None: not given; []: explicitly none
@@ -428,9 +770,67 @@ class Options(object):
         self.lang = "en"
 
 
-def usage(code=1):
-    sys.stderr.write(USAGE)
+def usage(code=1, text=None):
+    """--help prints to stdout; a usage error prints the short page to stderr."""
+    (sys.stdout if code == 0 else sys.stderr).write(text or USAGE)
     sys.exit(code)
+
+
+def bad_value(message, topic=None):
+    """A wrong flag value: say what was wrong and where the valid values are, instead of
+    burying the one useful line under the whole help page."""
+    sys.stderr.write("error: %s\n" % message)
+    if topic:
+        sys.stderr.write("       see: install.sh --list %s\n" % topic)
+    sys.stderr.write("       all options: install.sh --help\n")
+    sys.exit(1)
+
+
+LIST_TOPICS = ("harnesses", "platforms", "presets", "types", "skills", "sections")
+SECTION_IDS = ("project", "build", "tools", "stack", "cmds", "arch", "lang", "process",
+               "standards", "install")
+EXPLAIN_TOPICS = ("tiers", "presets", "effort", "decision", "hooks", "profile", "skills",
+                  "roles", "charter", "harnesses")
+
+
+def print_list(topic):
+    if topic == "harnesses":
+        print("AI tools (--harness). Each gets a pointer file that names AGENTS.md:\n")
+        for name in sorted(HARNESS_ALIASES):
+            print("  %-10s %-24s %s" % (name, HARNESS_TITLES.get(name, name),
+                                        ", ".join(HARNESS_ALIASES[name])))
+        print("\nRead AGENTS.md directly, nothing to install: %s" % ", ".join(HARNESS_NATIVE))
+    elif topic == "platforms":
+        print("Deployment platforms (--deploy). Each installs a checklist in <docs>/platforms/:\n")
+        for pid, label in DEPLOY_PLATFORMS:
+            print("  %-20s %s" % (pid, label))
+        print("  %-20s %s" % ("other", "anything unlisted -- recorded in the charter, no checklist"))
+        print("  %-20s %s" % ("none", "nothing deployed from here"))
+    elif topic == "presets":
+        print("Presets (--preset). An explicit flag always wins over the preset:\n")
+        print("  %-10s %-8s %-10s %-6s %s" % ("", "effort", "decision", "method", "tier rules"))
+        for name in ("solo", "team", "regulated"):
+            p = PRESETS[name]
+            print("  %-10s %-8s %-10s %-6s %s" % (name, p["effort_mode"], p["decision_style"],
+                                                  p["dev_method"], p["tier_rules"]))
+        print("")
+        for name in ("solo", "team", "regulated"):
+            print("  %-10s %s" % (name, PRESET_HELP[name]))
+    elif topic == "types":
+        print("Project types (asked by the guided setup; several can apply):\n")
+        for i, label in enumerate(PROJECT_TYPES, 1):
+            facts = ", ".join(TYPE_FACTS.get(i, ())) or "-"
+            print("  %2d  %-52s %s" % (i, label, facts))
+        print("\nThe facts on the right decide which roles review the work and which skills install.")
+    elif topic == "sections":
+        print("Sections of the guided setup (--sections). The ones not named take defaults:\n")
+        for sid in SECTION_IDS:
+            print("  %-10s %s" % (sid, t("sec." + sid)))
+    elif topic == "skills":
+        print("Skills (installed to .claude/skills/ when their condition holds):\n")
+        for name, rule, why_on, _ in SKILL_RULES:
+            print("  %-26s %-14s %s" % (name, rule, why_on))
+    sys.exit(0)
 
 
 def parse_args(argv):
@@ -440,15 +840,38 @@ def parse_args(argv):
     while i < len(argv):
         arg = argv[i]
         if arg in ("-h", "--help"):
+            if i + 1 < len(argv) and argv[i + 1] in ("full", "all"):
+                usage(0, USAGE_FULL)
             usage(0)
+        elif arg == "--list":
+            if i + 1 >= len(argv) or argv[i + 1] not in LIST_TOPICS:
+                bad_value("--list needs one of: %s" % ", ".join(LIST_TOPICS))
+            print_list(argv[i + 1])
+        elif arg in ("--quick", "--full"):
+            o.mode = arg[2:]
+        elif arg == "--plain":
+            o.plain = True
+        elif arg == "--sections":
+            names = argv[i + 1].split(",") if i + 1 < len(argv) else []
+            bad = [n for n in names if n.strip() not in SECTION_IDS]
+            if not names or bad:
+                bad_value("--sections takes a comma-separated list of: %s"
+                          % ", ".join(SECTION_IDS))
+            o.sections, o.mode = ["sec." + n.strip() for n in names], "custom"
+            i += 1
+        elif arg == "--explain":
+            if i + 1 >= len(argv) or argv[i + 1] not in EXPLAIN_TOPICS:
+                bad_value("--explain needs one of: %s" % ", ".join(EXPLAIN_TOPICS))
+            print(t("explain." + argv[i + 1]))
+            sys.exit(0)
         elif arg == "--docs-dir":
             if i + 1 >= len(argv):
-                usage()
+                bad_value("--docs-dir needs a directory name")
             o.docs_dir, o.docs_dir_given = argv[i + 1], True
             i += 1
         elif arg == "--lang":
             if i + 1 >= len(argv):
-                usage()
+                bad_value("--lang needs a language code, e.g. tr")
             o.lang = argv[i + 1]
             i += 1
         elif arg == "--upgrade":
@@ -463,8 +886,7 @@ def parse_args(argv):
             o.scaffold_tests = True
         elif arg == "--scaffold-ci":
             if i + 1 >= len(argv) or argv[i + 1] not in ("github", "gitlab"):
-                sys.stderr.write("--scaffold-ci requires github or gitlab\n")
-                usage()
+                bad_value("--scaffold-ci requires github or gitlab")
             o.scaffold_ci = argv[i + 1]
             i += 1
         elif arg == "--hooks":
@@ -476,61 +898,50 @@ def parse_args(argv):
                 i += 1
         elif arg == "--profile":
             if i + 1 >= len(argv) or argv[i + 1] not in ("full", "compact"):
-                sys.stderr.write("--profile requires full or compact\n")
-                usage()
-            o.profile = argv[i + 1]
+                bad_value("--profile requires full or compact")
+            o.profile, o.profile_given = argv[i + 1], True
             i += 1
         elif arg == "--effort-mode":
             if i + 1 >= len(argv) or argv[i + 1] not in ("lean", "normal", "beast"):
-                sys.stderr.write("--effort-mode requires lean, normal, or beast\n")
-                usage()
+                bad_value("--effort-mode requires lean, normal, or beast")
             o.effort_mode, o.effort_given = argv[i + 1], True
             i += 1
         elif arg == "--dev-method":
             if i + 1 >= len(argv) or argv[i + 1] not in ("item", "epic"):
-                sys.stderr.write("--dev-method requires item or epic\n")
-                usage()
+                bad_value("--dev-method requires item or epic")
             o.dev_method, o.dev_method_given = argv[i + 1], True
             i += 1
         elif arg == "--decision-style":
             if i + 1 >= len(argv) or argv[i + 1] not in ("ask", "guide", "autopilot"):
-                sys.stderr.write("--decision-style requires ask, guide, or autopilot\n")
-                usage()
+                bad_value("--decision-style requires ask, guide, or autopilot")
             o.decision_style, o.decision_given = argv[i + 1], True
             i += 1
         elif arg == "--preset":
             if i + 1 >= len(argv) or argv[i + 1] not in PRESETS:
-                sys.stderr.write("--preset requires one of %s\n" % ", ".join(sorted(PRESETS)))
-                usage()
+                bad_value("--preset requires one of %s" % ", ".join(sorted(PRESETS)), "presets")
             o.preset = argv[i + 1]
             i += 1
         elif arg == "--tier-rules":
             if i + 1 >= len(argv) or argv[i + 1] not in ("standard", "strict"):
-                sys.stderr.write("--tier-rules requires standard or strict\n")
-                usage()
+                bad_value("--tier-rules requires standard or strict")
             o.tier_rules, o.tier_rules_given = argv[i + 1], True
             i += 1
         elif arg == "--acquisition-profile":
             if i + 1 >= len(argv) or argv[i + 1] not in ("standard", "advanced"):
-                sys.stderr.write("--acquisition-profile requires standard or advanced\n")
-                usage()
+                bad_value("--acquisition-profile requires standard or advanced")
             o.acquisition_profile, o.acquisition_given = argv[i + 1], True
             i += 1
         elif arg == "--deploy":
             if i + 1 >= len(argv):
-                sys.stderr.write("--deploy requires a comma-separated list\n")
-                usage()
+                bad_value("--deploy requires a comma-separated list", "platforms")
             ids, bad = parse_deploy(argv[i + 1])
             if bad is not None:
-                sys.stderr.write("unknown deployment platform: %s (known: %s, other, none)\n"
-                                 % (bad, ", ".join(DEPLOY_IDS)))
-                usage()
+                bad_value("unknown deployment platform: %s" % bad, "platforms")
             o.deploy = ids
             i += 1
         elif arg == "--harness":
             if i + 1 >= len(argv):
-                sys.stderr.write("--harness requires a comma-separated list\n")
-                usage()
+                bad_value("--harness requires a comma-separated list", "harnesses")
             names = [x.strip().lower() for x in argv[i + 1].split(",") if x.strip()]
             if "all" in names:
                 names = sorted(HARNESS_ALIASES)
@@ -541,9 +952,7 @@ def parse_args(argv):
                     "%s reads AGENTS.md directly and needs no pointer file\n"
                     % ", ".join(native))
             if unknown:
-                sys.stderr.write("unknown harness: %s (known: %s)\n"
-                                 % (", ".join(unknown), ", ".join(sorted(HARNESS_ALIASES))))
-                usage()
+                bad_value("unknown harness: %s" % ", ".join(unknown), "harnesses")
             o.harnesses = [x for x in names if x in HARNESS_ALIASES]
             o.native_harnesses = native
             i += 1
@@ -556,14 +965,12 @@ def parse_args(argv):
         elif arg == "--git-exclude":
             o.git_exclude = True
         elif arg.startswith("-"):
-            sys.stderr.write("unknown option: %s\n" % arg)
-            usage()
+            bad_value("unknown option: %s" % arg)
         else:
             positional.append(arg)
         i += 1
     if len(positional) > 2:
-        sys.stderr.write("unexpected argument: %s\n" % positional[2])
-        usage()
+        bad_value("unexpected argument: %s" % positional[2])
     if positional:
         o.target = positional[0]
     if len(positional) > 1:
@@ -734,6 +1141,28 @@ HARNESS_ALIASES = {
     "cline": (".clinerules",),
     "roo": (".roo/rules/agents.md",),
     "aider": ("CONVENTIONS.md",),
+}
+
+HARNESS_TITLES = {
+    "claude": "Claude Code", "cursor": "Cursor", "copilot": "GitHub Copilot",
+    "gemini": "Gemini CLI", "windsurf": "Windsurf", "cline": "Cline", "roo": "Roo Code",
+    "amp": "Amp", "aider": "Aider",
+}
+# The order the guided setup offers them in, most used first.
+HARNESS_ORDER = ("claude", "cursor", "copilot", "gemini", "windsurf", "cline", "roo",
+                 "amp", "aider")
+# Files or directories that show a tool is already used here. Detection only pre-ticks
+# the question; the answer decides.
+HARNESS_MARKERS = {
+    "claude": ("CLAUDE.md", ".claude"),
+    "cursor": (".cursor", ".cursorrules"),
+    "copilot": (".github/copilot-instructions.md", ".github/instructions"),
+    "gemini": ("GEMINI.md", ".gemini"),
+    "windsurf": (".windsurfrules", ".windsurf"),
+    "cline": (".clinerules",),
+    "roo": (".roo", ".roomodes"),
+    "amp": ("AGENT.md",),
+    "aider": ("CONVENTIONS.md", ".aider.conf.yml"),
 }
 
 # Deployment platforms: (id, label). Each id has a checklist in optional/platforms/<id>.md
@@ -1616,6 +2045,7 @@ def detect(root):
 
 BACK = "\x00back"
 QUIT = "\x00quit"
+OTHER = "\x00other"          # a choice option that asks for free text
 
 PROJECT_TYPES = (
     "Web application (users sign in, there is state)",
@@ -1717,10 +2147,11 @@ SKILL_RULES = (
 class Step(object):
     def __init__(self, sid, section, kind, prompt, default=None, help=None,
                  when=None, before=None, after=None, options=None, validate=None,
-                 label=None, cascade=False, secret_default=None):
+                 label=None, cascade=False, secret_default=None, quick=False,
+                 none_ok=False):
         self.sid = sid
         self.section = section
-        self.kind = kind            # text | yesno | key | multichoice | dest
+        self.kind = kind            # text | yesno | key | choice | multichoice | dest
         self.prompt = prompt        # message key
         self.default = default      # callable(w) or literal
         self.help = help            # message key
@@ -1731,6 +2162,8 @@ class Step(object):
         self.validate = validate    # callable(w, raw) -> (ok, value_or_message)
         self.label = label or prompt
         self.cascade = cascade      # a change here changes later questions
+        self.quick = quick          # asked in Quick mode too; otherwise defaulted there
+        self.none_ok = none_ok      # multichoice: 0 / none is a valid answer
 
     def visible(self, w):
         return self.when(w) if self.when else True
@@ -1759,6 +2192,8 @@ class Wizard(object):
         self.skip_section = None
         self.skip_all = False
         self.last_section = None
+        self.force = None           # a step the review screen jumped to: always asked
+        self.since = 0              # where the current question's lines start, for folding
         self.steps = build_steps(self)
 
     # -- helpers used by step defaults ----------------------------------------
@@ -1821,8 +2256,9 @@ class Wizard(object):
                       charter.read_text(encoding="utf-8", errors="replace"), re.M)
         return m.group(1) if m else ""
 
-    def skills(self):
-        """(name, on, why) for every skill this kit ships, judged by the answers."""
+    def skills(self, rules_only=False):
+        """(name, on, why) for every skill this kit ships, judged by the answers.
+        rules_only ignores a pick made at the skills question."""
         out = []
         for name, rule, why_on, why_off in SKILL_RULES:
             if not (SRC / "optional" / "skills" / name).is_dir():
@@ -1843,7 +2279,7 @@ class Wizard(object):
                 on = self.has_data_layer()
             else:
                 on = bool(self.fact(rule))
-            chosen = self.a.get("skill:" + name)
+            chosen = None if rules_only else self.a.get("skill:" + name)
             if chosen is not None:
                 on = bool(chosen)
             out.append((name, on, why_on if on else why_off))
@@ -1881,6 +2317,42 @@ class Wizard(object):
         return roles
 
     # -- prompting -------------------------------------------------------------
+    def hint(self, step):
+        """The one line shown under every question, so nobody has to press ? first."""
+        key = "x." + step.sid
+        return t(key) if (key in _CATALOG or key in EN) else ""
+
+    def title(self, step):
+        """A typed prompt says how to type the answer ("e.g. 1,3"); a menu does not need to."""
+        key = step.prompt + ".rich"
+        if key in _CATALOG or key in EN:
+            return t(key)
+        return t(step.prompt, **self.prompt_args(step))
+
+    def keys(self, name):
+        return t("keys." + name, **TERM.g)
+
+    def help_for(self, step):
+        return t(step.help) if step.help else ""
+
+    def show_hint(self, step):
+        """Plain mode: the hint as a dim line above the prompt."""
+        if not TERM.rich and self.hint(step):
+            TERM.dim(self.hint(step))
+
+    def done(self, step, value_text):
+        """Rich mode: fold the finished question into one line."""
+        if TERM.rich:
+            label = t(step.label, **self.prompt_args(step))
+            if step.label == step.prompt:            # no short label: the menu's own title
+                label = self.title(step)
+            TERM.collapse(self.since, label, value_text)
+
+    def confirm_quit(self):
+        r = ui.confirm(TERM, t("quit.confirm"), default=False, keys=self.keys("confirm"),
+                       yes=t("yes"), no=t("no"))
+        return r is True or r == ui.QUIT
+
     def _control(self, raw, step):
         """Universal keys. Returns (handled, result)."""
         if raw == "b":
@@ -1888,10 +2360,11 @@ class Wizard(object):
         if raw == "q":
             return True, QUIT
         if raw == "?":
-            if step.help:
-                TERM.dim(t(step.help))
+            text = self.help_for(step) or "no extra detail for this one."
+            if TERM.rich:
+                TERM.wrap(text, TERM.D)
             else:
-                TERM.dim("no extra detail for this one.")
+                TERM.dim(text)
             return True, None            # re-ask
         if raw == "s":
             self.skip_section = step.section
@@ -1903,16 +2376,68 @@ class Wizard(object):
             return True, step.default_for(self)
         return False, None
 
+    def _widget_control(self, result, step):
+        """A widget's answer that is not a value: (True, result) to return it, (True,
+        None) to ask again, (False, None) when it is a value after all."""
+        if result == ui.BACK:
+            return True, BACK
+        if result == ui.QUIT:
+            return True, QUIT
+        if result == ui.SKIP:
+            self.skip_section = step.section
+            return True, step.default_for(self)
+        if result == ui.SKIP_ALL:
+            self.skip_all = True
+            return True, step.default_for(self)
+        return False, None
+
+    def mode(self):
+        return self.a.get("mode") or self.o.mode
+
+    def quick(self):
+        return self.mode() == "quick"
+
+    def custom_sections(self):
+        if self.o.sections:
+            return set(self.o.sections)
+        return set(SECTION_KEYS[i - 1] for i in (self.a.get("sections") or [])
+                   if 1 <= i <= len(SECTION_KEYS))
+
+    def _outside_custom(self, step):
+        return (self.mode() == "custom" and step.section not in ("sec.dest", "sec.mode")
+                and step.section not in self.custom_sections())
+
     def _skipping(self, step):
+        if self.interactive and self.force is step:
+            return False
         return (not self.interactive or self.skip_all
+                or (self.quick() and not step.quick)
+                or self._outside_custom(step)
                 or (self.skip_section and self.skip_section == step.section))
+
+    def progress(self, section):
+        """'3 of 9' for a section header: only the sections that will actually ask."""
+        order = []
+        for st in self.steps:
+            if st.section in ("sec.mode", "sec.dest") or not st.visible(self):
+                continue
+            if self.quick() and not st.quick:
+                continue
+            if self._outside_custom(st):
+                continue
+            if st.section not in order:
+                order.append(st.section)
+        if section not in order:
+            return ""
+        return t("progress", n=order.index(section) + 1, total=len(order))
 
     def ask(self, step):
         if step.kind == "dest" and self.target:      # given on the command line
             return str(self.target)
         if step.section != self.last_section and self.interactive and not self._skipping(step):
-            TERM.head(t(step.section))
+            TERM.head(t(step.section), self.progress(step.section))
             self.last_section = step.section
+        self.since = TERM.mark()
         if step.before and self.interactive and not self._skipping(step):
             step.before(self)
         if self._skipping(step):
@@ -1922,14 +2447,31 @@ class Wizard(object):
             "text": self.ask_text,
             "yesno": self.ask_yesno,
             "key": self.ask_key,
+            "choice": self.ask_choice,
             "multichoice": self.ask_multi,
+            "show": lambda st: "",
         }[step.kind]
-        return handler(step)
+        while True:
+            value = handler(step)
+            # A stray q in the arrow-key setup should not throw away every answer.
+            if value == QUIT and TERM.rich and not self.confirm_quit():
+                self.since = TERM.mark()
+                continue
+            return value
+
+    def _text_prompt(self):
+        return "%s%s%s  %s%s%s" % (TERM.D, TERM.g["bar"], TERM.R, TERM.C, TERM.g["pointer"], TERM.R)
 
     def ask_text(self, step):
         default = step.default_for(self)
+        if TERM.rich:
+            TERM.title(self.title(step), self.hint(step))
+        self.show_hint(step)
         while True:
-            raw = TERM.read(t(step.prompt), default if default else "blank")
+            if TERM.rich:
+                raw = TERM.read(self._text_prompt(), default if default else "blank", lead="")
+            else:
+                raw = TERM.read(t(step.prompt), default if default else "blank")
             if raw is None:
                 return QUIT
             handled, result = self._control(raw, step)
@@ -1943,14 +2485,31 @@ class Wizard(object):
             if step.validate:
                 ok, out = step.validate(self, value)
                 if not ok:
-                    TERM.dim(out)
+                    if TERM.rich:
+                        TERM.bar("%s%s %s" % (TERM.Y, TERM.g["warn"], out), "")
+                    else:
+                        TERM.dim(out)
                     continue
                 value = out
+            self.done(step, value if value != "" else "(blank)")
             return value
 
     def ask_yesno(self, step):
         default = bool(step.default_for(self))
+        if TERM.rich:
+            while True:
+                r = ui.confirm(TERM, self.title(step), default=default,
+                               hint=self.hint(step), help_text=self.help_for(step),
+                               keys=self.keys("confirm"), yes=t("yes"), no=t("no"))
+                handled, result = self._widget_control(r, step)
+                if handled:
+                    return result
+                if r != default:
+                    self.explicit.add(step.sid)
+                self.done(step, t("yes") if r else t("no"))
+                return r
         hint = "Y/n" if default else "y/N"
+        self.show_hint(step)
         while True:
             raw = TERM.read(t(step.prompt, **self.prompt_args(step)), hint)
             if raw is None:
@@ -1972,6 +2531,22 @@ class Wizard(object):
 
     def ask_key(self, step):
         default = step.default_for(self)
+        if TERM.rich:
+            menu = [opt for opt in KEY_MENU if opt[0] in step.options]
+            index = [opt[0] for opt in menu].index(default) if default in step.options else 0
+            r = ui.select(TERM, self.title(step), [
+                (t(name), t(desc), t("recommended") if key == "y" else "")
+                for key, name, desc in menu], default=index, hint=self.hint(step),
+                help_text=self.help_for(step), keys=self.keys("select"))
+            handled, result = self._widget_control(r, step)
+            if handled:
+                return result
+            value = menu[r][0]
+            if value != default:
+                self.explicit.add(step.sid)
+            self.done(step, t(menu[r][1]))
+            return value
+        self.show_hint(step)
         while True:
             raw = TERM.read(t(step.prompt), default)
             if raw is None:
@@ -1988,12 +2563,71 @@ class Wizard(object):
                 return raw
             TERM.dim(t("err.answer_keys", keys="/".join(step.options)))
 
-    def ask_multi(self, step):
-        default = step.default_for(self)          # list of ints
-        for i, label in enumerate(step.options):
-            TERM.say("    %s%2d%s  %s" % (TERM.D, i + 1, TERM.R, label))
+    def choice_options(self, step):
+        return step.options(self) if callable(step.options) else step.options
+
+    def choice_name(self, step, value):
+        for opt in self.choice_options(step):
+            if opt[0] == value:
+                return opt[1]
+        return str(value) if value not in ("", None) else "(blank)"
+
+    def multi_items(self, step):
+        """(name, description) for each option of a multichoice step."""
+        items = []
+        for opt in self.choice_options(step):
+            if isinstance(opt, tuple):
+                items.append((opt[0], opt[1]))
+                continue
+            m = re.match(r"^(.*?) \((.*)\)$", opt)
+            items.append((m.group(1), m.group(2)) if m else (opt, ""))
+        return items
+
+    def ask_choice(self, step):
+        """A menu: every option with what it means, the recommended one marked. Typed, it
+        accepts the number, the option's name, or its old one-letter key."""
+        default = step.default_for(self)
+        options = self.choice_options(step)
+        if TERM.rich:
+            values = [o[0] for o in options]
+            if default in values:
+                index = values.index(default)
+            elif default not in ("", None) and OTHER in values:
+                index = values.index(OTHER)
+            else:
+                index = 0
+            r = ui.select(TERM, self.title(step), [
+                (name, desc, t("recommended") if rec else "")
+                for _, name, desc, rec in options], default=index, hint=self.hint(step),
+                help_text=self.help_for(step), keys=self.keys("select"))
+            handled, result = self._widget_control(r, step)
+            if handled:
+                return result
+            picked = values[r]
+            if picked == OTHER:
+                typed = TERM.read("%s %s" % (self._text_prompt(), t("q.other")),
+                                  default if default not in values else "blank", lead="")
+                if typed is None:
+                    return QUIT
+                picked = typed.strip() or (default if default not in values else "")
+            if r != index or picked != default:
+                self.explicit.add(step.sid)
+            self.done(step, options[r][1] if picked in values else picked)
+            return picked
+        width = max(len(o[1]) for o in options)
+        for i, (value, name, desc, rec) in enumerate(options):
+            mark = ("  " + t("recommended")) if rec else ""
+            TERM.say("    %s%d%s  %-*s  %s%s%s%s" % (TERM.D, i + 1, TERM.R, width, name,
+                                                   TERM.D, desc, mark, TERM.R))
+        hint = None
+        for i, opt in enumerate(options):
+            if opt[0] == default:
+                hint = "%d %s" % (i + 1, opt[1])
+        if hint is None and default not in ("", None):
+            hint = str(default)
+        self.show_hint(step)
         while True:
-            raw = TERM.read(t(step.prompt), ",".join(str(x) for x in default))
+            raw = TERM.read(t(step.prompt, **self.prompt_args(step)), hint or "blank")
             if raw is None:
                 return QUIT
             handled, result = self._control(raw, step)
@@ -2003,17 +2637,81 @@ class Wizard(object):
                 return result
             if raw == "":
                 return default
+            picked = None
+            low = raw.strip().lower()
+            if low.isdigit() and 1 <= int(low) <= len(options):
+                picked = options[int(low) - 1][0]
+            else:
+                for value, name, _, _ in options:
+                    if low in (str(value).lower(), name.lower(), name.split(" ")[0].lower()):
+                        picked = value
+                        break
+            if picked is None:
+                TERM.dim(t("err.choice", max=len(options)))
+                continue
+            if picked == OTHER:
+                typed = TERM.read(t("q.other"), "blank")
+                if typed is None:
+                    return QUIT
+                picked = typed.strip()
+            self.explicit.add(step.sid)
+            return picked
+
+    def ask_multi(self, step):
+        default = step.default_for(self)          # list of ints, 1-based
+        items = self.multi_items(step)
+        if TERM.rich:
+            r = ui.multiselect(TERM, self.title(step),
+                               [(name, desc, "") for name, desc in items],
+                               default=[i - 1 for i in default], hint=self.hint(step),
+                               help_text=self.help_for(step), keys=self.keys("multi"),
+                               none_ok=step.none_ok, need_one=t("multi.need_one"),
+                               filter_label=t("multi.no_match"))
+            handled, result = self._widget_control(r, step)
+            if handled:
+                return result
+            picked = [i + 1 for i in r]
+            if picked != sorted(default):
+                self.explicit.add(step.sid)
+            self.done(step, ", ".join(items[i - 1][0] for i in picked) or t("none.word"))
+            return picked
+        for i, (name, desc) in enumerate(items):
+            TERM.say("    %s%2d%s  %s%s" % (TERM.D, i + 1, TERM.R, name,
+                                            (" (%s)" % desc) if desc else ""))
+        if step.none_ok:
+            TERM.say("    %s%2d%s  %s" % (TERM.D, 0, TERM.R, t("none.option")))
+        self.show_hint(step)
+        while True:
+            hint = ",".join(str(x) for x in default)
+            if not hint and step.none_ok:
+                hint = "0 " + t("none.word")
+            raw = TERM.read(t(step.prompt), hint)
+            if raw is None:
+                return QUIT
+            handled, result = self._control(raw, step)
+            if handled:
+                if result is None:
+                    continue
+                return result
+            if raw == "":
+                if not default and not step.none_ok:
+                    TERM.dim(t("err.number_range", max=len(items)))
+                    continue
+                return default
+            if step.none_ok and raw.strip().lower() in ("0", "none"):
+                self.explicit.add(step.sid)
+                return []
             picked, bad = [], False
             for part in re.split(r"[\s,]+", raw.strip()):
                 if not part:
                     continue
-                if not part.isdigit() or not (1 <= int(part) <= len(step.options)):
+                if not part.isdigit() or not (1 <= int(part) <= len(items)):
                     bad = True
                     break
                 if int(part) not in picked:
                     picked.append(int(part))
             if bad or not picked:
-                TERM.dim(t("err.number_range", max=len(step.options)))
+                TERM.dim(t("err.number_range", max=len(items)))
                 continue
             self.explicit.add(step.sid)
             return sorted(picked)
@@ -2021,35 +2719,54 @@ class Wizard(object):
     def ask_dest(self, step):
         if self.target:                            # given on the command line
             return str(self.target)
+        if TERM.rich:
+            TERM.title(t("q.dest"), self.hint(step))
+        self.show_hint(step)
         while True:
-            raw = TERM.read(t("q.dest"), "required")
+            if TERM.rich:
+                raw = TERM.read(self._text_prompt(), "required", lead="")
+            else:
+                raw = TERM.read(t("q.dest"), "required")
             if raw is None:
                 return QUIT
             if raw in ("q",):
                 return QUIT
             if raw == "?":
-                TERM.dim(t("h.dest"))
+                (TERM.wrap if TERM.rich else TERM.dim)(t("h.dest"))
                 continue
             if raw == "":
                 TERM.dim(t("err.required"))
                 continue
             path = os.path.expanduser(raw)
             if not os.path.isdir(path):
-                answer = TERM.read(t("q.create", path=path), "Y/n")
-                if answer is None:
-                    return QUIT
-                if answer.lower() in ("n", "no"):
-                    continue
+                if TERM.rich:
+                    answer = ui.confirm(TERM, t("q.create", path=path), default=True,
+                                        keys=self.keys("confirm"), yes=t("yes"), no=t("no"))
+                    if answer == ui.QUIT:
+                        return QUIT
+                    if answer is not True:
+                        continue
+                else:
+                    answer = TERM.read(t("q.create", path=path), "Y/n")
+                    if answer is None:
+                        return QUIT
+                    if answer.lower() in ("n", "no"):
+                        continue
                 self.o.create = True
             resolved = resolve_target(path, self.o, TERM)
             if resolved:
                 self.target = resolved
-                TERM.dim("-> %s" % resolved)
+                if TERM.rich:
+                    TERM.collapse(self.since, t("l.dest"), str(resolved))
+                else:
+                    TERM.dim("-> %s" % resolved)
                 return str(resolved)
 
     def prompt_args(self, step):
         if step.sid in ("direct", "l.direct"):
             return {"branch": self.a.get("branch", "the default branch")}
+        if step.sid == "commands":
+            return {"n": len(list((SRC / "optional" / "claude-commands").glob("*.md")))}
         return {}
 
     # -- the loop --------------------------------------------------------------
@@ -2063,7 +2780,9 @@ class Wizard(object):
             if not step.visible(self):
                 idx += 1
                 continue
+            self.force = step if single else None
             value = self.ask(step)
+            self.force = None
             if value == QUIT:
                 return False
             if value == BACK:
@@ -2094,40 +2813,90 @@ class Wizard(object):
             return DEV_METHOD_KEYS.get(value, "Item")
         if step.sid == "decision":
             return DECISION_KEYS.get(value, "Guide")
+        if step.kind == "choice":
+            if step.sid in ("access_model", "mfa_policy", "platform"):   # the value is the wording
+                return str(value) if value else "(blank)"
+            return self.choice_name(step, value)
         if isinstance(value, bool):
             return "yes" if value else "no"
+        if step.sid == "skills_pick" and isinstance(value, list):
+            return "%d of %d" % (len(value), len(self.multi_items(step)))
         if isinstance(value, list):
             if step.kind == "multichoice":
-                return ", ".join(step.options[i - 1].split(" (")[0] for i in value)
+                if not value:
+                    return t("none.word")
+                items = self.multi_items(step)
+                return ", ".join(items[i - 1][0] for i in value if 1 <= i <= len(items))
             return ", ".join(str(x) for x in value)
         return str(value) if str(value) != "" else "(blank)"
+
+    def review_rows(self):
+        """(step index, section, label, value) for every answer the review lists."""
+        rows = []
+        for i in self.visible_indexes():
+            step = self.steps[i]
+            if (step.kind in ("key", "show") or step.sid in ("mode", "sections")
+                    or step.sid in ("stack_pick", "cmds_pick")
+                    or step.sid.startswith("skill:")):
+                continue
+            rows.append((i, step.section, t(step.label, **self.prompt_args(step)),
+                         self.display(step)))
+        return rows
+
+    def print_review(self, rows):
+        width = max(12, min(self.term_cols() - 46, 60))
+        section = None
+        for n, (i, sec, label, value) in enumerate(rows, 1):
+            if sec != section:
+                section = sec
+                TERM.say("  %s%s%s" % (TERM.D, t(sec), TERM.R))
+            if len(label) > 34:
+                label = label[:31] + "..."
+            if len(value) > width:
+                # A path is recognised by its end; anything else by its start.
+                value = ("..." + value[-(width - 3):]) if self.steps[i].kind == "dest" \
+                    else (value[:width - 3] + "...")
+            TERM.say("   %2d  %-34s %s" % (n, label, value))
+        for line in (textwrap.wrap("roles: " + ", ".join(self.active_roles()),
+                                   max(40, self.term_cols() - 6), subsequent_indent="  ")
+                     + textwrap.wrap("skills: " + (", ".join(self.chosen_skills()) or "none"),
+                                     max(40, self.term_cols() - 6), subsequent_indent="  ")):
+            TERM.say("  %s%s%s" % (TERM.D, line, TERM.R))
+        TERM.say("")
+        TERM.dim(t("review.command"))
+        TERM.say("    %s" % equivalent_command(self))
+
+    @staticmethod
+    def term_cols():
+        return shutil.get_terminal_size((80, 24)).columns
+
+    def show_files(self):
+        new, kept = preview_files(self)
+        TERM.head(t("files.title", path=self.target))
+        for line in file_tree(new):
+            TERM.say("    " + line)
+        if kept:
+            TERM.dim(t("files.kept"))
+            for line in file_tree(kept)[:8]:
+                TERM.say("    %s%s%s" % (TERM.D, line, TERM.R))
+        TERM.dim(t("files.summary", new=len(new), kept=len(kept)))
+        return new
 
     def review(self):
         """None = write, QUIT = abandon, int = the step index to revisit."""
         if not self.interactive:
             return None
         while True:
-            TERM.head(t("review.title"))
-            numbered = []
-            section = None
-            for i in self.visible_indexes():
-                step = self.steps[i]
-                if ((step.kind == "key" and step.sid not in ("effort", "acquisition", "devmethod", "decision"))
-                        or step.sid.startswith("skill:")):
+            rows = self.review_rows()
+            TERM.head(t("review.rich_title" if TERM.rich else "review.title"))
+            self.print_review(rows)
+            if TERM.rich:
+                choice = self.review_menu(rows)
+                if choice == "files":
+                    self.show_files()
+                    TERM.read(t("files.back"))
                     continue
-                if step.section != section:
-                    section = step.section
-                    TERM.say("  %s%s%s" % (TERM.D, t(section), TERM.R))
-                numbered.append(i)
-                label = t(step.label, **self.prompt_args(step))
-                if len(label) > 34:
-                    label = label[:31] + "..."
-                value = self.display(step)
-                if len(value) > 40:
-                    value = value[:37] + "..."
-                TERM.say("   %2d  %-34s %s" % (len(numbered), label, value))
-            TERM.say("  %s%s%s" % (TERM.D, "roles: " + ", ".join(self.active_roles()), TERM.R))
-            TERM.say("  %s%s%s" % (TERM.D, "skills: " + (", ".join(self.chosen_skills()) or "none"), TERM.R))
+                return choice
             raw = TERM.read(t("review.prompt"), "write")
             if raw is None:
                 TERM.say("")
@@ -2137,9 +2906,39 @@ class Wizard(object):
                 return None
             if raw.lower() in ("q", "quit", "n"):
                 return QUIT
-            if raw.isdigit() and 1 <= int(raw) <= len(numbered):
-                return numbered[int(raw) - 1]
+            if raw.lower() == "f":
+                self.show_files()
+                continue
+            if raw.isdigit() and 1 <= int(raw) <= len(rows):
+                return rows[int(raw) - 1][0]
             TERM.dim(t("review.bad"))
+
+    def review_menu(self, rows):
+        """The review's actions as a menu, and "change" as a second menu over the rows."""
+        new, _ = preview_files(self)
+        actions = [(t("review.write"), t("review.write_desc", new=len(new)), t("recommended")),
+                   (t("review.change"), "", ""),
+                   (t("review.files"), t("review.files_desc"), ""),
+                   (t("review.quit_opt"), t("review.quit_desc"), "")]
+        while True:
+            TERM.say("")
+            r = ui.select(TERM, t("review.rich_title"), actions, default=0,
+                          hint=t("review.rich_hint"), keys=self.keys("select"))
+            if r == 0:
+                return None
+            if r == 2:
+                return "files"
+            if r in (3, ui.QUIT):
+                if self.confirm_quit():
+                    return QUIT
+                continue
+            if r == 1:
+                pick = ui.select(TERM, t("review.change"), [
+                    ("%2d  %s" % (n, label), value, "")
+                    for n, (_, _, label, value) in enumerate(rows, 1)], default=0,
+                    keys=self.keys("select"))
+                if isinstance(pick, int):
+                    return rows[pick][0]
 
 
 # ---------------------------------------------------------------- the steps
@@ -2179,6 +2978,96 @@ PRESETS = {
     "regulated": {"effort_mode": "normal", "decision_style": "ask", "dev_method": "item",
                   "tier_rules": "strict"},
 }
+PRESET_HELP = {
+    "solo": "one person moving fast: lean effort, the agent recommends and you decide",
+    "team": "several people, normal depth -- the kit's own defaults",
+    "regulated": "audited or high-stakes work: every material choice asked, strict tiers",
+}
+
+# Menus for the guided setup: (stored value, name, what it means, recommended). The stored
+# values are the ones the charter writers already read, so a menu changes only the asking.
+MODE_OPTIONS = (
+    ("quick", "Use these settings", "asks 4 things it cannot detect, then shows every answer for review", True),
+    ("custom", "Customise", "pick which sections to go through; the rest keep the settings above", False),
+    ("full", "Every question", "all ten sections, about 40 questions, each one explained", False),
+)
+# The sections a Customise run can pick, in the order they are asked.
+SECTION_KEYS = tuple("sec." + sid for sid in SECTION_IDS)
+# The confirm-a-table questions as a menu: (stored key, name key, description key).
+KEY_MENU = (
+    ("y", "k.use", "k.use_desc"),
+    ("e", "k.edit", "k.edit_desc"),
+    ("n", "k.blank", "k.blank_desc"),
+)
+PRESET_OPTIONS = tuple((name, name.capitalize(), PRESET_HELP[name], name == "team")
+                       for name in ("solo", "team", "regulated"))
+EFFORT_OPTIONS = (
+    ("l", "Lean", "least optional work: fastest and cheapest", False),
+    ("n", "Normal", "balanced investigation and review", True),
+    ("x", "Beast", "maximum investigation and verification; slowest", False),
+)
+DEV_METHOD_OPTIONS = (
+    ("i", "Item", "one work item at a time, approvals at each", True),
+    ("e", "Epic", "plan several items together, one plan approval, chosen checkpoints", False),
+)
+DECISION_OPTIONS = (
+    ("a", "Ask", "every material choice put to you, with options and trade-offs", False),
+    ("g", "Guide", "recommends in plain language, then asks you", True),
+    ("p", "Autopilot", "takes the recommended option and logs it for your review", False),
+)
+TIER_OPTIONS = (
+    ("standard", "Standard", "weight by blast radius: small low-risk changes stay light", True),
+    ("strict", "Strict", "the 3.x rules: a full record for every tier", False),
+)
+ACQUISITION_OPTIONS = (
+    ("s", "Standard", "ordinary fetching of sources that permit it", True),
+    ("a", "Advanced", "browser automation, OCR, session flows -- authorised targets only", False),
+)
+PROFILE_OPTIONS = (
+    ("full", "Full", "every process document (about 22k tokens read per change)", True),
+    ("compact", "Compact", "the one-page card instead (about 8k); small context windows", False),
+)
+ENFORCE_OPTIONS = (
+    ("none", "None", "the agent follows the rules by instruction only", True),
+    ("claude", "Agent hooks", "Claude Code refuses commits without an ID, credentials, protected edits", False),
+    ("git", "Git hooks", "git itself refuses staged credentials and ID-less commits, for every tool", False),
+    ("both", "Both", "agent hooks and git hooks", False),
+)
+GIT_TOOLS_OPTIONS = (
+    ("commit", "Commit", ".ai-sdlc/ (manifest, runtime) is versioned with the project", True),
+    ("gitignore", "Ignore", "add .ai-sdlc/ to .gitignore -- teammates will not get it", False),
+    ("exclude", "Ignore locally", "add it to .git/info/exclude; .gitignore is left alone", False),
+)
+CI_OPTIONS = (
+    ("none", "None", "no CI file is written", True),
+    ("github", "GitHub Actions", "a manual-only workflow running the confirmed check commands", False),
+    ("gitlab", "GitLab CI", "the same, as .gitlab-ci.yml", False),
+)
+ACCESS_OPTIONS = (
+    ("Role-Based (RBAC)", "Role-Based (RBAC)", "users hold roles; roles grant permissions", False),
+    ("Simple Owner/User", "Simple Owner/User", "an owner and ordinary users", False),
+    ("Multi-tenant Workspace-Scoped", "Multi-tenant", "every record belongs to a workspace or tenant", False),
+    ("ABAC/ReBAC", "ABAC/ReBAC", "attribute- or relationship-based rules", False),
+    ("None (Public)", "None (Public)", "no sign-in, nothing private", False),
+    (OTHER, "Other", "type your own", False),
+)
+PLATFORM_OPTIONS = (
+    ("none", "None", "a plain repository; only you and your agents change it", True),
+    ("Lovable", "Lovable", "AI app builder that edits and syncs this repo", False),
+    ("Replit", "Replit", "cloud IDE with its own agent and deploys", False),
+    ("Bolt", "Bolt", "AI app builder (.bolt/)", False),
+    ("Firebase-Studio", "Firebase Studio", "Google's cloud IDE, formerly IDX (.idx/)", False),
+    ("Glitch", "Glitch", "hosted editor that runs the app", False),
+    ("CodeSandbox", "CodeSandbox", "cloud sandbox that syncs the repo", False),
+    (OTHER, "Other", "type its name", False),
+)
+MFA_OPTIONS = (
+    ("Optional / User-enabled", "Optional", "users may turn it on", False),
+    ("Enforced for Admin/Privileged only", "Admins only", "required for privileged accounts", False),
+    ("Enforced for all users", "Everyone", "required for every account", False),
+    ("Not required", "Not required", "no second factor", False),
+    (OTHER, "Other", "type your own", False),
+)
 
 
 def apply_preset(o):
@@ -2191,8 +3080,160 @@ def apply_preset(o):
             setattr(o, given, True)
 
 
+def preset_field(w, field):
+    """A flag wins, then the preset chosen in setup, then the kit default."""
+    given = {"effort_mode": "effort_given", "decision_style": "decision_given",
+             "dev_method": "dev_method_given", "tier_rules": "tier_rules_given"}[field]
+    if getattr(w.o, given):
+        return getattr(w.o, field)
+    if w.a.get("preset") in PRESETS:
+        return PRESETS[w.a["preset"]][field]
+    return getattr(w.o, field)
+
+
 def selected_tier_rules(w):
-    return {"standard": "Standard", "strict": "Strict"}.get(w.o.tier_rules, "Standard")
+    raw = w.a.get("tier") or w.o.tier_rules
+    return {"standard": "Standard", "strict": "Strict"}.get(raw, "Standard")
+
+
+def harness_options():
+    return [HARNESS_TITLES[n] for n in HARNESS_ORDER] + [
+        "Codex, Jules, Zed, Factory, opencode, Antigravity (read AGENTS.md directly)"]
+
+
+def default_harness(w):
+    if not w.interactive or not w.target:
+        return [1]
+    found = [i + 1 for i, name in enumerate(HARNESS_ORDER)
+             if any((w.target / rel).exists() for rel in HARNESS_MARKERS.get(name, ()))]
+    return found or [1]
+
+
+def after_harness(w, picked):
+    names = [HARNESS_ORDER[i - 1] for i in picked if 1 <= i <= len(HARNESS_ORDER)]
+    w.a["harnesses"] = names
+    w.o.native_harnesses = ["codex"] if (len(HARNESS_ORDER) + 1) in picked else []
+
+
+def after_profile(w, value):
+    w.o.profile = value
+
+
+def after_enforce(w, value):
+    w.o.hooks = value in ("claude", "both")
+    w.o.git_hooks = "all" if value in ("git", "both") else ""
+
+
+def after_git_tools(w, value):
+    w.o.gitignore_tools = value == "gitignore"
+    w.o.git_exclude = value == "exclude"
+
+
+def after_scaffold_tests(w, value):
+    w.o.scaffold_tests = bool(value)
+
+
+def after_scaffold_ci(w, value):
+    w.o.scaffold_ci = "" if value == "none" else value
+
+
+def preview_files(w):
+    """(new, kept): the paths an install with these answers would add, and the ones it
+    would leave because they exist -- from the same code path as --dry-run, so the
+    preview cannot drift from what is written."""
+    import contextlib
+    import io
+    saved, w.o.dry_run = w.o.dry_run, True
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            inst = Installer(w)
+            inst.run()
+            inst.scaffold()
+            inst.install_hooks()
+            inst.install_git_hooks()
+    except (IOError, OSError, RuntimeError, ValueError):
+        pass
+    finally:
+        w.o.dry_run = saved
+    new, kept = [], []
+    for line in out.getvalue().splitlines():
+        m = re.match(r"^\s+(would add|skip \(exists\))\s+(\S.*)$", line)
+        if m:
+            (new if m.group(1) == "would add" else kept).append(m.group(2).strip())
+    return new, kept
+
+
+def file_tree(paths):
+    """Paths folded to folders with counts: 'docs/process/  14 files'."""
+    groups = []
+    counts = {}
+    for rel in paths:
+        parts = rel.split("/")
+        key = rel if len(parts) == 1 else "/".join(parts[:2]) + ("/" if len(parts) > 2 else "")
+        if len(parts) == 2:
+            key = parts[0] + "/"
+        if key not in counts:
+            groups.append(key)
+            counts[key] = 0
+        counts[key] += 1
+    width = max([len(k) for k in groups] or [0])
+    return ["%-*s  %s" % (width, k, ("%d files" % counts[k]) if counts[k] > 1 else
+                          ("1 file" if k.endswith("/") else "")) for k in groups]
+
+
+def equivalent_command(w):
+    """The same install choices as flags, so a setup can be repeated or scripted. -y does
+    not carry the charter's free-text answers -- those live in the charter itself."""
+    import shlex
+    a, o = w.a, w.o
+    parts = ["./install.sh", shlex.quote(str(w.target or "<project>")),
+             a.get("prefix") or o.prefix or "<PREFIX>", "-y"]
+    docs = a.get("docsdir") or o.docs_dir
+    if docs != "docs":
+        parts += ["--docs-dir", shlex.quote(docs)]
+    names = a.get("harnesses")
+    if names is None:
+        names = ["claude"] if o.harnesses is None else list(o.harnesses)
+    names = list(names) + list(o.native_harnesses)
+    if names != ["claude"] and names:
+        parts += ["--harness", ",".join(names)]
+    if w.fact("deploy") or o.deploy is not None:
+        parts += ["--deploy", ",".join(selected_platforms(w)) or "none"]
+    chosen = {"effort_mode": selected_effort(w).lower(),
+              "decision_style": selected_decision(w).lower(),
+              "dev_method": selected_dev_method(w).lower(),
+              "tier_rules": selected_tier_rules(w).lower()}
+    preset = a.get("preset") or o.preset
+    if preset in PRESETS and PRESETS[preset] == chosen:
+        if preset != "team":
+            parts += ["--preset", preset]
+    else:
+        defaults = {"effort_mode": "normal", "decision_style": "guide",
+                    "dev_method": "item", "tier_rules": "standard"}
+        for field, flag in (("effort_mode", "--effort-mode"), ("decision_style", "--decision-style"),
+                            ("dev_method", "--dev-method"), ("tier_rules", "--tier-rules")):
+            if chosen[field] != defaults[field]:
+                parts += [flag, chosen[field]]
+    if selected_acquisition(w) == "Advanced":
+        parts += ["--acquisition-profile", "advanced"]
+    if o.profile == "compact":
+        parts += ["--profile", "compact"]
+    if not o.want_skills or a.get("skills_pick") == []:
+        parts.append("--no-skills")
+    if o.hooks:
+        parts.append("--hooks")
+    if o.git_hooks:
+        parts += ["--git-hooks"] + (["secrets"] if o.git_hooks == "secrets" else [])
+    if o.gitignore_tools:
+        parts.append("--gitignore-tools")
+    if o.git_exclude:
+        parts.append("--git-exclude")
+    if o.scaffold_tests:
+        parts.append("--scaffold-tests")
+    if o.scaffold_ci:
+        parts += ["--scaffold-ci", o.scaffold_ci]
+    return " ".join(parts)
 
 
 def selected_effort(w):
@@ -2261,19 +3302,91 @@ def after_cmds_ok(w, value):
         seed_from_detection(w)
 
 
-def after_skills_ok(w, value):
-    for name, _, _, _ in SKILL_RULES:
+def skill_items(w):
+    return [(name, why if on else "off: " + why) for name, on, why in w.skills(rules_only=True)]
+
+
+def default_skills(w):
+    return [i for i, (_, on, _) in enumerate(w.skills(rules_only=True), 1) if on]
+
+
+def after_skills_pick(w, picked):
+    """A deliberate pick pins every skill on or off; an untouched one leaves them to the
+    rules, so a later change of project type still changes the skills."""
+    for i, (name, _, _) in enumerate(w.skills(rules_only=True), 1):
         key = "skill:" + name
-        if value == "n":
-            w.a[key] = False
-        elif value == "y" and key in w.a:
+        if "skills_pick" in w.explicit:
+            w.a[key] = i in picked
+        elif key in w.a:
             del w.a[key]
+
+
+def after_facts_pick(w, picked):
+    if "facts_pick" not in w.explicit:
+        return
+    for i, fid in enumerate(FACT_IDS, 1):
+        w.a[fid] = i in picked
+        w.explicit.add(fid)
+
+
+def show_plan(w):
+    """The start screen: what detection found and what the recommended settings would
+    install, so the first decision is made with the outcome in view."""
+    if not w.target:
+        return
+    a, o, g = w.a, w.o, TERM.g
+    dot = " %s " % g["dot"]
+    name = a.get("name") or w.target.name
+    prefix = o.prefix or w.recovered_prefix() or w.derive_prefix()
+    types = [PROJECT_TYPES[i - 1].split(" (")[0] for i in (a.get("types") or w.det.types)]
+    if o.harnesses is None:
+        tools = [harness_options()[i - 1].split(" (")[0] for i in default_harness(w)]
+    else:
+        tools = [HARNESS_TITLES.get(n, n) for n in o.harnesses]
+    stack = dot.join(a.get(sid) for sid in ("s_lang", "s_pm", "s_fw", "s_db") if a.get(sid))
+    found = [key for sid, _, key in CMD_FIELDS if a.get(sid)]
+    preset = o.preset or "team"
+    on = [s for s in w.skills(rules_only=True) if s[1]]
+    docs = default_docsdir(w)
+    rows = [
+        (t("plan.name"), "%s  (%s-1, %s-2, ...)" % (name, prefix, prefix)),
+        (t("plan.types"), ", ".join(types) or t("plan.nothing")),
+        (t("plan.tools"), ", ".join(tools)),
+        (t("plan.stack"), stack or t("plan.nothing")),
+        (t("plan.checks"), t("plan.checks_value", n=len(found), names=", ".join(found))
+         if found else t("plan.checks_none")),
+    ]
+    if w.det.deploy:
+        rows.append((t("plan.deploy"), ", ".join(DEPLOY_LABELS.get(p, p) for p in w.det.deploy)))
+    if w.det.platforms:
+        rows.append((t("plan.platform"), ", ".join(w.det.platforms)))
+    rows += [
+        (t("plan.style"), "%s: %s" % (preset.capitalize(), PRESET_HELP[preset])),
+        (t("plan.roles"), "%d: %s" % (len(w.active_roles()), ", ".join(w.active_roles()))),
+        (t("plan.skills"), t("plan.skills_value", n=len(on), total=len(w.skills(rules_only=True)))),
+        (t("plan.writes"), "AGENTS.md, %s/, .ai-sdlc/, .claude/commands/, .claude/skills/" % docs),
+    ]
+    width = max(len(r[0]) for r in rows)
+    if TERM.rich:
+        TERM.title(t("plan.title"), t("plan.found", path=w.target))
+        for label, value in rows:
+            TERM.bar("%-*s  %s%s" % (width, label, TERM.B, value), "")
+        if w.existing_docs():
+            TERM.bar(t("plan.existing"), TERM.Y)
+        TERM.bar()
+    else:
+        TERM.dim(t("plan.title") + " -- " + t("plan.found", path=w.target))
+        for label, value in rows:
+            TERM.say("    %-*s  %s" % (width, label, value))
+        if w.existing_docs():
+            TERM.dim(t("plan.existing"))
 
 
 def show_facts(w):
     TERM.dim(t("hint.facts"))
     for fid in FACT_IDS:
-        TERM.say("    %-44s %s" % (FACT_LABELS[fid], "yes" if w.fact(fid) else "no"))
+        width = max(len(v) for v in FACT_LABELS.values())
+        TERM.say("    %-*s  %s" % (width, FACT_LABELS[fid], "yes" if w.fact(fid) else "no"))
 
 
 def show_stack(w):
@@ -2308,13 +3421,6 @@ def show_i18n(w):
         TERM.dim(t("hint.i18n", locales=", ".join(w.det.locales)))
     elif w.det.i18n_libs:
         TERM.dim(t("hint.i18n", locales=", ".join(w.det.i18n_libs)))
-
-
-def show_skills(w):
-    TERM.dim(t("hint.skills"))
-    for name, on, why in w.skills():
-        TERM.say("    [%s] %-26s %s%s%s" % ("x" if on else " ", name, TERM.D,
-                                            why if on else "off: " + why, TERM.R))
 
 
 def default_shape(w):
@@ -2421,46 +3527,73 @@ def platform_cell(ids):
 
 
 def build_steps(w):
+    o = w.o
+    # Flags given on the command line answer their question; captured once, because the
+    # answers below write into the same options and must not hide their own question.
+    hooks_given = bool(o.hooks or o.git_hooks)
+    ignore_given = bool(o.gitignore_tools or o.git_exclude)
+    tests_given, ci_given = bool(o.scaffold_tests), bool(o.scaffold_ci)
+    profile_given, harness_given, preset_given = o.profile_given, o.harnesses is not None, bool(o.preset)
+    asking = lambda w: w.interactive
     steps = [
-        Step("dest", "sec.dest", "dest", "q.dest", help="h.dest", cascade=True,
+        Step("dest", "sec.dest", "dest", "q.dest", help="h.dest", cascade=True, quick=True,
              default=lambda w: str(w.target or ""), after=after_dest, label="l.dest"),
 
-        Step("name", "sec.project", "text", "q.name", label="l.name",
+        Step("plan", "sec.mode", "show", "plan.title", before=show_plan, quick=True,
+             when=asking),
+        Step("mode", "sec.mode", "choice", "q.mode", help="h.mode", quick=True,
+             options=MODE_OPTIONS, default="quick", cascade=True,
+             when=lambda w: w.interactive and not w.o.mode),
+        Step("sections", "sec.mode", "multichoice", "q.sections", help="h.sections",
+             label="l.sections", options=lambda w: [t(k) for k in SECTION_KEYS], default=[],
+             cascade=True, when=lambda w: w.interactive and w.mode() == "custom"
+             and not w.o.sections),
+
+        Step("name", "sec.project", "text", "q.name", help="h.name", label="l.name",
              default=lambda w: w.a.get("name") or (w.target.name if w.target else "")),
-        Step("what", "sec.project", "text", "q.what", help="h.what", label="l.what"),
+        Step("what", "sec.project", "text", "q.what", help="h.what", label="l.what", quick=True),
         Step("prefix", "sec.project", "text", "q.prefix", help="h.prefix", label="l.prefix",
-             validate=validate_prefix,
+             validate=validate_prefix, quick=True,
              default=lambda w: (w.o.prefix or w.recovered_prefix() or w.derive_prefix())),
         Step("owner", "sec.project", "text", "q.owner", help="h.owner", label="l.owner",
              default=lambda w: w.git("config", "user.name")),
-        Step("repo", "sec.project", "text", "q.repo", label="l.repo",
+        Step("repo", "sec.project", "text", "q.repo", help="h.repo", label="l.repo",
              default=lambda w: w.git("remote", "get-url", "origin")),
 
         Step("types", "sec.build", "multichoice", "q.types", help="h.types", label="l.types",
              options=list(PROJECT_TYPES), default=lambda w: w.det.types,
-             after=after_types, cascade=True),
-        Step("facts_ok", "sec.build", "key", "q.facts", options="ye", default="y",
-             before=show_facts),
+             after=after_types, cascade=True, quick=True),
+        Step("facts_ok", "sec.build", "key", "q.facts", help="h.facts_ok", options="ye",
+             default="y", before=show_facts),
+        Step("facts_pick", "sec.build", "multichoice", "q.facts_pick", help="h.facts_pick",
+             label="l.facts_pick", options=lambda w: [FACT_LABELS[f] for f in FACT_IDS],
+             default=lambda w: [i + 1 for i, f in enumerate(FACT_IDS) if w.fact(f)],
+             none_ok=True, after=after_facts_pick, when=lambda w: w.a.get("facts_ok") == "e"),
     ]
-    for fid, prompt in zip(FACT_IDS, ("q.ui", "q.visual", "q.public", "q.deploy",
-                                      "q.pii", "q.conv")):
-        steps.append(Step(fid, "sec.build", "yesno", prompt,
-                          default=(lambda f: (lambda w: w.fact(f)))(fid),
-                          when=lambda w: w.a.get("facts_ok") == "e"))
 
-    steps.append(Step("stack_ok", "sec.stack", "key", "q.stack_ok", options="yen",
-                      default="y", before=show_stack, after=after_stack_ok))
-    for sid, prompt, _ in STACK_FIELDS:
-        steps.append(Step(sid, "sec.stack", "text", prompt,
-                          default=(lambda s: (lambda w: w.a.get(s, "")))(sid),
-                          when=lambda w: w.a.get("stack_ok") == "e"))
+    steps.append(Step("harness_pick", "sec.tools", "multichoice", "q.harness", help="h.harness",
+                      label="l.harness", options=harness_options(), default=default_harness,
+                      after=after_harness, quick=True,
+                      when=lambda w: w.interactive and not harness_given))
 
-    steps.append(Step("cmds_ok", "sec.cmds", "key", "q.cmds_ok", options="yen",
-                      default="y", before=show_cmds, after=after_cmds_ok))
-    for sid, prompt, _ in CMD_FIELDS:
-        steps.append(Step(sid, "sec.cmds", "text", prompt,
-                          default=(lambda s: (lambda w: w.a.get(s, "")))(sid),
-                          when=lambda w: w.a.get("cmds_ok") == "e"))
+    for section, ok, fields, empty in (("sec.stack", "stack_ok", STACK_FIELDS, "not.detected"),
+                                       ("sec.cmds", "cmds_ok", CMD_FIELDS, "none.found")):
+        # "Change some" picks the rows first, so correcting one command is one question
+        # rather than eighteen.
+        steps.append(Step(ok, section, "key", "q." + ok, help="h." + ok, options="yen",
+                          default="y", before=show_stack if ok == "stack_ok" else show_cmds,
+                          after=after_stack_ok if ok == "stack_ok" else after_cmds_ok))
+        pick = ok.replace("_ok", "_pick")
+        steps.append(Step(pick, section, "multichoice", "q.pick", help="h.pick",
+                          options=(lambda f, e: (lambda w: [(t(key), w.a.get(sid) or t(e))
+                                                            for sid, key, _ in f]))(fields, empty),
+                          default=[], none_ok=True,
+                          when=(lambda k: (lambda w: w.a.get(k) == "e"))(ok)))
+        for n, (sid, prompt, _) in enumerate(fields, 1):
+            steps.append(Step(sid, section, "text", prompt,
+                              default=(lambda s: (lambda w: w.a.get(s, "")))(sid),
+                              when=(lambda k, p, n: (lambda w: w.a.get(k) == "e"
+                                                     and n in (w.a.get(p) or [])))(ok, pick, n)))
 
     steps += [
         Step("shape", "sec.arch", "text", "q.shape", help="h.shape", label="l.shape",
@@ -2469,6 +3602,7 @@ def build_steps(w):
         Step("expensive", "sec.arch", "text", "q.expensive", help="h.expensive", label="l.expensive"),
 
         Step("multilingual", "sec.lang", "yesno", "q.multilingual", cascade=True, label="l.multilingual",
+             help="h.multilingual",
              before=show_i18n,
              when=lambda w: w.fact("ui") or w.fact("public"),
              default=lambda w: len(w.det.locales) > 1 or bool(w.det.i18n_libs)),
@@ -2478,63 +3612,82 @@ def build_steps(w):
              default=lambda w: w.det.catalog, when=lambda w: w.multilingual()),
         Step("translation", "sec.lang", "text", "q.translation", help="h.translation", label="l.translation",
              when=lambda w: w.multilingual()),
-        Step("glossary", "sec.lang", "text", "q.glossary", label="l.glossary",
+        Step("glossary", "sec.lang", "text", "q.glossary", help="h.glossary", label="l.glossary",
              when=lambda w: w.multilingual()),
 
-        Step("branch", "sec.process", "text", "q.branch", label="l.branch",
+        Step("branch", "sec.process", "text", "q.branch", help="h.branch", label="l.branch",
              default=lambda w: w.git("symbolic-ref", "--short", "HEAD") or "main"),
-        Step("direct", "sec.process", "yesno", "q.direct", default=False, label="l.direct"),
+        Step("direct", "sec.process", "yesno", "q.direct", help="h.direct", default=False,
+             label="l.direct"),
         Step("approvers", "sec.process", "text", "q.approvers", help="h.approvers", label="l.approvers",
              default=lambda w: w.a.get("owner", "")),
-        Step("staleness", "sec.process", "text", "q.staleness", default="90 days", label="l.staleness"),
-        Step("effort", "sec.process", "key", "q.effort", help="h.effort",
-             options="lnx", default=lambda w: {"lean": "l", "normal": "n", "beast": "x"}[
-                 w.o.effort_mode], label="l.effort"),
-        Step("devmethod", "sec.process", "key", "q.devmethod", help="h.devmethod",
-             options="ie", default=lambda w: {"item": "i", "epic": "e"}[w.o.dev_method],
-             label="l.devmethod"),
-        Step("decision", "sec.process", "key", "q.decision", help="h.decision",
-             options="agp", default=lambda w: {"ask": "a", "guide": "g", "autopilot": "p"}[
-                 w.o.decision_style], label="l.decision"),
-        Step("acquisition", "sec.process", "key", "q.acquisition", help="h.acquisition",
-             options="sa", default=lambda w: {"standard": "s", "advanced": "a"}[
+        Step("staleness", "sec.process", "text", "q.staleness", help="h.staleness",
+             default="90 days", label="l.staleness"),
+        Step("preset", "sec.process", "choice", "q.preset", help="h.preset", label="l.preset",
+             options=PRESET_OPTIONS, default="team",
+             when=lambda w: w.interactive and not preset_given),
+        Step("effort", "sec.process", "choice", "q.effort", help="h.effort",
+             options=EFFORT_OPTIONS, default=lambda w: {"lean": "l", "normal": "n", "beast": "x"}[
+                 preset_field(w, "effort_mode")], label="l.effort"),
+        Step("devmethod", "sec.process", "choice", "q.devmethod", help="h.devmethod",
+             options=DEV_METHOD_OPTIONS, default=lambda w: {"item": "i", "epic": "e"}[
+                 preset_field(w, "dev_method")], label="l.devmethod"),
+        Step("decision", "sec.process", "choice", "q.decision", help="h.decision",
+             options=DECISION_OPTIONS, default=lambda w: {"ask": "a", "guide": "g", "autopilot": "p"}[
+                 preset_field(w, "decision_style")], label="l.decision"),
+        Step("tier", "sec.process", "choice", "q.tier", help="h.tier", label="l.tier",
+             options=TIER_OPTIONS, default=lambda w: preset_field(w, "tier_rules"),
+             when=asking),
+        Step("acquisition", "sec.process", "choice", "q.acquisition", help="h.acquisition",
+             options=ACQUISITION_OPTIONS, default=lambda w: {"standard": "s", "advanced": "a"}[
                  w.o.acquisition_profile], label="l.acquisition", when=lambda w: w.fact("acquire")),
-        Step("approval", "sec.process", "text", "q.approval", default=default_approval, label="l.approval"),
+        Step("approval", "sec.process", "text", "q.approval", help="h.approval",
+             default=default_approval, label="l.approval"),
         Step("forbidden", "sec.process", "text", "q.forbidden", help="h.forbidden", label="l.forbidden"),
-        Step("platform", "sec.process", "text", "q.platform", help="h.platform", label="l.platform",
-             default=lambda w: ", ".join(w.det.platforms) or "none"),
+        Step("platform", "sec.process", "choice", "q.platform", help="h.platform", label="l.platform",
+             options=PLATFORM_OPTIONS, default=lambda w: ", ".join(w.det.platforms) or "none"),
         Step("deploy_targets", "sec.process", "multichoice", "q.deploy", help="h.deploy",
              label="l.deploy", options=deploy_options(), default=default_deploy,
-             when=lambda w: w.fact("deploy")),
+             when=lambda w: w.fact("deploy"), none_ok=True),
 
-        Step("a11y", "sec.standards", "text", "q.a11y", default="WCAG 2.2 AA", label="l.a11y",
+        Step("a11y", "sec.standards", "text", "q.a11y", help="h.a11y", default="WCAG 2.2 AA",
+             label="l.a11y",
              when=lambda w: w.fact("ui")),
         Step("outcome", "sec.standards", "text", "q.outcome", help="h.outcome", label="l.outcome",
              when=lambda w: w.fact("conv")),
-        Step("access_model", "sec.standards", "text", "q.access_model", help="h.access_model",
-             label="l.access_model",
+        Step("access_model", "sec.standards", "choice", "q.access_model", help="h.access_model",
+             label="l.access_model", options=ACCESS_OPTIONS,
              default=lambda w: "None (Public)" if not (w.fact("pii") or bool(w.a.get("s_auth"))) else "Role-Based (RBAC)",
              when=lambda w: bool(w.interactive and (w.fact("pii") or bool(w.a.get("s_auth"))))),
-        Step("mfa_policy", "sec.standards", "text", "q.mfa_policy", help="h.mfa_policy",
-             label="l.mfa_policy",
+        Step("mfa_policy", "sec.standards", "choice", "q.mfa_policy", help="h.mfa_policy",
+             label="l.mfa_policy", options=MFA_OPTIONS,
              default=lambda w: "Not required" if not (w.fact("pii") or bool(w.a.get("s_auth"))) else "Optional / User-enabled",
              when=lambda w: bool(w.interactive and (w.fact("pii") or bool(w.a.get("s_auth"))))),
 
-        Step("docsdir", "sec.install", "text", "q.docsdir", default=default_docsdir, label="l.docsdir",
+        Step("docsdir", "sec.install", "text", "q.docsdir", help="h.docsdir",
+             default=default_docsdir, label="l.docsdir",
              validate=validate_docsdir),
-        Step("commands", "sec.install", "yesno", "q.commands", default=True, label="l.commands"),
-        Step("gitignore_tools", "sec.install", "yesno", "q.gitignore_tools", help="h.gitignore_tools",
-             default=lambda w: bool(w.o.gitignore_tools), label="l.gitignore_tools"),
-        Step("skills_ok", "sec.install", "key", "q.skills", options="yen", default="y",
-             before=show_skills, after=after_skills_ok),
+        Step("profile", "sec.install", "choice", "q.profile", help="h.profile", label="l.profile",
+             options=PROFILE_OPTIONS, default=lambda w: w.o.profile, after=after_profile,
+             when=lambda w: w.interactive and not profile_given),
+        Step("commands", "sec.install", "yesno", "q.commands", help="h.commands", default=True,
+             label="l.commands"),
+        Step("enforce", "sec.install", "choice", "q.enforce", help="h.enforce", label="l.enforce",
+             options=ENFORCE_OPTIONS, default="none", after=after_enforce,
+             when=lambda w: w.interactive and not hooks_given),
+        Step("git_tools", "sec.install", "choice", "q.git_tools", help="h.git_tools",
+             label="l.gitignore_tools", options=GIT_TOOLS_OPTIONS, default="commit",
+             after=after_git_tools, when=lambda w: w.interactive and not ignore_given),
+        Step("scaffold_tests", "sec.install", "yesno", "q.scaffold_tests", help="h.scaffold_tests",
+             label="l.scaffold_tests", default=False, after=after_scaffold_tests,
+             when=lambda w: w.interactive and not tests_given),
+        Step("scaffold_ci", "sec.install", "choice", "q.scaffold_ci", help="h.scaffold_ci",
+             label="l.scaffold_ci", options=CI_OPTIONS, default="none", after=after_scaffold_ci,
+             when=lambda w: w.interactive and not ci_given),
+        Step("skills_pick", "sec.install", "multichoice", "q.skills", help="h.skills_pick",
+             label="l.skills", options=skill_items, default=default_skills,
+             after=after_skills_pick, none_ok=True, when=lambda w: w.o.want_skills),
     ]
-    for name, _, _, _ in SKILL_RULES:
-        if not (SRC / "optional" / "skills" / name).is_dir():
-            continue
-        steps.append(Step("skill:" + name, "sec.install", "yesno", name,
-                          label=name,
-                          default=(lambda n: (lambda w: dict((s[0], s[1]) for s in w.skills()).get(n, False)))(name),
-                          when=lambda w: w.a.get("skills_ok") == "e"))
     return steps
 
 
@@ -2555,6 +3708,7 @@ def resolve_target(path, options, term):
             term.say("  would create %s after review" % p)
         else:
             term.err(t("err.no_dir", path=str(p)))
+            term.err(t("hint.create"))
             return None
     p = p.resolve()
     if p == SRC:
@@ -3023,7 +4177,7 @@ class Installer(object):
         self.harnesses = set()
         self.platforms = selected_platforms(w)
         chosen = w.a.get("harnesses")
-        if not chosen:
+        if chosen is None:
             chosen = ["claude"] if w.o.harnesses is None else w.o.harnesses
         for name in chosen:
             self.harnesses.update(HARNESS_ALIASES.get(name, ()))
@@ -3392,7 +4546,7 @@ class Installer(object):
             self.merge_json_hooks(".cursor/hooks.json", cursor)
 
     def apply_git_ignores(self):
-        want_gitignore = bool(self.w.a.get("gitignore_tools") if getattr(self.w, "interactive", False) else self.o.gitignore_tools)
+        want_gitignore = bool(self.o.gitignore_tools)
         want_exclude = bool(self.o.git_exclude)
 
         if want_gitignore:
@@ -3658,7 +4812,7 @@ class Installer(object):
             "harnesses": sorted(self.wired),
             "platform": w.a.get("platform", "") if w.a.get("platform", "none") != "none" else "",
             "deploy_platforms": installed_platforms(self.target, self.docs, self.platforms),
-            "gitignore_tools": bool(w.a.get("gitignore_tools") if getattr(w, "interactive", False) else self.o.gitignore_tools),
+            "gitignore_tools": bool(self.o.gitignore_tools),
             "git_exclude": bool(self.o.git_exclude),
             "detected": {
                 "adapters": d.adapters,
@@ -3905,7 +5059,7 @@ class Installer(object):
         text = fill_row(text, "**Default effort mode**", selected_effort(w))
         text = fill_row(text, "**Acquisition profile**", selected_acquisition(w))
         text = fill_row(text, "**Development method**", selected_dev_method(w))
-        if self.o.tier_rules_given:
+        if self.o.tier_rules_given or a.get("tier"):
             text = fill_row(text, "**Tier rules**", selected_tier_rules(w))
         text = fill_row(text, "**Decision style**", selected_decision(w))
         if a.get("access_model"):
@@ -4289,8 +5443,10 @@ def upgrade(target, o):
         return 0
 
     print("Upgrading Nuhut kit in %s to v%s" % (target, VERSION))
-    print("  (%s portable docs and already-installed skills -- project records untouched)"
+    print("  refreshes the kit's own files: %s/process, roles, templates, platforms, the"
           % docs)
+    print("  /sdlc-* commands and the skills already installed. Your charter, backlog,")
+    print("  worklog and other project records are never touched.")
     print("")
     if not previous:
         print("  warning        legacy install has no manifest; backing up portable files "
@@ -4357,14 +5513,24 @@ def upgrade(target, o):
         sys.stderr.write("error: upgrade failed and managed files were restored: %s\n" % exc)
         return 1
     print("")
-    print("Done: %d updated, %d obsolete managed files removed." %
-          (inst.updated, len(obsolete)))
+    if inst.updated or obsolete:
+        print("Done: %d updated, %d obsolete managed files removed." %
+              (inst.updated, len(obsolete)))
+    else:
+        print("Already up to date with v%s: nothing changed." % VERSION)
     print("")
     for note in notes:
         print("note: %s" % note)
         print("")
-    print("New skills shipped by this version are not added by --upgrade. To see them:")
-    print("  ls %s" % (SRC / "optional" / "skills"))
+    have = target / ".claude" / "skills"
+    missing = [(name, why) for name, _, why, _ in SKILL_RULES
+               if (SRC / "optional" / "skills" / name).is_dir() and not (have / name).is_dir()]
+    if missing:
+        print("%d kit skills are not installed here (--upgrade never adds one):" % len(missing))
+        print("  %s" % ", ".join(name for name, _ in missing))
+        print("What each is for: install.sh --list skills. To add the ones that fit, run the")
+        print("guided setup again; it only adds files that are missing:")
+        print("  %s/install.sh %s --full" % (SRC, target))
     return 0
 
 
@@ -4385,6 +5551,11 @@ def report(w, inst, skills, tailored):
         print("Done: %d added, %d skipped." % (inst.added, inst.skipped))
     if skills:
         print("Skills installed: %s" % " ".join(skills))
+    if inst.fresh:
+        print("")
+        print("%s:" % t("outro.got"))
+        for line in file_tree(sorted(inst.fresh)):
+            print("  " + line)
     print("")
 
     if w.det.platforms:
@@ -4408,12 +5579,6 @@ def report(w, inst, skills, tailored):
             print("      The charter already existed, so it was not edited: add %s to its"
                   % ", ".join(installed))
             print("      'Deployment platforms' row yourself -- the row is authoritative.")
-        print("")
-    elif w.det.deploy and not w.interactive:
-        print("note: deployment detected for %s. Detection is not a decision, so no"
-              % ", ".join(w.det.deploy))
-        print("      platform checklist was installed. Confirm it with --deploy %s"
-              % ",".join(w.det.deploy))
         print("")
     if inst.wired:
         print("Wired to read AGENTS.md: %s" % " ".join(inst.wired))
@@ -4445,13 +5610,45 @@ def report(w, inst, skills, tailored):
         print("     was not found. A blank cell is read as Unknown, never as 'not applicable'.")
     else:
         print("  1. Fill in %s/project/charter.md -- nothing else is reliable until you do." % docs)
+    blanks = charter_blanks(w.target, docs)
+    if blanks:
+        print("     " + t("outro.later"))
+        for line, label in blanks[:6]:
+            print("       %s/project/charter.md:%-4d %s" % (docs, line, label))
+        if len(blanks) > 6:
+            print("       " + t("outro.later_more", n=len(blanks) - 6))
     print("  2. Fill in the Project overrides section at the end of AGENTS.md.")
-    print("  3. Check nothing was left unsubstituted:")
-    print("       grep -rn '{{' %s/%s %s/AGENTS.md %s/.claude"
-          % (w.target, docs, w.target, w.target))
     if ("%s/project/architecture.md" % docs) in tailored:
-        print("  4. Confirm every _(detected at install)_ row in %s/project/architecture.md."
+        print("  3. Confirm every _(detected at install)_ row in %s/project/architecture.md."
               % docs)
+    leftovers = leftover_placeholders(w.target, docs)
+    if leftovers:
+        print("")
+        print("WARNING: unsubstituted {{...}} placeholders remain in:")
+        for rel in leftovers[:10]:
+            print("           %s" % rel)
+        if len(leftovers) > 10:
+            print("           ... and %d more" % (len(leftovers) - 10))
+    else:
+        print("")
+        print("Checked: no {{...}} placeholder was left unsubstituted.")
+
+    print("")
+    print("Start working:")
+    chosen = inst.w.a.get("harnesses")
+    if chosen is None:
+        chosen = ["claude"] if inst.o.harnesses is None else inst.o.harnesses
+    if "claude" in chosen and w.a.get("commands", True):
+        print("  Claude Code    open the project and run  /sdlc-plan <what you want to build>")
+        print("                 then /sdlc-build, /sdlc-verify, /sdlc-review, /sdlc-log")
+    others = [HARNESS_TITLES.get(n, n) for n in chosen if n != "claude"]
+    if others or inst.o.native_harnesses:
+        names = ", ".join(others + (["Codex and others"] if inst.o.native_harnesses else []))
+        print("  %-14s ask it to \"follow AGENTS.md\" and describe the change you want" %
+              ("Other tools" if len(others) != 1 else others[0]))
+        print("                 (%s)" % names)
+    print("  Health check   python3 %s/.ai-sdlc/bin/sdlc.py doctor" % w.target)
+    print("  See the state  python3 %s/.ai-sdlc/bin/sdlc.py view --serve" % w.target)
 
     if w.interactive:
         rec = ["product-brief", "test-plan"]
@@ -4476,9 +5673,69 @@ def report(w, inst, skills, tailored):
             print("This project ships in more than one language, so:")
             print("  - %s/process/08-content-and-translation.md is now binding." % docs)
             print("  - the localisation role is active in the charter's roster.")
+    if w.interactive:
+        print("")
+        print(t("review.command"))
+        print("  %s" % equivalent_command(w))
+    else:
+        defaults_taken(w, inst)
     print("")
     print("Later, to pick up a newer version of the portable standards:")
-    print("  install.sh %s %s --upgrade" % (w.target, inst.ctx.get("PREFIX", "<PREFIX>")))
+    print("  %s/install.sh %s %s --upgrade" % (SRC, w.target, inst.ctx.get("PREFIX", "<PREFIX>")))
+
+
+def charter_blanks(target, docs):
+    """(line, label) for each charter row still holding only its _(hint)_ or nothing."""
+    path = Path(target) / docs / "project" / "charter.md"
+    if not path.is_file():
+        return []
+    rows = []
+    for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        m = re.match(r"^\| \*\*(.+?)\*\* \|\s*(_\(.*\)_)?\s*\|\s*$", line)
+        if m:
+            rows.append((n, m.group(1)))
+    return rows
+
+
+def leftover_placeholders(target, docs):
+    """Installed files that still hold a {{TOKEN}}: a literal {{PREFIX}} becomes a path
+    the agent follows, so this is checked here instead of left to the reader."""
+    found = []
+    pattern = re.compile(r"\{\{(PROJECT_NAME|PREFIX|DOCS_DIR|KIT_VERSION)\}\}")
+    roots = [Path(target) / docs, Path(target) / ".claude", Path(target) / "AGENTS.md"]
+    for root in roots:
+        files = [root] if root.is_file() else (sorted(root.rglob("*.md")) if root.is_dir() else [])
+        for path in files:
+            try:
+                if pattern.search(path.read_text(encoding="utf-8", errors="replace")):
+                    found.append(str(path.relative_to(target)))
+            except (IOError, OSError):
+                continue
+    return found
+
+
+def defaults_taken(w, inst):
+    """-y answers nothing, so say what it assumed and which flag changes each."""
+    o = inst.o
+    rows = []
+    if not o.prefix:
+        rows.append(("work item prefix", inst.ctx.get("PREFIX", "none"),
+                     "give it as the second argument"))
+    rows.append(("AI tools", ", ".join((o.harnesses if o.harnesses is not None else ["claude"])
+                                       + o.native_harnesses) or "none", "--harness, see --list harnesses"))
+    if o.deploy is None:
+        found = ", ".join(w.det.deploy) if w.det.deploy else ""
+        rows.append(("deploy checklists", "none" + (" (detected: %s)" % found if found else ""),
+                     "--deploy %s" % (",".join(w.det.deploy) if found else "<list>")))
+    if not o.preset and not (o.effort_given or o.decision_given or o.dev_method_given):
+        rows.append(("working style", "charter defaults (team)", "--preset solo|team|regulated"))
+    if not (o.hooks or o.git_hooks):
+        rows.append(("enforcement", "off", "--hooks and/or --git-hooks"))
+    rows.append(("charter", "left blank, nothing declared", "run without -y for guided setup"))
+    print("")
+    print("Defaults taken (no questions were asked):")
+    for what, value, how in rows:
+        print("  %-18s %-34s %s" % (what, value, how))
 
 
 # ---------------------------------------------------------------- main
@@ -4496,6 +5753,8 @@ def main(argv):
     interactive = (not o.assume_yes and not o.upgrade and TERM.interactive_in)
     if target is None and not interactive:
         usage()
+    if interactive:
+        TERM.enable_rich(o.plain)
 
     if o.upgrade:
         return upgrade(target, o)
@@ -4508,8 +5767,13 @@ def main(argv):
     if w.interactive:
         print("")
         print("%s%s%s" % (TERM.B, t("intro.title", version=VERSION), TERM.R))
-        TERM.dim(t("intro.keys1"))
-        TERM.dim(t("intro.keys2"))
+        TERM.dim(t("intro.what"))
+        TERM.say("")
+        if TERM.rich:
+            TERM.dim(t("intro.rich", **TERM.g))
+        else:
+            TERM.dim(t("intro.keys1"))
+            TERM.dim(t("intro.keys2"))
         TERM.dim(t("intro.keys3"))
 
     if not w.run(0):
@@ -4536,27 +5800,58 @@ def main(argv):
         w.a.setdefault("docsdir", find_docs(w.target, o.docs_dir) or o.docs_dir)
 
     inst = Installer(w)
+    global WRITING
+    WRITING = True
+    import contextlib
+    import io
+    # The arrow-key setup already showed every path on request; while copying it prints
+    # what needs attention, and the report's "What you got" tree stands in for the list.
+    listing = io.StringIO() if TERM.rich else sys.stdout
     try:
-        skills = inst.run()
-        tailored = inst.tailor()
-        inst.scaffold()
-        inst.install_hooks()
-        inst.install_git_hooks()
-        inst.apply_git_ignores()
-        inst.record_manifest()
-        inst.write_profile()
+        with contextlib.redirect_stdout(listing):
+            skills = inst.run()
+            tailored = inst.tailor()
+            inst.scaffold()
+            inst.install_hooks()
+            inst.install_git_hooks()
+            inst.apply_git_ignores()
+            inst.record_manifest()
+            inst.write_profile()
     except (IOError, OSError, RuntimeError) as exc:
         sys.stderr.write("error: installation failed: %s\n" % exc)
         return 1
+    finally:
+        if listing is not sys.stdout:
+            for line in listing.getvalue().splitlines():
+                if line.strip() and not re.match(r"^\s+(add|skip \(exists\))\s", line):
+                    print(line)
     report(w, inst, skills, tailored)
+    offer_viewer(w)
     return 0
+
+
+def offer_viewer(w):
+    """The last step of a guided setup: see the project the way agents will record it."""
+    script = w.target / RUNTIME_REL
+    if not (TERM.rich and w.interactive and script.is_file()):
+        return
+    print("")
+    if ui.confirm(TERM, t("q.viewer"), default=False, help_text=t("h.viewer"),
+                  keys=t("keys.confirm", **TERM.g), yes=t("yes"), no=t("no")) is True:
+        try:
+            subprocess.call([sys.executable, str(script), "view", "--serve"], cwd=str(w.target))
+        except KeyboardInterrupt:
+            print("")
+
+
+WRITING = False             # set once files are being copied: Ctrl-C then may leave a partial install
 
 
 if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]))
     except KeyboardInterrupt:
+        sys.stdout.write("\033[?25h" if TERM.tty_out else "")
         print("")
-        print("  interrupted -- review-stage quits write nothing; if copying had started,"
-              " the installation may be partial and is safe to re-run.")
+        print("  " + t("cancelled.partial" if WRITING else "cancelled"))
         sys.exit(130)
