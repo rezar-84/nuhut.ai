@@ -769,7 +769,7 @@ class Options(object):
         self.preset = ""
         self.tier_rules = "standard"
         self.tier_rules_given = False
-        self.independent_review = "tier1"
+        self.independent_review = "none"
         self.independent_review_given = False
         self.git_hooks = ""        # "", "all" or "secrets"
         self.native_harnesses = []
@@ -3110,7 +3110,7 @@ def selected_tier_rules(w):
 
 def selected_independent_review(w):
     raw = w.o.independent_review
-    return {"none": "none", "tier1": "Tier 1", "tier1-2": "Tier 1 and 2"}.get(raw, "Tier 1")
+    return {"none": "none", "tier1": "Tier 1", "tier1-2": "Tier 1 and 2"}.get(raw, "none")
 
 
 def harness_options():

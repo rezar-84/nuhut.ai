@@ -180,6 +180,17 @@ def is_valid_work_item_id(raw_id, prefix, legacy_prefixes=None):
 
 
 def build(rt, project):
+    own_cache = getattr(project, "_build_cache", None) is None
+    if own_cache:
+        project._build_cache = {}
+    try:
+        return _build_inner(rt, project)
+    finally:
+        if own_cache:
+            project._build_cache = None
+
+
+def _build_inner(rt, project):
     prefix = project.prefix
     legacy_prefixes = set(getattr(project, "legacy_prefixes", []))
     if not legacy_prefixes and project.charter:
@@ -478,7 +489,7 @@ def build(rt, project):
                 model["items"][dep].setdefault("dependents", []).append(it["id"])
         it["steps"] = lifecycle(it, model)
         has_plan = any(model["docs"][n]["kind"] == "plans" for n in it.get("records", []))
-        if has_plan and hasattr(rt, "plan_check"):
+        if has_plan and hasattr(rt, "plan_check") and it.get("column") == "Now":
             try:
                 pc_res, _ = rt.plan_check(project, it["id"])
                 if pc_res:
@@ -669,6 +680,9 @@ MAX_FLOW_POINTS = 180
 MAX_EVIDENCE_RUNS = 30
 
 
+_FLOW_BLOB_CACHE = {}
+
+
 def flow(rt, project, model, today=None):
     """Backlog column counts at each committed day the backlog changed, oldest first,
     plus today's working tree. Each point is a snapshot of that commit's backlog, so a
@@ -677,6 +691,7 @@ def flow(rt, project, model, today=None):
     today = today or datetime.date.today()
     names = [name for name, _ in COLUMNS if name != "Dropped"]
     backlog_rel = os.path.join(project.docs, "project", "backlog.md")
+    backlog_git_path = backlog_rel.replace(os.sep, "/")
     legacy = set(getattr(project, "legacy_prefixes", []) or [])
     picked, seen = [], set()
     for line in project.git("log", "--format=%H %cs", "--", backlog_rel).splitlines():
@@ -689,7 +704,14 @@ def flow(rt, project, model, today=None):
     picked.reverse()
     dates, series = [], dict((name, []) for name in names)
     for date, sha in picked:
-        text = project.git("show", "%s:%s" % (sha, backlog_rel.replace(os.sep, "/")))
+        cache_key = (project.root, sha, backlog_git_path)
+        if cache_key in _FLOW_BLOB_CACHE:
+            text = _FLOW_BLOB_CACHE[cache_key]
+        else:
+            text = project.git("show", "%s:%s" % (sha, backlog_git_path))
+            if len(_FLOW_BLOB_CACHE) > 512:
+                _FLOW_BLOB_CACHE.clear()
+            _FLOW_BLOB_CACHE[cache_key] = text
         if not text:
             continue
         counts = dict((name, 0) for name in names)
@@ -809,6 +831,16 @@ def metrics(rt, project, model, today=None):
         (": " + ", ".join(gaps[:8]) + (" …" if len(gaps) > 8 else "") if gaps else ""),
         "Done items missing a plan, review, commit or worklog entry their tier requires")
 
+    plan_dates = {}
+    plans_dir = os.path.join(project.docs, "project", "plans")
+    if os.path.isdir(project.path(plans_dir)):
+        cur_date = None
+        for line in project.git("log", "--date=short", "--format=%x01%ad",
+                                "--name-only", "--", plans_dir).splitlines():
+            if line.startswith("\x01"):
+                cur_date = _date(line[1:].strip())
+            elif cur_date and line.strip():
+                plan_dates.setdefault(line.strip().replace(os.sep, "/"), []).append(cur_date)
     revised = 0
     for it in items:
         plan = next((model["docs"][n] for n in it.get("records", [])
@@ -816,8 +848,11 @@ def metrics(rt, project, model, today=None):
         start = first_commit(it)
         if not plan or not start:
             continue
-        log = project.git("log", "--date=short", "--format=%ad", "--", plan["path"])
-        if any(_date(d) and _date(d) > start for d in log.split()):
+        dates = plan_dates.get(plan["path"])
+        if dates is None:
+            log = project.git("log", "--date=short", "--format=%ad", "--", plan["path"])
+            dates = [_date(d) for d in log.split() if _date(d)]
+        if any(d > start for d in dates):
             revised += 1
     add("Plans updated after build started", "lagging", str(revised),
         "plan files changed after the item's first commit: deviations that were recorded")
@@ -890,39 +925,79 @@ class Live(object):
     def __init__(self, rt, project, template, interval):
         self.rt, self.project, self.template, self.interval = rt, project, template, interval
         self.lock = threading.Lock()
+        self.refreshing = False
         self.token = hashlib.sha256(os.urandom(32)).hexdigest()[:32]
         self.checked = 0.0
         self.version = None
+        self.model = None
         self.model_json = b""
         self.page = b""
         self.refresh(force=True)
 
+    def update_kit(self, kit_data, alerts=None):
+        """Fast in-memory update for /api/config and /api/fix without full git rebuild."""
+        with self.lock:
+            if not self.model:
+                self.refresh(force=True)
+                return self.version
+            self.model["kit"] = kit_data
+            if alerts is not None:
+                self.model["alerts"] = alerts
+            version = fingerprint(self.project)
+            self.model["version"] = version
+            self.version = version
+            self.model_json = json.dumps(self.model, ensure_ascii=False,
+                                         separators=(",", ":")).encode("utf-8")
+            self.page = render(self.model, self.template).encode("utf-8")
+            self.checked = time.time()
+            return self.version
+
     def refresh(self, force=False):
         with self.lock:
             now = time.time()
-            if not force and now - self.checked < self.interval:
-                return self.version
-            self.checked = now
+            if not force:
+                if self.refreshing or now - self.checked < self.interval:
+                    return self.version
+                self.checked = now
+                self.refreshing = True
+        try:
             version = fingerprint(self.project)
             if version == self.version and not force:
                 return self.version
             try:
-                self.project.__init__(self.project.root)
-                model = build(self.rt, self.project)
+                fresh_project = self.rt.Project(self.project.root)
+                model = build(self.rt, fresh_project)
             except Exception as exc:  # a record caught half-written; keep the last good one
                 sys.stderr.write("view: rebuild failed, keeping the last model: %s\n" % exc)
                 return self.version
             model["version"] = version
             model["live_interval"] = self.interval
             model["action_token"] = self.token
-            self.version = version
-            self.model_json = json.dumps(model, ensure_ascii=False,
-                                         separators=(",", ":")).encode("utf-8")
-            self.page = render(model, self.template).encode("utf-8")
+            new_json = json.dumps(model, ensure_ascii=False,
+                                  separators=(",", ":")).encode("utf-8")
+            new_page = render(model, self.template).encode("utf-8")
+            with self.lock:
+                self.project = fresh_project
+                self.model = model
+                self.version = version
+                self.model_json = new_json
+                self.page = new_page
+                self.checked = time.time()
             if not force:
                 sys.stderr.write("view: records changed, model rebuilt (%s)\n"
                                  % time.strftime("%H:%M:%S"))
             return self.version
+        finally:
+            if not force:
+                with self.lock:
+                    self.refreshing = False
+
+
+def _parse_host(raw_host):
+    raw = (raw_host or "").strip().lower()
+    if raw.startswith("["):
+        return raw.split("]", 1)[0].lstrip("[")
+    return raw.split(":", 1)[0]
 
 
 def serve(rt, project, template, opts):
@@ -933,24 +1008,31 @@ def serve(rt, project, template, opts):
     interval = max(1, int(getattr(opts, "interval", 2) or 2))
     live = Live(rt, project, template, interval)
 
+    class LocalServer(ThreadingHTTPServer):
+        allow_reuse_address = True
+        daemon_threads = True
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "nuhut-view"
 
         def _send(self, code, body, ctype):
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def do_GET(self):
             # The page carries the records' contents. Refuse any Host but this machine,
             # so a web page cannot reach it through DNS rebinding.
-            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+            host = _parse_host(self.headers.get("Host"))
             if host not in ("127.0.0.1", "localhost", "::1"):
                 return self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
             path = self.path.split("?", 1)[0]
@@ -968,7 +1050,7 @@ def serve(rt, project, template, opts):
         do_HEAD = do_GET
 
         def do_POST(self):
-            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+            host = _parse_host(self.headers.get("Host"))
             if host not in ("127.0.0.1", "localhost", "::1"):
                 return self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
             if self.headers.get("X-Action-Token") != live.token:
@@ -985,24 +1067,27 @@ def serve(rt, project, template, opts):
                 return self._send(400, b'{"ok":false,"error":"invalid json"}\n',
                                   "application/json; charset=utf-8")
             if path == "/api/config":
-                res, err = rt.configure_kit(project, payload)
+                res, err = rt.configure_kit(live.project, payload)
                 if err:
                     body = json.dumps({"ok": False, "error": err}).encode("utf-8")
                     return self._send(400, body, "application/json; charset=utf-8")
-                live.refresh(force=True)
+                live.update_kit(res["kit"])
                 body = json.dumps({
                     "ok": True,
                     "applied": res["applied"],
+                    "kit": res["kit"],
                     "version": live.version,
                 }).encode("utf-8")
                 return self._send(200, body, "application/json; charset=utf-8")
             if path == "/api/fix":
                 action = payload.get("action") or "all"
-                res = rt.fix_kit(project, action, payload)
-                live.refresh(force=True)
+                res = rt.fix_kit(live.project, action, payload)
+                live.update_kit(res["kit"], res.get("findings"))
                 body = json.dumps({
                     "ok": True,
                     "repaired": res["repaired"],
+                    "kit": res["kit"],
+                    "alerts": res.get("findings"),
                     "version": live.version,
                 }).encode("utf-8")
                 return self._send(200, body, "application/json; charset=utf-8")
@@ -1014,7 +1099,7 @@ def serve(rt, project, template, opts):
     server = None
     for candidate in ([port] if port == 0 else range(port, port + 10)):
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", candidate), Handler)
+            server = LocalServer(("127.0.0.1", candidate), Handler)
             break
         except OSError:
             continue
@@ -1372,6 +1457,6 @@ def run(rt, project, opts):
              len(model["worklog"]), len(model["docs"]),
              ", %d unread" % len(model["unread"]) if model["unread"] else ""))
     print("wrote %s and %s" % (os.path.relpath(out, project.root), os.path.relpath(svg_out, project.root)))
-    if not getattr(opts, "no_open", False):
+    if not getattr(opts, "no_open", False) and not custom_html and not custom_svg:
         webbrowser.open("file://" + out)
     return 0

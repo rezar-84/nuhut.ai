@@ -261,6 +261,7 @@ class Project(object):
         m_leg = re.search(r"legacy(?: prefixes?)?:\s*([^\n|]+)", prefix_cell, re.I)
         if m_leg:
             self.legacy_prefixes.update(re.findall(r"`([^`]+)`", m_leg.group(1)))
+        self._build_cache = None
 
     def path(self, rel):
         return os.path.join(self.root, rel)
@@ -832,25 +833,32 @@ def check_bite_leftover(project, out):
 def doctor(project, today=None):
     out = Findings()
     today = today or datetime.date.today()
-    check_bite_leftover(project, out)
-    check_hook_dependency(project, out)
-    check_identity(project, out)
-    check_verified_claims(project, out)
-    check_placeholders(project, out)
-    check_pointer(project, out)
-    check_charter(project, out)
-    check_staleness(project, out, today)
-    check_stack_versions(project, out, today)
-    check_traceability(project, out)
-    check_backlog_age(project, out, today)
-    check_epics(project, out)
-    check_dependencies(project, out)
-    check_worklog_size(project, out)
-    check_known_mistakes(project, out)
-    check_rollback(project, out, today)
-    check_profile(project, out)
-    check_sensitive(project, out)
-    return out.items
+    own_cache = getattr(project, "_build_cache", None) is None
+    if own_cache:
+        project._build_cache = {}
+    try:
+        check_bite_leftover(project, out)
+        check_hook_dependency(project, out)
+        check_identity(project, out)
+        check_verified_claims(project, out)
+        check_placeholders(project, out)
+        check_pointer(project, out)
+        check_charter(project, out)
+        check_staleness(project, out, today)
+        check_stack_versions(project, out, today)
+        check_traceability(project, out)
+        check_backlog_age(project, out, today)
+        check_epics(project, out)
+        check_dependencies(project, out)
+        check_worklog_size(project, out)
+        check_known_mistakes(project, out)
+        check_rollback(project, out, today)
+        check_profile(project, out)
+        check_sensitive(project, out)
+        return out.items
+    finally:
+        if own_cache:
+            project._build_cache = None
 
 
 def print_findings(items):
@@ -1037,37 +1045,57 @@ def model_family(name):
     return "unknown"
 
 
-def commit_index(project, known=None):
-    """{item: [(sha, parent, trailers)]} for every commit, from one `git log` -- the same
-    matching as item_commits, for callers that need every item at once."""
+def _parsed_commits(project):
+    cache = getattr(project, "_build_cache", None)
+    if cache is not None and "commits" in cache:
+        return cache["commits"]
     out = project.git("log", "--all", "--format=%H%x01%P%x01%B%x00")
-    index = {}
+    records = []
     for record in out.split("\x00"):
         parts = record.strip("\n").split("\x01")
         if len(parts) < 3 or not parts[0].strip():
             continue
-        tags = trailers(parts[2])
-        found = set(ids_in(parts[2], project.prefix, known)) if project.prefix or known else set()
+        sha = parts[0].strip()
+        parent = (parts[1].split() or [""])[0]
+        body = parts[2]
+        tags = trailers(body)
+        records.append((sha, parent, body, tags))
+    if cache is not None:
+        cache["commits"] = records
+    return records
+
+
+def commit_index(project, known=None):
+    """{item: [(sha, parent, trailers)]} for every commit, from one `git log` -- the same
+    matching as item_commits, for callers that need every item at once."""
+    cache = getattr(project, "_build_cache", None)
+    if cache is not None and "commit_index" in cache:
+        return cache["commit_index"]
+    if known is None:
+        known = getattr(project, "legacy_prefixes", None)
+    index = {}
+    for sha, parent, body, tags in _parsed_commits(project):
+        found = set(ids_in(body, project.prefix, known)) if project.prefix or known else set()
         if tags.get("Work-Item"):
             found.add(tags["Work-Item"])
         for item in found:
-            index.setdefault(item, []).append((parts[0].strip(), (parts[1].split() or [""])[0], tags))
+            index.setdefault(item, []).append((sha, parent, tags))
+    if cache is not None:
+        cache["commit_index"] = index
     return index
 
 
 def item_commits(project, item):
     """[(sha, parent, trailers)] for commits naming <item> in a Work-Item trailer or in
     the message, newest first."""
-    out = project.git("log", "--all", "--format=%H%x01%P%x01%B%x00")
+    cache = getattr(project, "_build_cache", None)
+    if cache is not None:
+        return list(commit_index(project).get(item, ()))
     found = []
     pattern = re.compile(r"(?<![A-Za-z0-9])%s(?![0-9])" % re.escape(item))
-    for record in out.split("\x00"):
-        parts = record.strip("\n").split("\x01")
-        if len(parts) < 3 or not parts[0].strip():
-            continue
-        tags = trailers(parts[2])
-        if tags.get("Work-Item") == item or pattern.search(parts[2]):
-            found.append((parts[0].strip(), (parts[1].split() or [""])[0], tags))
+    for sha, parent, body, tags in _parsed_commits(project):
+        if tags.get("Work-Item") == item or pattern.search(body):
+            found.append((sha, parent, tags))
     return found
 
 
@@ -1262,44 +1290,62 @@ def review(project, item, role, by, model=None, stage="ship", base=None, timeout
 
 def review_records(project, item):
     """Parsed headers of every review file for <item>."""
-    folder = project.path(os.path.join(project.docs, "project", "reviews"))
-    found = []
-    if not os.path.isdir(folder):
-        return found
-    for name in sorted(os.listdir(folder)):
-        if not (name.startswith(item + "-") and name.endswith(".md")):
-            continue
-        text = read(os.path.join(folder, name))
-        fields = dict(re.findall(r"^\*\*(Reviewer agent|Reviewer model|Independence|Author):\*\*"
-                                 r"\s*(.+)$", text, re.M))
-        found.append({"file": name, "fields": fields})
-    return found
+    cache = getattr(project, "_build_cache", None)
+    if cache is not None and "reviews" in cache:
+        all_recs = cache["reviews"]
+    else:
+        folder = project.path(os.path.join(project.docs, "project", "reviews"))
+        all_recs = []
+        if os.path.isdir(folder):
+            for name in sorted(os.listdir(folder)):
+                if not name.endswith(".md"):
+                    continue
+                text = read(os.path.join(folder, name))
+                fields = dict(re.findall(r"^\*\*(Reviewer agent|Reviewer model|Independence|Author):\*\*"
+                                         r"\s*(.+)$", text, re.M))
+                all_recs.append({"file": name, "fields": fields})
+        if cache is not None:
+            cache["reviews"] = all_recs
+    prefix = item + "-"
+    return [r for r in all_recs if r["file"].startswith(prefix)]
 
 
-def independent_review_policy(charter):
-    """(policy, tiers, state): policy is 'none', 'Tier 1', or 'Tier 1 and 2'."""
+def independent_review_policy(charter, profile=None):
+    """(policy, tiers, state): policy is 'none' (default), 'Tier 1', or 'Tier 1 and 2'.
+    Off ('none') by default unless explicitly enabled in the charter or profile."""
     raw = labelled(charter, "Independent review required for")
-    if raw is None:
-        return "Tier 1", set(["1"]), "blank"
-    cell = UNFILLED.sub("", raw).strip()
-    has_none = bool(re.search(r"\b(none|off)\b", cell, re.I))
-    has_t12 = "and 2" in cell
-    t1_count = cell.count("Tier 1")
-    if has_none and t1_count == 0:
-        return "none", set(), "decided"
-    if has_t12 and t1_count == 1 and not has_none:
-        return "Tier 1 and 2", set(["1", "2"]), "decided"
-    if t1_count == 1 and not has_t12 and not has_none:
-        return "Tier 1", set(["1"]), "decided"
-    return "Tier 1", set(["1"]), ("blank" if not cell else "undecided")
+    if raw is not None:
+        cell = UNFILLED.sub("", raw).strip()
+        has_none = bool(re.search(r"\b(none|off)\b", cell, re.I))
+        has_t12 = "and 2" in cell
+        t1_count = cell.count("Tier 1")
+        if has_none and t1_count == 0:
+            return "none", set(), "decided"
+        if has_t12 and t1_count == 1 and not has_none:
+            return "Tier 1 and 2", set(["1", "2"]), "decided"
+        if t1_count == 1 and not has_t12 and not has_none:
+            return "Tier 1", set(["1"]), "decided"
+        state = "blank" if not cell else "undecided"
+    else:
+        state = "blank"
+    if isinstance(profile, dict) and profile.get("independent_review"):
+        p_raw = str(profile.get("independent_review")).strip().lower()
+        if p_raw in ("tier 1 and 2", "tier1-2"):
+            return "Tier 1 and 2", set(["1", "2"]), "decided"
+        if p_raw in ("tier 1", "tier1"):
+            return "Tier 1", set(["1"]), "decided"
+        if p_raw in ("none", "off"):
+            return "none", set(), "decided"
+    return "none", set(), state
 
 
 def check_identity(project, out):
-    """Tier 1 work (and Tier 2 if the charter says so) needs a review from a different
-    model family than the author's. Same-family reviews are recorded as self-checks and
-    clear nothing. Only items whose commits carry Agent or Model trailers are judged:
-    earlier work has no author identity to compare."""
-    _, tiers, _ = independent_review_policy(project.charter)
+    """When independent review is enabled in the charter, Tier 1 work (and Tier 2 if the
+    charter says so) needs a review from a different model family than the author's.
+    Same-family reviews are recorded as self-checks and clear nothing. Only items whose
+    commits carry Agent or Model trailers are judged: earlier work has no author identity
+    to compare."""
+    _, tiers, _ = independent_review_policy(project.charter, project.profile)
     if not tiers:
         return
     where = os.path.join(project.docs, "project", "backlog.md")
@@ -1370,23 +1416,31 @@ def budgets(project):
 def budget_usage(project):
     """Per item with Tokens/Minutes trailers: its tier, its usage, and its tier's budget.
     No harness writes these by itself; an agent adds them where it can read its usage."""
-    limits = budgets(project)
-    report = []
-    for item, _, cells in backlog_rows(project.records("backlog.md"), project.prefix,
-                                       getattr(project, "legacy_prefixes", None)):
-        tokens = minutes = 0
-        seen = False
-        for _, _, tags in item_commits(project, item):
-            if "Tokens" in tags or "Minutes" in tags:
-                seen = True
-                tokens += int(re.sub(r"[^0-9]", "", tags.get("Tokens", "0")) or 0)
-                minutes += float(re.sub(r"[^0-9.]", "", tags.get("Minutes", "0")) or 0)
-        if not seen:
-            continue
-        tier = item_tier(project, item)
-        report.append({"item": item, "tier": tier, "tokens": tokens, "minutes": minutes,
-                       "budget": limits.get(tier, {})})
-    return report
+    own_cache = getattr(project, "_build_cache", None) is None
+    if own_cache:
+        project._build_cache = {}
+    try:
+        limits = budgets(project)
+        report = []
+        for item, _, cells in backlog_rows(project.records("backlog.md"), project.prefix,
+                                           getattr(project, "legacy_prefixes", None)):
+            tokens = minutes = 0
+            seen = False
+            for _, _, tags in item_commits(project, item):
+                if "Tokens" in tags or "Minutes" in tags:
+                    seen = True
+                    tokens += int(re.sub(r"[^0-9]", "", tags.get("Tokens", "0")) or 0)
+                    minutes += float(re.sub(r"[^0-9.]", "", tags.get("Minutes", "0")) or 0)
+            if not seen:
+                continue
+            tier = (re.search(r"[123]", cells[2]).group(0)
+                    if len(cells) > 2 and re.search(r"[123]", cells[2]) else "")
+            report.append({"item": item, "tier": tier, "tokens": tokens, "minutes": minutes,
+                           "budget": limits.get(tier, {})})
+        return report
+    finally:
+        if own_cache:
+            project._build_cache = None
 
 
 # ---------------------------------------------------------------- log
@@ -1737,6 +1791,10 @@ def default_branch(project):
 
 def changed_files(project, base):
     """Committed on the branch since it left base, plus anything not yet committed."""
+    cache = getattr(project, "_build_cache", None)
+    key = ("changed", base)
+    if cache is not None and key in cache:
+        return cache[key]
     names = set()
     merge_base = project.git("merge-base", base, "HEAD").strip()
     if merge_base:
@@ -1744,8 +1802,11 @@ def changed_files(project, base):
     names.update(project.git("diff", "--name-only", "HEAD").split("\n"))
     names.update(project.git("ls-files", "--others", "--exclude-standard").split("\n"))
     records = project.docs.rstrip("/") + "/project/"
-    return sorted(n for n in names if n and not n.startswith(records)
-                  and not n.startswith(".ai-sdlc/"))
+    res = sorted(n for n in names if n and not n.startswith(records)
+                 and not n.startswith(".ai-sdlc/"))
+    if cache is not None:
+        cache[key] = res
+    return res
 
 
 def plan_check(project, item, base=None):
@@ -1786,7 +1847,15 @@ def plan_check(project, item, base=None):
         return None, ("%s has no backticked paths under \"## Files that change\", so "
                       "there is nothing to compare the diff with." % rel)
     base = base or default_branch(project) or "main"
-    if not project.git("rev-parse", "--verify", "--quiet", base).strip():
+    cache = getattr(project, "_build_cache", None)
+    ref_key = ("ref", base)
+    if cache is not None and ref_key in cache:
+        ref_ok = cache[ref_key]
+    else:
+        ref_ok = bool(project.git("rev-parse", "--verify", "--quiet", base).strip())
+        if cache is not None:
+            cache[ref_key] = ref_ok
+    if not ref_ok:
         return None, ("base %r is not a git ref here. Pass --base, or fill the charter's "
                       "Default branch row." % base)
     changed = changed_files(project, base)
@@ -1889,16 +1958,27 @@ def kit_status(project):
     """Structured inventory of the kit installation, active constraints, token reading
     budget, wired harnesses/hooks, and safe mechanical repairs."""
     charter = project.charter
+    prof = project.profile or {}
     effort_val, effort_state = choice(labelled(charter, "Default effort mode"), EFFORT)
+    if not effort_val and prof.get("effort_mode"):
+        effort_val = next((o for o in EFFORT if o.lower() == str(prof["effort_mode"]).lower()), None)
     effort_resolved = effort_val or "Normal"
-    ind_policy, ind_tiers, ind_state = independent_review_policy(charter)
+    ind_policy, ind_tiers, ind_state = independent_review_policy(charter, prof)
     tier_val, tier_state = choice(labelled(charter, "Tier rules"), TIER_RULES)
+    if not tier_val and prof.get("tier_rules"):
+        tier_val = next((o for o in TIER_RULES if o.lower() == str(prof["tier_rules"]).lower()), None)
     tier_resolved = tier_val or "Standard"
     dec_val, dec_state = choice(labelled(charter, "Decision style"), DECISION_STYLE)
+    if not dec_val and prof.get("decision_style"):
+        dec_val = next((o for o in DECISION_STYLE if o.lower() == str(prof["decision_style"]).lower()), None)
     dec_resolved = dec_val or "Guide"
     dev_val, dev_state = choice(labelled(charter, "Development method"), DEV_METHOD)
+    if not dev_val and prof.get("dev_method"):
+        dev_val = next((o for o in DEV_METHOD if o.lower() == str(prof["dev_method"]).lower()), None)
     dev_resolved = dev_val or "Item"
     acq_val, acq_state = choice(labelled(charter, "Acquisition profile"), ACQUISITION)
+    if not acq_val and prof.get("acquisition_profile"):
+        acq_val = next((o for o in ACQUISITION if o.lower() == str(prof["acquisition_profile"]).lower()), None)
     acq_resolved = acq_val or "Standard"
     budget_cell = UNFILLED.sub("", labelled(charter, "Agent budget per tier") or "").strip()
 
@@ -2209,9 +2289,7 @@ def sync_profile(project, extra=None):
 def configure_kit(project, changes):
     """Apply user-selected constraint changes to charter.md and .ai-sdlc/profile.json.
     Never modifies kit-owned files tracked in manifest.json."""
-    if not project.charter:
-        return None, "no charter at %s" % project.charter_path
-    text = project.charter
+    text = project.charter or ""
     extra_profile = {}
     applied = []
 
@@ -2227,11 +2305,13 @@ def configure_kit(project, changes):
                 "Tier 3: 5k tokens, 5 min; Tier 2: 15k tokens, 15 min; Tier 1: 40k tokens, 45 min"
             )
             extra_profile["token_saving"] = True
+            extra_profile["effort_mode"] = "lean"
+            extra_profile["independent_review"] = "none"
+            extra_profile["tier_rules"] = "standard"
             extra_profile["profile"] = "compact"
             applied.append("token_saving=on (Lean, single-agent review, Standard tier rules, compact budget)")
         else:
             text = _set_charter_row(text, "Default effort mode", "`Normal`")
-            text = _set_charter_row(text, "Independent review required for", "`Tier 1`")
             text = _set_charter_row(
                 text, "Agent budget per tier",
                 "Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h"
@@ -2240,14 +2320,16 @@ def configure_kit(project, changes):
                 project.path(os.path.join(project.docs, "process", "00-operating-model.md"))
             )
             extra_profile["token_saving"] = False
+            extra_profile["effort_mode"] = "normal"
             extra_profile["profile"] = "full" if has_proc else "compact"
-            applied.append("token_saving=off (Normal effort, Tier 1 independent review)")
+            applied.append("token_saving=off (Normal effort restored)")
 
     if changes.get("effort"):
         val = next((o for o in EFFORT if o.lower() == str(changes["effort"]).strip().lower()), None)
         if not val:
             return None, "effort must be one of: %s" % ", ".join(EFFORT)
         text = _set_charter_row(text, "Default effort mode", "`%s`" % val)
+        extra_profile["effort_mode"] = val.lower()
         if val != "Lean":
             extra_profile["token_saving"] = False
         applied.append("Default effort mode=%s" % val)
@@ -2266,6 +2348,7 @@ def configure_kit(project, changes):
             return None, "independent_review must be none, Tier 1, or Tier 1 and 2"
         label_val, cell_val = mapping[raw]
         text = _set_charter_row(text, "Independent review required for", cell_val)
+        extra_profile["independent_review"] = label_val
         if label_val != "none":
             extra_profile["token_saving"] = False
         applied.append("Independent review required for=%s" % label_val)
@@ -2275,6 +2358,7 @@ def configure_kit(project, changes):
         if not val:
             return None, "tier_rules must be one of: %s" % ", ".join(TIER_RULES)
         text = _set_charter_row(text, "Tier rules", "`%s`" % val)
+        extra_profile["tier_rules"] = val.lower()
         applied.append("Tier rules=%s" % val)
 
     if changes.get("decision_style"):
@@ -2282,6 +2366,7 @@ def configure_kit(project, changes):
         if not val:
             return None, "decision_style must be one of: %s" % ", ".join(DECISION_STYLE)
         text = _set_charter_row(text, "Decision style", "`%s`" % val)
+        extra_profile["decision_style"] = val.lower()
         applied.append("Decision style=%s" % val)
 
     if changes.get("dev_method"):
@@ -2289,6 +2374,7 @@ def configure_kit(project, changes):
         if not val:
             return None, "dev_method must be one of: %s" % ", ".join(DEV_METHOD)
         text = _set_charter_row(text, "Development method", "`%s`" % val)
+        extra_profile["dev_method"] = val.lower()
         applied.append("Development method=%s" % val)
 
     if changes.get("acquisition_profile"):
@@ -2296,6 +2382,7 @@ def configure_kit(project, changes):
         if not val:
             return None, "acquisition_profile must be one of: %s" % ", ".join(ACQUISITION)
         text = _set_charter_row(text, "Acquisition profile", "`%s`" % val)
+        extra_profile["acquisition_profile"] = val.lower()
         applied.append("Acquisition profile=%s" % val)
 
     if changes.get("preferred_reviewer"):
@@ -2314,9 +2401,13 @@ def configure_kit(project, changes):
             applied.append("checks.%s=%s" % (stage_clean, cmd))
 
     charter_full = project.path(project.charter_path)
-    with open(charter_full, "w", encoding="utf-8") as handle:
-        handle.write(text)
-    project.charter = text
+    charter_dir = os.path.dirname(charter_full)
+    if charter_dir and not os.path.isdir(charter_dir):
+        os.makedirs(charter_dir)
+    if text:
+        with open(charter_full, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        project.charter = text
     sync_profile(project, extra_profile)
     return {"applied": applied, "kit": kit_status(project)}, None
 
@@ -2472,6 +2563,9 @@ def selftest():
     assert sensitive_kinds("ask me@eu.example.org or noreply@acme.io") == ([], [])
     assert sensitive_kinds("card 4111 1111 1111 1111")[1] == ["card-number shape"]
     assert sensitive_kinds("plain prose, ACME-12, 2026-01-01") == ([], [])
+    assert independent_review_policy("") == ("none", set(), "blank")
+    assert independent_review_policy("| **Independent review required for** | `none` · `Tier 1` · `Tier 1 and 2` |") == \
+        ("none", set(), "undecided")
     assert independent_review_policy("| **Independent review required for** | `none` |") == \
         ("none", set(), "decided")
     assert independent_review_policy("| **Independent review required for** | `Tier 1` |") == \

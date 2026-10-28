@@ -1199,7 +1199,8 @@ def test_view():
     check("a row that is not PREFIX-### is reported, not dropped silently",
           any("NOPE-9" in u["reason"] for u in model["unread"]), str(model["unread"]))
     check("model carries kit status and constraints",
-          "kit" in model and "constraints" in model["kit"] and "reading_tokens" in model["kit"],
+          "kit" in model and "constraints" in model["kit"] and "reading_tokens" in model["kit"]
+          and model["kit"]["constraints"].get("independent_review") == "none",
           str(model.get("kit"))[:300])
     check("items carry chronological thread events",
           any(e.get("kind") == "frame" for e in items.get("VWX-1", {}).get("thread", []))
@@ -1856,16 +1857,21 @@ def test_separation():
     check("Verified with no ledger run for the item is flagged",
           "SEP-2" in out and "evidence ledger has no" in out, out)
 
-    # Independent review: a Tier 1 item, built, whose commits name the author.
+    # Independent review: off ('none') by default, and enforced when enabled for Tier 1 / Tier 1 and 2.
     backlog = read(d, "docs/project/backlog.md")
     i = backlog.index("## Done")
     j = backlog.index("\n", backlog.index("| --- ", i)) + 1
     write(d, "docs/project/backlog.md", backlog[:j] + "| SEP-4 | Comment | 1 | security | | Done | 2026-10-19 |\n"
           "| SEP-1 | Install | 2 | qa | | Done | 2026-10-19 |\n" + backlog[j:])
     code, out = sdlc("doctor", "--strict")
-    check("a built Tier 1 item with no independent review fails",
+    check("independent review is off by default unless turned on",
+          "no review from a model family other than" not in out, out)
+    code_cfg, out_cfg = sdlc("config", "--independent-review", "tier1")
+    check("enabling independent review for Tier 1 updates charter", code_cfg == 0, out_cfg)
+    code, out = sdlc("doctor", "--strict")
+    check("when enabled, a built Tier 1 item with no independent review fails",
           code == 1 and "SEP-4" in out and "no review from a model family other than" in out, out)
-    check("Tier 2 is not judged by default", not re.search(r"SEP-1 .*Tier 2", out), out)
+    check("Tier 2 is not judged when only Tier 1 is enabled", not re.search(r"SEP-1 .*Tier 2", out), out)
     write(d, "stub_same.py", "import sys\nsys.stdin.read()\nprint('Model: claude-sonnet-5-5')\n"
                              "print('Verdict: Pass')\nprint('Checked: the diff')\n")
     write(d, "stub_other.py", "import sys\nprompt = sys.stdin.read()\nassert 'Work item SEP-4, Tier 1' in prompt\n"
@@ -1932,7 +1938,8 @@ def test_dashboard():
           not any("dashboard" in f for f in manifest.get("files", {})), str(sorted(manifest.get("files", {}))[:4]))
     target = os.path.join(d, "out", "status.html")
     p = subprocess.Popen([sys.executable, os.path.join(d, ".ai-sdlc", "bin", "sdlc.py"), "view",
-                          "--export-html", target], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                          "--no-open", "--export-html", target], cwd=d,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     text = p.communicate()[0].decode("utf-8", "replace")
     page = read(os.path.join(d, "out"), "status.html")
     check("view --export-html writes one self-contained file", p.returncode == 0 and "<html" in page.lower()

@@ -171,9 +171,9 @@ than not reviewing — it launders the problem into a document that looks like d
 ## Independent review
 
 A review written by the same model family that wrote the change shares its blind spots.
-For Tier 1, and for Tier 2 when the charter's **Independent review required for** says
-so (unless the row is explicitly set to `none` for a single-agent or token-saving setup),
-at least one review must come from a different family:
+Independent second-agent review is off (`none`) by default; when the charter's
+**Independent review required for** is set to `Tier 1` or `Tier 1 and 2`, at least one
+review for those tiers must come from a different family:
 
 ```sh
 python3 .ai-sdlc/bin/sdlc.py review <ID> --role security --by codex
