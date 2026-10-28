@@ -254,7 +254,7 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | **Always Tier 1 here** | _(the surfaces that are high-risk in this project specifically)_ |
 | **Never Tier 1 here** | _(surfaces from the `AGENTS.md` Tier 1 list that genuinely do not apply — e.g. "no PII: this project holds no personal data, see Data categories held". Without this, "when in doubt, tier up" makes almost everything Tier 1.)_ |
 | **Human approval required for** | _(list — mirrors the "Human approval required for" line in `AGENTS.md`, "Project overrides")_ |
-| **Independent review required for** | `Tier 1` · `Tier 1 and 2` _(default: Tier 1. `sdlc.py doctor` fails such an item, once built, if no review came from a model family other than the author's; a same-family review is a self-check and clears nothing. Judged only on commits that carry Agent or Model trailers)_ |
+| **Independent review required for** | `none` · `Tier 1` · `Tier 1 and 2` _(default: Tier 1; set `none` for single-agent / token-saving mode. `sdlc.py doctor` fails such an item, once built, if no review came from a model family other than the author's; a same-family review is a self-check and clears nothing. Judged only on commits that carry Agent or Model trailers)_ |
 | **Agent budget per tier** | _(optional, e.g. "Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h". `sdlc.py metrics` reports usage from Tokens and Minutes commit trailers against it; nothing is enforced)_ |
 | **Approvers** | _(names for Tier 1's two approvals)_ |
 | **Staleness threshold** | _(e.g. 90 days — after this, a `project/` doc is treated as a hypothesis)_ |

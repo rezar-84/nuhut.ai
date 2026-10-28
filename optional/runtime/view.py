@@ -448,6 +448,21 @@ def build(rt, project):
         if reviews:
             it["reviews"] = reviews
         commits = index.get(item_id)
+        if commits:
+            trailer_by_sha = {}
+            for full_sha, _, tags in commits:
+                trailer_by_sha[full_sha] = tags
+                trailer_by_sha[full_sha[:7]] = tags
+            for c_obj in it.get("commits", []):
+                ctags = trailer_by_sha.get(c_obj.get("sha", ""), {})
+                if ctags.get("Agent"):
+                    c_obj["agent"] = ctags["Agent"]
+                if ctags.get("Model"):
+                    c_obj["model"] = ctags["Model"]
+                if ctags.get("Tokens"):
+                    c_obj["tokens"] = ctags["Tokens"]
+                if ctags.get("Minutes"):
+                    c_obj["minutes"] = ctags["Minutes"]
         if commits and ledger_rows:
             rows = rt.evidence_matches(project, item_id, ledger_rows, commits)
             if rows:
@@ -462,6 +477,15 @@ def build(rt, project):
             if dep in model["items"]:
                 model["items"][dep].setdefault("dependents", []).append(it["id"])
         it["steps"] = lifecycle(it, model)
+        has_plan = any(model["docs"][n]["kind"] == "plans" for n in it.get("records", []))
+        if has_plan and hasattr(rt, "plan_check"):
+            try:
+                pc_res, _ = rt.plan_check(project, it["id"])
+                if pc_res:
+                    it["plan_check"] = pc_res
+            except Exception:
+                pass
+        it["thread"] = build_item_thread(it, model)
 
     model["evidence"] = evidence_runs(project)
     model["metrics"] = metrics(rt, project, model)
@@ -470,6 +494,11 @@ def build(rt, project):
     except Exception as exc:  # a chart is never a reason for the view not to open
         model["flow"] = {"dates": [], "series": {}, "error": str(exc)}
 
+    try:
+        model["kit"] = rt.kit_status(project) if hasattr(rt, "kit_status") else {}
+    except Exception as exc:
+        model["kit"] = {"error": str(exc)}
+
     # The mechanical doctor findings are the home page's alerts.
     try:
         model["alerts"] = rt.doctor(project)
@@ -477,6 +506,119 @@ def build(rt, project):
         model["alerts"] = [{"level": "warn", "check": "view", "where": "",
                             "message": "doctor could not run: %s" % exc}]
     return model
+
+
+def build_item_thread(it, model):
+    """Build a causally and chronologically ordered list of action/thread events for an item."""
+    events = []
+    # 1. Frame event
+    events.append({
+        "kind": "frame",
+        "order": 10,
+        "date": (it.get("extra") or {}).get("Since") or "",
+        "title": it.get("title") or it["id"],
+        "status": it.get("status") or it.get("column") or "Unknown",
+        "tier": it.get("tier") or "",
+        "owner": it.get("owner") or "",
+        "depends": it.get("depends") or [],
+        "dependents": it.get("dependents") or [],
+    })
+    # 2. Plan & Design Review & ADR/Defect records
+    for doc_idx in it.get("records", []):
+        doc = model["docs"][doc_idx]
+        dkind = doc.get("kind", "record")
+        dstage = doc.get("stage", "")
+        ddate = (doc.get("meta") or {}).get("last-reviewed", "")
+        if dkind == "plans":
+            events.append({
+                "kind": "plan",
+                "order": 20,
+                "date": ddate,
+                "path": doc["path"],
+                "title": doc["title"],
+                "doc_index": doc_idx,
+            })
+        elif dkind == "reviews" and dstage == "design":
+            events.append({
+                "kind": "design_review",
+                "order": 30,
+                "date": ddate,
+                "path": doc["path"],
+                "title": doc["title"],
+                "doc_index": doc_idx,
+            })
+        elif dkind == "reviews":
+            events.append({
+                "kind": "ship_review",
+                "order": 60,
+                "date": ddate,
+                "path": doc["path"],
+                "title": doc["title"],
+                "doc_index": doc_idx,
+            })
+        else:
+            events.append({
+                "kind": dkind,
+                "order": 35,
+                "date": ddate,
+                "path": doc["path"],
+                "title": doc["title"],
+                "doc_index": doc_idx,
+            })
+    # 3. Commits (oldest first in thread feed)
+    for c in reversed(it.get("commits", [])):
+        events.append({
+            "kind": "commit",
+            "order": 40,
+            "date": c.get("date", ""),
+            "sha": c.get("sha", ""),
+            "author": c.get("author", ""),
+            "agent": c.get("agent", ""),
+            "model": c.get("model", ""),
+            "tokens": c.get("tokens", ""),
+            "minutes": c.get("minutes", ""),
+            "subject": c.get("subject", ""),
+        })
+    # 4. Evidence / Verify runs
+    if it.get("evidence"):
+        by_commit = {}
+        for ev in it["evidence"]:
+            key = (ev.get("time") or "")[:10] + "@" + (ev.get("commit") or "")
+            by_commit.setdefault(key, {
+                "kind": "verify",
+                "order": 50,
+                "date": (ev.get("time") or "")[:10],
+                "time": ev.get("time") or "",
+                "commit": ev.get("commit") or "",
+                "dirty": bool(ev.get("dirty")),
+                "stages": [],
+            })["stages"].append({"stage": ev.get("stage"), "result": ev.get("result")})
+        events.extend(by_commit.values())
+    # 5. Human gate / blockage alert if Parked or Blocked
+    if it.get("column") in ("Blocked", "Parked"):
+        extra = it.get("extra") or {}
+        events.append({
+            "kind": "gate",
+            "order": 55,
+            "date": extra.get("Since") or "",
+            "column": it.get("column"),
+            "waiting_on": extra.get("Waiting on whom") or extra.get("Unblocked by") or "",
+            "decision": extra.get("Decision needed") or extra.get("Blocked on") or "",
+        })
+    # 6. Worklog entries
+    for w_idx in it.get("worklog", []):
+        w = model["worklog"][w_idx]
+        events.append({
+            "kind": "worklog",
+            "order": 70,
+            "date": w.get("date") or "",
+            "title": w.get("title") or "",
+            "compact": bool(w.get("compact")),
+            "sections": w.get("sections") or {},
+            "worklog_index": w_idx,
+        })
+    events.sort(key=lambda e: (e.get("order", 50), e.get("date") or ""))
+    return events
 
 
 def lifecycle(it, model):
@@ -709,7 +851,18 @@ def print_metrics(rt, project, opts):
 def watched_paths(project):
     """Every file the model is read from. A change to any of them, or a new commit,
     changes the fingerprint."""
-    paths = [project.path("AGENTS.md"), project.path(os.path.join(project.docs, "CARD.md"))]
+    paths = [
+        project.path("AGENTS.md"),
+        project.path("CLAUDE.md"),
+        project.path("GEMINI.md"),
+        project.path(os.path.join(project.docs, "CARD.md")),
+        project.path(".ai-sdlc/profile.json"),
+        project.path(".ai-sdlc/manifest.json"),
+        project.path(".ai-sdlc/test-lock.txt"),
+        project.path(".ai-sdlc/protected.txt"),
+        project.path(".ai-sdlc/gates.txt"),
+        project.path(".ai-sdlc/bite/active.json"),
+    ]
     for base, _, files in os.walk(project.path(os.path.join(project.docs, "project"))):
         paths.extend(os.path.join(base, n) for n in files if n.endswith(".md"))
     evidence = project.path(os.path.join(".ai-sdlc", "evidence"))
@@ -737,6 +890,7 @@ class Live(object):
     def __init__(self, rt, project, template, interval):
         self.rt, self.project, self.template, self.interval = rt, project, template, interval
         self.lock = threading.Lock()
+        self.token = hashlib.sha256(os.urandom(32)).hexdigest()[:32]
         self.checked = 0.0
         self.version = None
         self.model_json = b""
@@ -753,12 +907,14 @@ class Live(object):
             if version == self.version and not force:
                 return self.version
             try:
+                self.project.__init__(self.project.root)
                 model = build(self.rt, self.project)
             except Exception as exc:  # a record caught half-written; keep the last good one
                 sys.stderr.write("view: rebuild failed, keeping the last model: %s\n" % exc)
                 return self.version
             model["version"] = version
             model["live_interval"] = self.interval
+            model["action_token"] = self.token
             self.version = version
             self.model_json = json.dumps(model, ensure_ascii=False,
                                          separators=(",", ":")).encode("utf-8")
@@ -810,6 +966,46 @@ def serve(rt, project, template, opts):
             return self._send(404, b"not found\n", "text/plain; charset=utf-8")
 
         do_HEAD = do_GET
+
+        def do_POST(self):
+            host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+            if host not in ("127.0.0.1", "localhost", "::1"):
+                return self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
+            if self.headers.get("X-Action-Token") != live.token:
+                return self._send(403, b'{"ok":false,"error":"invalid action token"}\n',
+                                  "application/json; charset=utf-8")
+            path = self.path.split("?", 1)[0]
+            if path not in ("/api/config", "/api/fix"):
+                return self._send(404, b"not found\n", "text/plain; charset=utf-8")
+            try:
+                length = min(65536, max(0, int(self.headers.get("Content-Length") or "0")))
+                raw = self.rfile.read(length).decode("utf-8", "replace") if length else "{}"
+                payload = json.loads(raw or "{}")
+            except ValueError:
+                return self._send(400, b'{"ok":false,"error":"invalid json"}\n',
+                                  "application/json; charset=utf-8")
+            if path == "/api/config":
+                res, err = rt.configure_kit(project, payload)
+                if err:
+                    body = json.dumps({"ok": False, "error": err}).encode("utf-8")
+                    return self._send(400, body, "application/json; charset=utf-8")
+                live.refresh(force=True)
+                body = json.dumps({
+                    "ok": True,
+                    "applied": res["applied"],
+                    "version": live.version,
+                }).encode("utf-8")
+                return self._send(200, body, "application/json; charset=utf-8")
+            if path == "/api/fix":
+                action = payload.get("action") or "all"
+                res = rt.fix_kit(project, action, payload)
+                live.refresh(force=True)
+                body = json.dumps({
+                    "ok": True,
+                    "repaired": res["repaired"],
+                    "version": live.version,
+                }).encode("utf-8")
+                return self._send(200, body, "application/json; charset=utf-8")
 
         def log_message(self, *args):  # the terminal shows rebuilds, not every poll
             pass

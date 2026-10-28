@@ -24,8 +24,10 @@ branch.)
    `{{DOCS_DIR}}/process/02-role-reviews.md` and the active roster in
    `{{DOCS_DIR}}/project/charter.md`. Include the charter's project-specific role checks. Do not
    review with every role reflexively, and do not skip a role whose surface was touched.
-   Apply the work item's effort mode: Lean uses the minimum applicable set, Normal uses
-   the standard set, and Beast adds only roles materially adjacent to the change.
+   Apply the work item's effort mode: Lean uses the minimum applicable set in a single
+   combined review pass (and skips spawning a second agent when the charter's
+   `Independent review required for` row is `none`), Normal uses the standard set, and
+   Beast adds only roles materially adjacent to the change.
 
 4. **For each role**, work through its playbook in `{{DOCS_DIR}}/roles/` against the real
    artifact. Produce:

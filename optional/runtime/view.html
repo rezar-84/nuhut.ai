@@ -334,20 +334,80 @@
     .docgrid { grid-template-columns: 1fr; }
     .outline { position: static; max-height: none; border-right: none; }
   }
+  /* Chat-Like Threads Interface */
+  .threads-layout { display: grid; grid-template-columns: 330px 1fr; gap: 16px; min-height: 76vh; align-items: start; margin-top: 8px; }
+  @media (max-width: 920px) { .threads-layout { grid-template-columns: 1fr; } }
+  .threads-inbox { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); display: flex; flex-direction: column; max-height: 83vh; overflow: hidden; }
+  .threads-inbox-top { padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; gap: 8px; }
+  .threads-inbox-list { overflow-y: auto; padding: 8px; flex: 1; }
+  .threads-group-hdr { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 8px 8px 4px; display: flex; justify-content: space-between; align-items: center; }
+  .thread-row { padding: 10px 12px; border-radius: 8px; border: 1px solid transparent; margin-bottom: 4px; cursor: pointer; background: var(--bg); transition: all .12s ease; display: flex; flex-direction: column; gap: 5px; }
+  .thread-row:hover { border-color: var(--line); transform: translateY(-1px); }
+  .thread-row.active { border-color: var(--link); box-shadow: 0 0 0 2px rgba(9, 105, 218, 0.18); background: var(--bg); }
+  .thread-row-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .thread-row-title { font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.35; }
+  .thread-row-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+  .mini-pips { display: inline-flex; gap: 3px; align-items: center; }
+  .mini-pip { width: 7px; height: 7px; border-radius: 50%; background: var(--line); display: inline-block; }
+  .mini-pip.done { background: var(--c-Done); }
+  .mini-pip.missing { background: var(--bad); }
+  .threads-stream { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); display: flex; flex-direction: column; min-height: 76vh; max-height: 83vh; overflow: hidden; }
+  .thread-hdr { padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+  .thread-hdr-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .thread-feed { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+  .msg-bubble { display: flex; gap: 12px; align-items: flex-start; position: relative; }
+  .msg-avatar { width: 32px; height: 32px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 15px; flex-shrink: 0; font-weight: 700; }
+  .msg-card { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 12px 15px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+  .msg-card.kind-frame { border-left: 3px solid var(--link); }
+  .msg-card.kind-plan { border-left: 3px solid var(--c-Next); }
+  .msg-card.kind-design_review, .msg-card.kind-ship_review { border-left: 3px solid var(--c-Done); }
+  .msg-card.kind-commit { background: var(--bg); border-left: 3px solid var(--muted); padding: 9px 14px; }
+  .msg-card.kind-verify { border-left: 3px solid var(--accent); }
+  .msg-card.kind-gate { border-left: 3px solid var(--bad); background: var(--badbg); }
+  .msg-card.kind-worklog { border-left: 3px solid var(--c-Done); background: var(--bg); }
+  .msg-hdr { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; font-size: 12px; }
+  .msg-hdr-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .msg-body { font-size: 13px; color: var(--text); line-height: 1.5; }
+  .thread-composer { border-top: 1px solid var(--line); background: var(--panel); padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .composer-next { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+  .composer-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .cmd-btn { font: inherit; font-size: 12px; font-weight: 600; padding: 6px 11px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all .12s ease; }
+  .cmd-btn:hover { border-color: var(--link); color: var(--link); }
+  .cmd-btn.primary { background: var(--link); color: #fff; border-color: var(--link); }
+  .cmd-btn.primary:hover { opacity: 0.92; color: #fff; }
+  /* Kit Control & Repair Panel */
+  .kit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin: 14px 0 22px; }
+  .kit-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .kit-card.token-hero { border: 2px solid var(--accent); background: var(--bg); }
+  .kit-card h2 { margin: 0; font-size: 14px; text-transform: none; color: var(--text); letter-spacing: 0; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .constraint-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .constraint-row:last-child { border-bottom: none; }
+  .constraint-label { display: flex; flex-direction: column; gap: 2px; }
+  .constraint-label strong { font-size: 13px; }
+  .constraint-label span { font-size: 11px; color: var(--muted); }
+  .seg-group { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 2px; gap: 2px; flex-wrap: wrap; }
+  .seg-btn { border: none; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 5px; cursor: pointer; transition: all .12s ease; }
+  .seg-btn:hover { color: var(--text); background: var(--chip); }
+  .seg-btn.active { background: var(--link); color: #fff; font-weight: 600; }
+  .meter-bar { height: 10px; background: var(--chip); border-radius: 99px; overflow: hidden; border: 1px solid var(--line); }
+  .meter-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .25s ease; }
+  .toast-bar { position: fixed; bottom: 20px; right: 20px; z-index: 2000; max-width: 540px; background: var(--bg); border: 2px solid var(--link); border-radius: 10px; padding: 12px 16px; box-shadow: 0 8px 28px rgba(0,0,0,0.22); font-size: 12px; display: none; flex-direction: column; gap: 6px; }
+  .toast-bar.show { display: flex; }
 </style>
 </head>
 <body>
 <header>
   <div class="brand"><i></i><span id="pname">Nuhut</span></div>
   <nav class="tabs" id="tabs">
-    <a data-r="map">Map</a><a data-r="board">Board</a><a data-r="activity">Activity</a>
-    <a data-r="waiting">Blockages & Waiting</a><a data-r="git">Git</a><a data-r="docs">Documents</a>
+    <a data-r="threads">Threads</a><a data-r="map">Map</a><a data-r="board">Board</a><a data-r="activity">Activity</a>
+    <a data-r="waiting">Blockages & Waiting</a><a data-r="git">Git</a><a data-r="docs">Documents</a><a data-r="kit" id="tab-kit">Kit & Control</a>
   </nav>
   <input id="q" type="search" placeholder="Search or ⌘K…" aria-label="Search">
   <div class="meta" id="meta"></div>
 </header>
 <div id="crumbs"></div>
 <main id="main"></main>
+<div id="toast-bar" class="toast-bar"></div>
 <div id="drawer-backdrop" class="drawer-backdrop"></div>
 <div id="drawer" class="drawer"></div>
 <div id="map-tooltip" class="map-tooltip"></div>
@@ -595,9 +655,80 @@
     paintMeta();
   }
 
+  var toastTimer = null;
+  function showToast(title, detail, cmd) {
+    var box = document.getElementById("toast-bar");
+    if (!box) return;
+    box.textContent = "";
+    var top = el("div", { style: "display: flex; align-items: center; justify-content: space-between; gap: 10px;" }, [
+      el("strong", { text: title }),
+      el("button", { text: "✕", style: "border: none; background: transparent; cursor: pointer; color: var(--muted);", on: { click: function () { box.className = "toast-bar"; } } })
+    ]);
+    box.appendChild(top);
+    if (detail) box.appendChild(el("div", { cls: "muted", text: detail }));
+    if (cmd) {
+      var codeRow = el("div", { style: "display: flex; align-items: center; gap: 8px; margin-top: 4px;" }, [
+        el("code", { style: "flex: 1; padding: 4px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow-x: auto;", text: cmd }),
+        el("button", { cls: "cmd-btn", text: "Copy", on: { click: function (e) {
+          if (navigator.clipboard) navigator.clipboard.writeText(cmd);
+          e.target.textContent = "Copied!";
+        } } })
+      ]);
+      box.appendChild(codeRow);
+    }
+    box.className = "toast-bar show";
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { box.className = "toast-bar"; }, cmd ? 8500 : 4000);
+  }
+
+  function copyCmd(cmd, label) {
+    if (navigator.clipboard) navigator.clipboard.writeText(cmd);
+    showToast("Copied command: " + (label || "CLI"), "Run this in your project terminal:", cmd);
+  }
+
+  function kitApi(endpoint, payload, fallbackCmd, desc) {
+    if (LIVE && M.action_token) {
+      fetch(endpoint.replace(/^\//, ""), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Action-Token": M.action_token
+        },
+        body: JSON.stringify(payload || {})
+      }).then(function (r) { return r.json(); }).then(function (res) {
+        if (!res || !res.ok) {
+          showToast("Update failed", (res && res.error) || "Could not apply change", fallbackCmd);
+          return;
+        }
+        return fetch("model.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (model) {
+          load(model);
+          liveAt = new Date();
+          paintMeta();
+          render();
+          var msg = (res.applied && res.applied.join(", ")) || (res.repaired && res.repaired.join(", ")) || desc || "Applied";
+          showToast("✓ Saved to kit", msg);
+        });
+      }).catch(function () {
+        copyCmd(fallbackCmd, desc);
+      });
+    } else {
+      if (navigator.clipboard) navigator.clipboard.writeText(fallbackCmd);
+      showToast(
+        "Static Snapshot Mode — Command Copied",
+        "Start `python3 .ai-sdlc/bin/sdlc.py view --serve` for 1-click live edits, or run this copied command:",
+        fallbackCmd
+      );
+    }
+  }
+
   function paintMeta() {
     document.getElementById("pname").textContent = M.project || "Nuhut";
     document.title = (M.project || "Project") + " — Nuhut view";
+    var kitTab = document.getElementById("tab-kit");
+    if (kitTab && M.kit) {
+      var fixCount = (M.kit.fixable && M.kit.fixable.filter(function (f) { return f.level !== "info"; }).length) || 0;
+      kitTab.textContent = (M.kit.token_saving ? "⚡ " : "") + "Kit & Control" + (fixCount ? " (" + fixCount + ")" : "");
+    }
     var meta = document.getElementById("meta");
     meta.textContent = "";
     var gitRef = M.git_head ? (M.git_branch ? M.git_branch + "@" : "") + M.git_head : "";
@@ -1114,6 +1245,7 @@
     var hdr = el("div", { cls: "drawer-header" }, [
       el("div", { style: "display: flex; align-items: baseline; gap: 8px; min-width: 0;" }, [
         el("strong", { style: "font-size: 15px;", text: id }),
+        link("Open thread 💬", "threads/" + id, "chip"),
         link("Open page ↗", "item/" + id, "chip")
       ]),
       el("button", { cls: "drawer-close", text: "✕", on: { click: closeDrawer } })
@@ -1326,7 +1458,7 @@
 
     var rows = [
       ["Cmd/Ctrl + K  or  /", "Open command palette"],
-      ["1 … 6", "Jump to tabs (1: Map, 2: Board, 3: Activity, 4: Waiting, 5: Git, 6: Docs)"],
+      ["1 … 8", "Jump to tabs (1: Threads, 2: Map, 3: Board, 4: Activity, 5: Waiting, 6: Git, 7: Docs, 8: Kit)"],
       ["t", "Toggle Dark / Light theme"],
       ["?", "Show this shortcuts help"],
       ["Esc", "Close palette, modal, or drawer"]
@@ -1383,12 +1515,15 @@
       var items = [];
 
       var navActions = [
-        { label: "Go to Project Map", hint: "Tab 1", run: function () { go("map"); } },
-        { label: "Go to Kanban Board", hint: "Tab 2", run: function () { go("board"); } },
-        { label: "Go to Activity Log", hint: "Tab 3", run: function () { go("activity"); } },
-        { label: "Go to Dependencies & Blockages Flow", hint: "Tab 4", run: function () { go("waiting"); } },
-        { label: "Go to Git Traceability", hint: "Tab 5", run: function () { go("git"); } },
-        { label: "Go to Documents", hint: "Tab 6", run: function () { go("docs"); } },
+        { label: "Go to Action Threads (Chat Stream)", hint: "Tab 1", run: function () { go("threads"); } },
+        { label: "Go to Kit & Control Panel (Constraints, Token Saver, Repair)", hint: "Tab 8", run: function () { go("kit"); } },
+        { label: "Toggle Token-Saving Mode (Lean + Single-Agent + Compact)", hint: "Kit Control", run: function () { go("kit"); } },
+        { label: "Go to Project Map", hint: "Tab 2", run: function () { go("map"); } },
+        { label: "Go to Kanban Board", hint: "Tab 3", run: function () { go("board"); } },
+        { label: "Go to Activity Log", hint: "Tab 4", run: function () { go("activity"); } },
+        { label: "Go to Dependencies & Blockages Flow", hint: "Tab 5", run: function () { go("waiting"); } },
+        { label: "Go to Git Traceability", hint: "Tab 6", run: function () { go("git"); } },
+        { label: "Go to Documents", hint: "Tab 7", run: function () { go("docs"); } },
         { label: "View Dependencies & Blockages Map", hint: "Map Focus", run: function () { go("map"); setTimeout(function () { var b = document.querySelector('[data-p="blockages"]'); if (b) b.click(); }, 60); } },
         { label: "Toggle Theme (Dark / Light)", hint: "Key: T", run: function () { toggleTheme(); } },
         { label: "Export Standalone HTML", hint: "Action", run: function () { exportHtml(); } },
@@ -1555,17 +1690,21 @@
       e.preventDefault();
       toggleTheme();
     } else if (e.key === "1") {
-      go("map");
+      go("threads");
     } else if (e.key === "2") {
-      go("board");
+      go("map");
     } else if (e.key === "3") {
-      go("activity");
+      go("board");
     } else if (e.key === "4") {
-      go("waiting");
+      go("activity");
     } else if (e.key === "5") {
-      go("git");
+      go("waiting");
     } else if (e.key === "6") {
+      go("git");
+    } else if (e.key === "7") {
       go("docs");
+    } else if (e.key === "8") {
+      go("kit");
     }
   });
 
@@ -4531,17 +4670,843 @@
     return box;
   }
 
+  // ---------------------------------------------------------------- threads (chat action stream)
+  var THREAD_STATE = { selected: "", query: "", filter: "all", role: "", reviewer: "" };
+
+  function pickDefaultThreadId() {
+    var order = M.order || [];
+    var now = order.filter(function (id) { return ITEMS[id] && ITEMS[id].column === "Now"; });
+    if (now.length) return now[0];
+    var wait = order.filter(function (id) { return ITEMS[id] && (ITEMS[id].column === "Blocked" || ITEMS[id].column === "Parked"); });
+    if (wait.length) return wait[0];
+    var next = order.filter(function (id) { return ITEMS[id] && ITEMS[id].column === "Next"; });
+    if (next.length) return next[0];
+    var done = order.filter(function (id) { return ITEMS[id] && ITEMS[id].column === "Done"; });
+    if (done.length) return done[0];
+    return order[0] || "";
+  }
+
+  function diagnoseNextAction(it) {
+    if (!it) return { label: "Select a work item", cmd: "" };
+    var id = it.id, steps = it.steps || {}, tier = it.tier || "2", col = it.column || "";
+    var kit = M.kit || {}, c = kit.constraints || {};
+    var revCli = THREAD_STATE.reviewer || c.preferred_reviewer || "codex";
+    var roleName = THREAD_STATE.role || it.owner || "qa";
+    if (col === "Parked" || col === "Blocked") {
+      var who = (it.extra && (it.extra["Waiting on whom"] || it.extra["Unblocked by"])) || "named human";
+      return {
+        label: "Waiting on " + who + " — resolve gate or run verification",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py verify --parallel",
+        kind: "warn"
+      };
+    }
+    if (tier === "1" && steps["Plan"] === "missing") {
+      return {
+        label: "Tier 1 requires a plan file before building",
+        cmd: "/sdlc-plan " + id,
+        kind: "warn"
+      };
+    }
+    if (tier === "1" && steps["Design review"] === "missing") {
+      return {
+        label: "Tier 1 requires a Design Review before building",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py review " + id + " --role " + roleName + " --by " + revCli + " --stage design",
+        kind: "warn"
+      };
+    }
+    if (steps["Build"] !== "done" && !(it.commits && it.commits.length)) {
+      return {
+        label: "Ready to build — record Work-Item & Agent trailers on commit",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py trailers " + id,
+        kind: "info"
+      };
+    }
+    if (steps["Verify"] !== "done") {
+      return {
+        label: "Run verification suite to record evidence in the ledger",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py verify --parallel",
+        kind: "info"
+      };
+    }
+    var needInd = c.independent_review !== "none" && (tier === "1" || (tier === "2" && c.independent_review === "Tier 1 and 2"));
+    var hasInd = (it.reviews || []).some(function (r) { return r.independent; });
+    if (needInd && !hasInd) {
+      return {
+        label: "Tier " + tier + " requires an independent cross-model review (" + revCli + ")",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py review " + id + " --role " + roleName + " --by " + revCli,
+        kind: "warn"
+      };
+    }
+    if (steps["Log"] === "missing" || !(it.worklog && it.worklog.length)) {
+      return {
+        label: "All checks green — draft compact worklog line from commits & verify runs",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py log --since main --write",
+        kind: "ok"
+      };
+    }
+    return {
+      label: col === "Done" ? "Completed & verified" : "Ready to close in backlog.md",
+      cmd: "python3 .ai-sdlc/bin/sdlc.py doctor --strict",
+      kind: "ok"
+    };
+  }
+
+  function renderThreadBubble(it, ev) {
+    var icon = "•", badgeText = ev.kind, avatarBg = "var(--panel)";
+    var hdrLeft = [], hdrRight = [], bodyNodes = [];
+
+    if (ev.kind === "frame") {
+      icon = "📋";
+      hdrLeft.push(el("strong", { text: "Framed Work Item" }));
+      if (ev.tier) hdrLeft.push(el("span", { cls: "chip", text: "Tier " + ev.tier }));
+      if (ev.owner) hdrLeft.push(el("span", { cls: "chip", text: "Role: " + ev.owner }));
+      if (ev.date) hdrRight.push(el("span", { cls: "muted", text: ev.date }));
+      bodyNodes.push(el("div", { style: "font-weight: 600; margin-bottom: 4px;", text: it.id + " — " + (ev.title || "(untitled)") }));
+      if (ev.depends && ev.depends.length) {
+        var depLine = el("div", { style: "font-size: 12px; margin-top: 4px;" }, [el("span", { cls: "muted", text: "Depends on: " })]);
+        ev.depends.forEach(function (d, idx) {
+          if (idx) depLine.appendChild(document.createTextNode(", "));
+          depLine.appendChild(link(d, "threads/" + d, "chip"));
+        });
+        bodyNodes.push(depLine);
+      }
+      if (ev.dependents && ev.dependents.length) {
+        var blkLine = el("div", { style: "font-size: 12px; margin-top: 4px;" }, [el("span", { cls: "muted", text: "Unblocks: " })]);
+        ev.dependents.forEach(function (d, idx) {
+          if (idx) blkLine.appendChild(document.createTextNode(", "));
+          blkLine.appendChild(link(d, "threads/" + d, "chip"));
+        });
+        bodyNodes.push(blkLine);
+      }
+    } else if (ev.kind === "plan") {
+      icon = "📐";
+      hdrLeft.push(el("strong", { text: "Implementation Plan" }));
+      hdrLeft.push(link(ev.path, docRoute(ev.doc_index), "chip"));
+      if (ev.date) hdrRight.push(el("span", { cls: "muted", text: ev.date }));
+      if (it.plan_check) {
+        var pc = it.plan_check;
+        var hasDrift = (pc.unplanned && pc.unplanned.length) || (pc.untouched && pc.untouched.length);
+        var pcBox = el("div", {
+          style: "margin: 6px 0 8px; padding: 8px 10px; border-radius: 6px; font-size: 12px; border: 1px solid " +
+                 (hasDrift ? "var(--warn)" : "var(--accent)") + "; background: var(--bg);"
+        }, [
+          el("div", { style: "font-weight: 600; display: flex; justify-content: space-between; align-items: center;" }, [
+            el("span", { text: hasDrift ? "⚠ Plan Conformance Drift Detected" : "✓ Plan Conformance Verified" }),
+            el("span", { cls: "muted", text: (pc.planned || []).length + " planned · " + (pc.changed || []).length + " changed" })
+          ])
+        ]);
+        if (pc.unplanned && pc.unplanned.length) {
+          pcBox.appendChild(el("div", { style: "margin-top: 4px; color: var(--bad);", text: "Unplanned files touched: " + pc.unplanned.join(", ") }));
+        }
+        if (pc.untouched && pc.untouched.length) {
+          pcBox.appendChild(el("div", { style: "margin-top: 4px; color: var(--warn);", text: "Planned paths untouched: " + pc.untouched.join(", ") }));
+        }
+        bodyNodes.push(pcBox);
+      }
+      var planDoc = DOCS[ev.doc_index];
+      if (planDoc) {
+        var det = el("details", null, [
+          el("summary", { style: "cursor: pointer; font-weight: 500; font-size: 12px; color: var(--link);", text: "Read plan (" + planDoc.title + ")" }),
+          renderMd(planDoc.text, planDoc.path.split("/").slice(0, -1).join("/"))
+        ]);
+        bodyNodes.push(det);
+      }
+    } else if (ev.kind === "design_review" || ev.kind === "ship_review") {
+      icon = ev.kind === "design_review" ? "🔍" : "🛡";
+      var revDoc = DOCS[ev.doc_index];
+      var matchRev = (it.reviews || []).filter(function (r) { return ev.path.indexOf(r.file) >= 0; })[0];
+      hdrLeft.push(el("strong", { text: ev.kind === "design_review" ? "Design Review" : "Ship Review" }));
+      hdrLeft.push(link(ev.path.split("/").pop(), docRoute(ev.doc_index), "chip"));
+      if (matchRev) {
+        hdrLeft.push(el("span", { cls: "chip", text: "Reviewer: " + matchRev.reviewer }));
+        hdrLeft.push(el("span", {
+          cls: "chip",
+          style: matchRev.independent ? "background: var(--c-Done); color: #fff;" : "background: var(--warn); color: #fff;",
+          text: matchRev.independent ? "✓ Independent Model Family" : "⚠ Self-Check (Same Family)"
+        }));
+      }
+      if (ev.date) hdrRight.push(el("span", { cls: "muted", text: ev.date }));
+      if (revDoc) {
+        bodyNodes.push(el("details", { open: true }, [
+          el("summary", { style: "cursor: pointer; font-weight: 500; font-size: 12px; color: var(--link);", text: "Review findings (" + revDoc.title + ")" }),
+          renderMd(revDoc.text, revDoc.path.split("/").slice(0, -1).join("/"))
+        ]));
+      }
+    } else if (ev.kind === "commit") {
+      icon = "🔨";
+      hdrLeft.push(el("code", { text: ev.sha }));
+      if (ev.agent || ev.model) {
+        hdrLeft.push(el("span", { cls: "chip", text: "🤖 " + (ev.agent || "agent") + (ev.model ? " / " + ev.model : "") }));
+      } else if (ev.author) {
+        hdrLeft.push(el("span", { cls: "chip", text: ev.author }));
+      }
+      if (ev.tokens) hdrLeft.push(el("span", { cls: "chip", text: ev.tokens + " tok" }));
+      if (ev.minutes) hdrLeft.push(el("span", { cls: "chip", text: ev.minutes + " min" }));
+      if (ev.date) hdrRight.push(el("span", { cls: "muted", text: ev.date }));
+      bodyNodes.push(el("div", null, [inline(ev.subject)]));
+    } else if (ev.kind === "verify") {
+      icon = "✅";
+      var allPass = (ev.stages || []).every(function (s) { return String(s.result || "").indexOf("Verified: fail") < 0; });
+      if (!allPass) icon = "❌";
+      hdrLeft.push(el("strong", { text: allPass ? "Verification Suite Passed" : "Verification Failure Recorded" }));
+      if (ev.commit) hdrLeft.push(el("code", { text: "@" + ev.commit }));
+      if (ev.dirty) hdrLeft.push(el("span", { cls: "chip", style: "color: var(--warn);", text: "dirty working tree" }));
+      if (ev.time) hdrRight.push(el("span", { cls: "muted", text: ev.time.replace("T", " ").replace("Z", "") }));
+      var stageWrap = el("div", { style: "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;" });
+      (ev.stages || []).forEach(function (s) {
+        var ok = String(s.result || "").indexOf("Verified: pass") === 0;
+        var fail = String(s.result || "").indexOf("Verified: fail") === 0;
+        stageWrap.appendChild(el("span", {
+          cls: "chip",
+          style: ok ? "background: var(--c-Done); color: #fff;" : (fail ? "background: var(--bad); color: #fff;" : ""),
+          text: s.stage + ": " + s.result
+        }));
+      });
+      bodyNodes.push(stageWrap);
+    } else if (ev.kind === "gate") {
+      icon = "🛑";
+      hdrLeft.push(el("strong", { style: "color: var(--bad);", text: ev.column + " — Human Gate / Decision Required" }));
+      if (ev.date) hdrRight.push(el("span", { cls: "muted", text: "Since " + ev.date }));
+      if (ev.waiting_on) bodyNodes.push(el("div", null, [el("strong", { text: "Waiting on: " }), document.createTextNode(ev.waiting_on)]));
+      if (ev.decision) bodyNodes.push(el("div", { style: "margin-top: 4px;" }, [el("strong", { text: "Decision / Unblock needed: " }), inline(ev.decision)]));
+    } else if (ev.kind === "worklog") {
+      icon = "🏁";
+      hdrLeft.push(el("strong", { text: "Worklog Entry" }));
+      if (ev.compact) hdrLeft.push(el("span", { cls: "chip", text: "compact log" }));
+      if (ev.date) hdrRight.push(el("span", { cls: "muted", text: ev.date }));
+      bodyNodes.push(entryBox(ev.worklog_index, false));
+    } else {
+      icon = "📄";
+      hdrLeft.push(el("strong", { text: ev.title || ev.kind }));
+      if (ev.path) hdrLeft.push(link(ev.path, docRoute(ev.doc_index), "chip"));
+      if (ev.date) hdrRight.push(el("span", { cls: "muted", text: ev.date }));
+    }
+
+    return el("div", { cls: "msg-bubble" }, [
+      el("div", { cls: "msg-avatar", style: "background: " + avatarBg, text: icon }),
+      el("div", { cls: "msg-card kind-" + ev.kind }, [
+        el("div", { cls: "msg-hdr" }, [
+          el("div", { cls: "msg-hdr-left" }, hdrLeft),
+          el("div", null, hdrRight)
+        ]),
+        el("div", { cls: "msg-body" }, bodyNodes)
+      ])
+    ]);
+  }
+
+  function viewThreads(selectedId) {
+    tab("threads");
+    if (selectedId && ITEMS[selectedId]) {
+      THREAD_STATE.selected = selectedId;
+    } else if (!THREAD_STATE.selected || !ITEMS[THREAD_STATE.selected]) {
+      THREAD_STATE.selected = pickDefaultThreadId();
+    }
+    var activeId = THREAD_STATE.selected;
+    var activeItem = ITEMS[activeId];
+
+    crumbs([[M.project || "Project", "threads"], ["Action Threads"], activeId ? [activeId] : null].filter(Boolean));
+
+    var kit = M.kit || {}, c = kit.constraints || {};
+    var topBar = el("div", { cls: "sub-toolbar" }, [
+      el("div", { cls: "sub-toolbar-left" }, [
+        el("div", { cls: "view-segmented" }, [
+          el("button", { cls: "active", text: "💬 Action Threads" }),
+          el("button", { text: "🗺 Mind Map Canvas", on: { click: function () { go("map"); } } })
+        ]),
+        el("span", { cls: "chip", text: "Effort: " + (c.effort_mode || "Normal") }),
+        el("span", { cls: "chip", text: "2nd Reviewer: " + (c.independent_review || "Tier 1") }),
+        kit.token_saving ? el("span", { cls: "chip", style: "background: var(--accent); color: #fff;", text: "⚡ Token-Saving Mode ON" }) : null
+      ]),
+      el("div", { cls: "sub-toolbar-right" }, [
+        el("button", {
+          cls: "cmd-btn",
+          text: "⚙ Adjust Kit Constraints & Token Saver",
+          on: { click: function () { go("kit"); } }
+        })
+      ])
+    ]);
+    main.appendChild(topBar);
+
+    var layout = el("div", { cls: "threads-layout" });
+
+    // Left Pane: Thread Inbox
+    var inbox = el("div", { cls: "threads-inbox" });
+    var searchIn = el("input", {
+      type: "search",
+      cls: "filter-input",
+      placeholder: "Filter threads by ID, title, or agent…",
+      value: THREAD_STATE.query,
+      on: { input: function () { THREAD_STATE.query = searchIn.value; renderInboxList(); } }
+    });
+    var filterBar = el("div", { style: "display: flex; gap: 4px; flex-wrap: wrap;" });
+    [["all", "All"], ["active", "Now"], ["human", "Needs Human"], ["gaps", "Missing Steps"], ["done", "Done"]].forEach(function (f) {
+      filterBar.appendChild(el("button", {
+        cls: "seg-btn" + (THREAD_STATE.filter === f[0] ? " active" : ""),
+        text: f[1],
+        on: { click: function () { THREAD_STATE.filter = f[0]; viewThreads(activeId); } }
+      }));
+    });
+    inbox.appendChild(el("div", { cls: "threads-inbox-top" }, [searchIn, filterBar]));
+
+    var inboxList = el("div", { cls: "threads-inbox-list" });
+    inbox.appendChild(inboxList);
+
+    function renderInboxList() {
+      inboxList.textContent = "";
+      var q = (THREAD_STATE.query || "").trim().toLowerCase();
+      var groups = [
+        { title: "Active / In Flight", cols: ["Now"] },
+        { title: "Needs Human / Blocked", cols: ["Blocked", "Parked"] },
+        { title: "Ready / Queue", cols: ["Next", "Later"] },
+        { title: "Completed", cols: ["Done", "Other"] }
+      ];
+      var anyShown = false;
+      groups.forEach(function (g) {
+        var ids = (M.order || []).filter(function (id) {
+          var it = ITEMS[id];
+          if (!it || g.cols.indexOf(it.column) < 0) return false;
+          if (THREAD_STATE.filter === "active" && it.column !== "Now") return false;
+          if (THREAD_STATE.filter === "human" && ["Blocked", "Parked"].indexOf(it.column) < 0) return false;
+          if (THREAD_STATE.filter === "done" && it.column !== "Done") return false;
+          if (THREAD_STATE.filter === "gaps" && !Object.keys(it.steps || {}).some(function (k) { return it.steps[k] === "missing"; })) return false;
+          if (q) {
+            var hay = (id + " " + (it.title || "") + " " + (it.owner || "") + " " + (it.author || "")).toLowerCase();
+            if (hay.indexOf(q) < 0) return false;
+          }
+          return true;
+        });
+        if (!ids.length) return;
+        anyShown = true;
+        inboxList.appendChild(el("div", { cls: "threads-group-hdr" }, [
+          el("span", { text: g.title }),
+          el("span", { cls: "chip", text: String(ids.length) })
+        ]));
+        ids.forEach(function (id) {
+          var it = ITEMS[id];
+          var pips = el("span", { cls: "mini-pips", title: "Lifecycle steps" });
+          (M.steps || []).forEach(function (s) {
+            var st = (it.steps || {})[s] || "n/a";
+            pips.appendChild(el("span", { cls: "mini-pip " + (st === "n/a" ? "na" : st), title: s + ": " + st }));
+          });
+          var row = el("div", {
+            cls: "thread-row" + (id === activeId ? " active" : ""),
+            on: { click: function () { THREAD_STATE.selected = id; go("threads/" + encodeURIComponent(id)); } }
+          }, [
+            el("div", { cls: "thread-row-top" }, [
+              el("div", { style: "display: flex; align-items: center; gap: 6px;" }, [
+                el("strong", { style: "font-size: 12px;", text: id }),
+                it.tier ? el("span", { cls: "chip", text: "T" + it.tier }) : null
+              ]),
+              colChip(it.column)
+            ]),
+            el("div", { cls: "thread-row-title", text: clip(it.title || "(untitled)", 68) }),
+            el("div", { cls: "thread-row-meta" }, [
+              el("span", { text: it.author ? "🤖 " + it.author : (it.owner || "unassigned") }),
+              pips
+            ])
+          ]);
+          inboxList.appendChild(row);
+        });
+      });
+      if (!anyShown) {
+        inboxList.appendChild(el("p", { cls: "muted", style: "padding: 12px; text-align: center;", text: "No threads match the current filter." }));
+      }
+    }
+    renderInboxList();
+    layout.appendChild(inbox);
+
+    // Right Pane: Chronological Action Stream
+    var stream = el("div", { cls: "threads-stream" });
+    if (!activeItem) {
+      stream.appendChild(el("div", { style: "padding: 40px; text-align: center;" }, [
+        el("h2", { text: "No work item threads yet" }),
+        el("p", { cls: "muted", text: "Frame your first item with /sdlc-intake or add a row to docs/project/backlog.md." })
+      ]));
+      layout.appendChild(stream);
+      main.appendChild(layout);
+      return;
+    }
+
+    var stepsBar = el("div", { cls: "steps", style: "margin: 0;" });
+    (M.steps || []).forEach(function (s) {
+      var st = (activeItem.steps || {})[s] || "n/a";
+      stepsBar.appendChild(el("span", { cls: "step " + (st === "n/a" ? "na" : st), text: s + (st === "missing" ? " !" : "") }));
+    });
+
+    var hdr = el("div", { cls: "thread-hdr" }, [
+      el("div", { cls: "thread-hdr-top" }, [
+        el("div", { style: "display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" }, [
+          el("strong", { style: "font-size: 16px;", text: activeId }),
+          colChip(activeItem.column),
+          activeItem.tier ? el("span", { cls: "chip", text: "Tier " + activeItem.tier }) : null,
+          activeItem.owner ? el("span", { cls: "chip", text: "Owner: " + activeItem.owner }) : null,
+          activeItem.author ? el("span", { cls: "chip", text: "🤖 " + activeItem.author }) : null
+        ]),
+        el("div", { style: "display: flex; gap: 6px; flex-wrap: wrap;" }, [
+          link("Full Item Record ↗", "item/" + encodeURIComponent(activeId), "chip"),
+          link("Focus on Board ↗", "board/focus/" + encodeURIComponent(activeId), "chip")
+        ])
+      ]),
+      el("div", { style: "font-size: 15px; font-weight: 600;", text: activeItem.title || "(untitled)" }),
+      stepsBar
+    ]);
+    stream.appendChild(hdr);
+
+    var feed = el("div", { cls: "thread-feed" });
+    var events = activeItem.thread || [];
+    events.forEach(function (ev) {
+      feed.appendChild(renderThreadBubble(activeItem, ev));
+    });
+
+    // If tests are locked in .ai-sdlc/test-lock.txt, surface an inline lock callout
+    var lockedTests = (kit.installed && kit.installed.guards && kit.installed.guards.test_locks) || [];
+    if (lockedTests.length) {
+      feed.appendChild(el("div", { cls: "msg-bubble" }, [
+        el("div", { cls: "msg-avatar", text: "🔒" }),
+        el("div", { cls: "msg-card kind-gate" }, [
+          el("div", { cls: "msg-hdr" }, [
+            el("strong", { text: "Reproducing Test Lock Active (.ai-sdlc/test-lock.txt)" }),
+            el("button", {
+              cls: "cmd-btn",
+              text: "🔓 Unlock Tests",
+              on: { click: function () {
+                kitApi("/api/fix", { action: "unlock-tests" }, "python3 .ai-sdlc/bin/sdlc.py fix unlock-tests", "Unlocked reproducing tests");
+              } }
+            })
+          ]),
+          el("div", { cls: "msg-body" }, [
+            el("div", { text: "Locked test files (protected from agent edits while fixing the bug): " + lockedTests.join(", ") })
+          ])
+        ])
+      ]));
+    }
+    stream.appendChild(feed);
+
+    // Bottom Next-Action & Command Composer Bar
+    var nextDiag = diagnoseNextAction(activeItem);
+    var revSelect = el("select", {
+      cls: "filter-select",
+      "aria-label": "Reviewer harness",
+      on: { change: function () { THREAD_STATE.reviewer = revSelect.value; viewThreads(activeId); } }
+    }, ["codex", "claude", "gemini"].map(function (hName) {
+      var opt = el("option", { value: hName, text: "Reviewer: " + hName });
+      if ((THREAD_STATE.reviewer || c.preferred_reviewer || "codex") === hName) opt.selected = true;
+      return opt;
+    }));
+
+    var roleList = ((kit.installed && kit.installed.roles) || []).filter(function (r) { return r.active; }).map(function (r) { return r.name; });
+    if (!roleList.length) roleList = ["qa", "security", "architect", "software-engineer"];
+    var curRole = THREAD_STATE.role || activeItem.owner || roleList[0];
+    if (roleList.indexOf(curRole) < 0) roleList.unshift(curRole);
+    var roleSelect = el("select", {
+      cls: "filter-select",
+      "aria-label": "Review role",
+      on: { change: function () { THREAD_STATE.role = roleSelect.value; viewThreads(activeId); } }
+    }, roleList.map(function (rName) {
+      var opt = el("option", { value: rName, text: "Role: " + rName });
+      if (curRole === rName) opt.selected = true;
+      return opt;
+    }));
+
+    var chosenReviewer = THREAD_STATE.reviewer || c.preferred_reviewer || "codex";
+    var composer = el("div", { cls: "thread-composer" }, [
+      el("div", { cls: "composer-next" }, [
+        el("div", null, [
+          el("strong", { text: "Next Action: " }),
+          el("span", { text: nextDiag.label })
+        ]),
+        nextDiag.cmd ? el("button", {
+          cls: "cmd-btn primary",
+          text: "📋 Copy Next Step: " + clip(nextDiag.cmd, 44),
+          on: { click: function () { copyCmd(nextDiag.cmd, "Next Step"); } }
+        }) : null
+      ]),
+      el("div", { cls: "composer-actions" }, [
+        el("button", {
+          cls: "cmd-btn",
+          text: "▶ Verify Suite",
+          title: "Copy sdlc.py verify --parallel command",
+          on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py verify --parallel", "Verify"); } }
+        }),
+        el("button", {
+          cls: "cmd-btn",
+          text: "📐 Plan-Check",
+          title: "Copy sdlc.py plan-check command",
+          on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py plan-check " + activeId, "Plan-Check"); } }
+        }),
+        revSelect,
+        roleSelect,
+        el("button", {
+          cls: "cmd-btn",
+          text: "🛡 Second-Agent Review",
+          title: "Copy cross-harness sdlc.py review command",
+          on: { click: function () {
+            var cmd = "python3 .ai-sdlc/bin/sdlc.py review " + activeId + " --role " + curRole + " --by " + chosenReviewer;
+            copyCmd(cmd, "Independent Review");
+          } }
+        }),
+        el("button", {
+          cls: "cmd-btn",
+          text: "🏁 Draft Worklog",
+          title: "Copy sdlc.py log --since main --write command",
+          on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py log --since main --write", "Worklog"); } }
+        })
+      ])
+    ]);
+    stream.appendChild(composer);
+    layout.appendChild(stream);
+    main.appendChild(layout);
+  }
+
+  // ---------------------------------------------------------------- kit control & repair panel
+  function viewKit() {
+    tab("kit");
+    crumbs([[M.project || "Project", "threads"], ["Kit & Control Panel"]]);
+    var kit = M.kit || {};
+    var c = kit.constraints || {};
+    var rt = kit.reading_tokens || {};
+    var inst = kit.installed || {};
+    var fixable = kit.fixable || [];
+
+    var hdrRow = el("div", { style: "display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;" }, [
+      el("div", null, [
+        h(1, "Kit Constraints, Status & Auto-Repair"),
+        el("p", { cls: "muted", style: "margin-top: 2px;", text: "Adjust effort level, second-reviewer requirements, and Token-Saving Mode, inspect what is installed, and fix broken kit setup." })
+      ]),
+      el("span", {
+        cls: "chip",
+        style: LIVE ? "background: var(--c-Done); color: #fff; padding: 5px 10px;" : "background: var(--panel); border: 1px solid var(--line); padding: 5px 10px;",
+        text: LIVE ? "🟢 Live Server (--serve) — 1-Click Save Active" : "📄 Static Snapshot — Clicks Copy CLI Command"
+      })
+    ]);
+    main.appendChild(hdrRow);
+
+    // Top Summary Strip
+    var strip = el("div", { cls: "strip" }, [
+      el("div", { cls: "stat" }, [el("b", { text: "v" + (kit.kit_version || "4.0") }), el("span", { text: "Kit Version (" + (kit.profile || "full") + ")" })]),
+      el("div", { cls: "stat" }, [el("b", { text: c.effort_mode || "Normal" }), el("span", { text: "Default Effort Mode" })]),
+      el("div", { cls: "stat" }, [el("b", { text: c.independent_review || "Tier 1" }), el("span", { text: "2nd Agent Review Policy" })]),
+      el("div", { cls: "stat" }, [el("b", { text: "~" + ((rt.tier1_tokens || 0) / 1000).toFixed(1) + "k tok" }), el("span", { text: "Tier 1 Reading Cost" + (rt.saved_pct ? " (-" + rt.saved_pct + "%)" : "") })]),
+      el("div", { cls: "stat" }, [el("b", { text: String(fixable.length) }), el("span", { text: fixable.length ? "Fixable Setup Issues" : "Setup Health: Clean" })])
+    ]);
+    main.appendChild(strip);
+
+    if (kit.reviewer_warning) {
+      main.appendChild(el("div", {
+        cls: "banner bad",
+        style: "margin: 12px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
+      }, [
+        el("span", { text: "⚠ " + kit.reviewer_warning }),
+        el("button", {
+          cls: "cmd-btn",
+          text: "Switch to Single-Agent Mode (Independent Review: none)",
+          on: { click: function () {
+            kitApi("/api/config", { independent_review: "none" }, "python3 .ai-sdlc/bin/sdlc.py config --independent-review none", "Set Independent review to none");
+          } }
+        })
+      ]));
+    }
+
+    var grid = el("div", { cls: "kit-grid" });
+
+    // Card 1: Token-Saving Mode Toggle & Reading Budget Meter
+    var tsOn = !!kit.token_saving;
+    var tokenCard = el("div", { cls: "kit-card token-hero" }, [
+      el("h2", null, [
+        el("span", { text: "⚡ Token-Saving Mode" }),
+        el("span", {
+          cls: "chip",
+          style: tsOn ? "background: var(--accent); color: #fff;" : "",
+          text: tsOn ? "ACTIVE (Saving ~" + (rt.saved_pct || 65) + "% Context)" : "OFF (Standard Context)"
+        })
+      ]),
+      el("div", { cls: "muted", style: "font-size: 12px; line-height: 1.45;" }, [
+        document.createTextNode("Cuts heavy token-consuming tasks in one click: sets Effort to "),
+        el("code", { text: "Lean" }),
+        document.createTextNode(" (stays in "),
+        el("code", { text: "CARD.md" }),
+        document.createTextNode(" without opening "),
+        el("code", { text: "docs/process/*.md" }),
+        document.createTextNode("), folds role reviews into a single pass, sets Independent 2nd-Agent Review to "),
+        el("code", { text: "none" }),
+        document.createTextNode(", and uses 1-line "),
+        el("code", { text: "sdlc.py log --write" }),
+        document.createTextNode(" worklogs.")
+      ]),
+      el("div", { style: "margin: 4px 0;" }, [
+        el("div", { style: "display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;" }, [
+          el("span", { text: "Estimated Tier 1 Reading Context: ~" + (rt.tier1_tokens || 0) + " tokens (" + (rt.tier1_words || 0) + " words)" }),
+          el("span", { cls: "muted", text: "Baseline: ~" + (rt.baseline_tier1_tokens || 0) + " tokens" })
+        ]),
+        el("div", { cls: "meter-bar" }, [
+          el("div", {
+            cls: "meter-fill",
+            style: "width: " + Math.min(100, Math.max(12, Math.round(((rt.tier1_tokens || 1) / Math.max(1, rt.baseline_tier1_tokens || 1)) * 100))) + "%;"
+          })
+        ]),
+        el("div", { style: "display: flex; gap: 10px; margin-top: 6px; font-size: 11px; color: var(--muted);" }, [
+          el("span", { text: "Tier 3: ~" + (rt.tier3_tokens || 0) + " tok" }),
+          el("span", { text: "·" }),
+          el("span", { text: "Tier 2: ~" + (rt.tier2_tokens || 0) + " tok" }),
+          el("span", { text: "·" }),
+          el("span", { text: "Tier 1: ~" + (rt.tier1_tokens || 0) + " tok" })
+        ])
+      ]),
+      el("div", { style: "display: flex; gap: 8px; align-items: center; margin-top: 4px;" }, [
+        el("button", {
+          cls: "cmd-btn " + (tsOn ? "" : "primary"),
+          text: tsOn ? "Disable Token-Saving Mode (Restore Normal + Tier 1 Review)" : "⚡ Enable Token-Saving Mode Now",
+          on: { click: function () {
+            var targetState = !tsOn ? "on" : "off";
+            kitApi("/api/config", { token_saving: targetState }, "python3 .ai-sdlc/bin/sdlc.py config --token-saving " + targetState, "Token-Saving Mode " + targetState);
+          } }
+        })
+      ])
+    ]);
+    grid.appendChild(tokenCard);
+
+    // Card 2: Kit Constraints & Second-Reviewer Policy
+    function makeSegControl(options, currentVal, onPick) {
+      var grp = el("div", { cls: "seg-group" });
+      options.forEach(function (opt) {
+        var val = opt[0], label = opt[1];
+        grp.appendChild(el("button", {
+          cls: "seg-btn" + (String(currentVal).toLowerCase() === String(val).toLowerCase() ? " active" : ""),
+          text: label,
+          on: { click: function () { onPick(val); } }
+        }));
+      });
+      return grp;
+    }
+
+    var cliTools = inst.cli_tools || {};
+    var constraintsCard = el("div", { cls: "kit-card" }, [
+      el("h2", null, [el("span", { text: "🎛 Kit Constraints & Reviewer Policy" }), el("span", { cls: "muted", style: "font-size: 11px;", text: "charter.md + profile.json" })]),
+      el("div", { cls: "constraint-row" }, [
+        el("div", { cls: "constraint-label" }, [
+          el("strong", { text: "Default Effort Level" }),
+          el("span", { text: "Breadth of reading, role selection, and test depth" })
+        ]),
+        makeSegControl([["Lean", "Lean"], ["Normal", "Normal"], ["Beast", "Beast"]], c.effort_mode || "Normal", function (v) {
+          kitApi("/api/config", { effort: v }, "python3 .ai-sdlc/bin/sdlc.py config --effort " + v, "Effort=" + v);
+        })
+      ]),
+      el("div", { cls: "constraint-row" }, [
+        el("div", { cls: "constraint-label" }, [
+          el("strong", { text: "Second Agent / Independent Review" }),
+          el("span", { text: "Require review from a different model family than author" })
+        ]),
+        makeSegControl([["none", "Off (1 Agent)"], ["Tier 1", "Tier 1 Only"], ["Tier 1 and 2", "Tier 1 & 2"]], c.independent_review || "Tier 1", function (v) {
+          var cliVal = v === "none" ? "none" : (v === "Tier 1 and 2" ? "tier1-2" : "tier1");
+          kitApi("/api/config", { independent_review: v }, "python3 .ai-sdlc/bin/sdlc.py config --independent-review " + cliVal, "Independent review=" + v);
+        })
+      ]),
+      el("div", { cls: "constraint-row" }, [
+        el("div", { cls: "constraint-label" }, [
+          el("strong", { text: "Preferred Second Reviewer CLI" }),
+          el("span", { text: "Default harness for `sdlc.py review` (✓ = on PATH)" })
+        ]),
+        makeSegControl(["codex", "claude", "gemini"].map(function (k) {
+          return [k, k + (cliTools[k] ? " ✓" : " ✗")];
+        }), c.preferred_reviewer || "codex", function (v) {
+          kitApi("/api/config", { preferred_reviewer: v }, "python3 .ai-sdlc/bin/sdlc.py config --reviewer " + v, "Reviewer=" + v);
+        })
+      ]),
+      el("div", { cls: "constraint-row" }, [
+        el("div", { cls: "constraint-label" }, [
+          el("strong", { text: "Decision Style" }),
+          el("span", { text: "Ask every choice · Guide with recommendation · Autopilot" })
+        ]),
+        makeSegControl([["Ask", "Ask"], ["Guide", "Guide"], ["Autopilot", "Autopilot"]], c.decision_style || "Guide", function (v) {
+          kitApi("/api/config", { decision_style: v }, "python3 .ai-sdlc/bin/sdlc.py config --decision-style " + v, "Decision style=" + v);
+        })
+      ]),
+      el("div", { cls: "constraint-row" }, [
+        el("div", { cls: "constraint-label" }, [
+          el("strong", { text: "Tier Rules & Development Method" }),
+          el("span", { text: "Standard (blast radius) vs Strict · Item vs Epic" })
+        ]),
+        el("div", { style: "display: flex; gap: 6px; flex-wrap: wrap;" }, [
+          makeSegControl([["Standard", "Standard"], ["Strict", "Strict"]], c.tier_rules || "Standard", function (v) {
+            kitApi("/api/config", { tier_rules: v }, "python3 .ai-sdlc/bin/sdlc.py config --tier-rules " + v, "Tier rules=" + v);
+          }),
+          makeSegControl([["Item", "Item"], ["Epic", "Epic"]], c.dev_method || "Item", function (v) {
+            kitApi("/api/config", { dev_method: v }, "python3 .ai-sdlc/bin/sdlc.py config --dev-method " + v, "Dev method=" + v);
+          })
+        ])
+      ])
+    ]);
+    grid.appendChild(constraintsCard);
+
+    // Card 3: Fix Kit & Broken Setup ("Safe Auto-Repair")
+    var repairCard = el("div", { cls: "kit-card" }, [
+      el("h2", null, [
+        el("span", { text: "🔧 Fix Kit & Broken Setup" }),
+        el("button", {
+          cls: "cmd-btn primary",
+          text: "🔧 Fix Safe Setup Issues",
+          on: { click: function () {
+            kitApi("/api/fix", { action: "all" }, "python3 .ai-sdlc/bin/sdlc.py fix all", "Ran safe kit repairs");
+          } }
+        })
+      ]),
+      el("div", { cls: "muted", style: "font-size: 12px;", text: "Mechanical repairs sync profile.json drift, wire missing AGENTS.md pointers, restore interrupted bite runs, and unlock tests without fabricating charter decisions." })
+    ]);
+
+    var repairActions = [
+      { id: "sync-profile", label: "Sync .ai-sdlc/profile.json with charter.md", cmd: "python3 .ai-sdlc/bin/sdlc.py fix sync-profile" },
+      { id: "wire-pointer", label: "Wire CLAUDE.md pointer to AGENTS.md", cmd: "python3 .ai-sdlc/bin/sdlc.py fix wire-pointer" },
+      { id: "restore-bite", label: "Restore interrupted `sdlc.py bite` backup", cmd: "python3 .ai-sdlc/bin/sdlc.py fix restore-bite" },
+      { id: "unlock-tests", label: "Unlock reproducing tests in .ai-sdlc/test-lock.txt", cmd: "python3 .ai-sdlc/bin/sdlc.py fix unlock-tests" }
+    ];
+    repairActions.forEach(function (ra) {
+      var activeIssue = fixable.filter(function (f) { return f.id === ra.id; })[0];
+      repairCard.appendChild(el("div", { cls: "constraint-row" }, [
+        el("div", { cls: "constraint-label" }, [
+          el("strong", { text: ra.label }),
+          el("span", {
+            style: activeIssue ? "color: var(--bad); font-weight: 600;" : "",
+            text: activeIssue ? ("⚠ Needed: " + activeIssue.detail) : "✓ Healthy"
+          })
+        ]),
+        el("button", {
+          cls: "cmd-btn" + (activeIssue ? " primary" : ""),
+          text: activeIssue ? "Fix Now" : "Re-run",
+          on: { click: function () {
+            kitApi("/api/fix", { action: ra.id }, ra.cmd, ra.label);
+          } }
+        })
+      ]));
+    });
+
+    // Blank checks.* helper (explicit user choice, never fabricated automatically)
+    var blankStages = inst.blank_stages || [];
+    var detectedCmds = inst.detected_commands || {};
+    if (blankStages.length) {
+      var blankBox = el("div", { style: "margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line);" }, [
+        el("div", { style: "font-size: 12px; font-weight: 600; margin-bottom: 6px;", text: "Unconfigured Check Stages in charter.md (" + blankStages.length + " blank)" })
+      ]);
+      blankStages.slice(0, 6).forEach(function (st) {
+        var suggested = detectedCmds[st];
+        var btns = [];
+        if (suggested) {
+          btns.push(el("button", {
+            cls: "cmd-btn primary",
+            text: "Use `" + suggested + "`",
+            on: { click: function () {
+              var ch = {}; ch[st] = suggested;
+              kitApi("/api/config", { checks: ch }, "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=\"" + suggested + "\"", "Set checks." + st);
+            } }
+          }));
+        }
+        btns.push(el("button", {
+          cls: "cmd-btn",
+          text: "Mark `absent`",
+          on: { click: function () {
+            var ch = {}; ch[st] = "absent";
+            kitApi("/api/config", { checks: ch }, "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=absent", "Marked checks." + st + " absent");
+          } }
+        }));
+        blankBox.appendChild(el("div", { style: "display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 12px;" }, [
+          el("code", { text: "checks." + st }),
+          el("div", { style: "display: flex; gap: 6px;" }, btns)
+        ]));
+      });
+      repairCard.appendChild(blankBox);
+    }
+    grid.appendChild(repairCard);
+
+    // Card 4: What's Installed (Kit Status Inventory)
+    var harnesses = inst.harnesses || [];
+    var hooks = inst.hooks || {};
+    var guards = inst.guards || {};
+    var skills = inst.skills || [];
+    var activeRoles = (inst.roles || []).filter(function (r) { return r.active; });
+
+    var invCard = el("div", { cls: "kit-card" }, [
+      el("h2", null, [el("span", { text: "📦 What's Installed (Kit Status)" }), el("span", { cls: "chip", text: skills.length + " skills · " + activeRoles.length + " active roles" })])
+    ]);
+
+    var hSection = el("div", null, [
+      el("div", { style: "font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 6px;", text: "Agent Harnesses & Contract Pointers" })
+    ]);
+    var hWrap = el("div", { style: "display: flex; flex-wrap: wrap; gap: 6px;" });
+    harnesses.forEach(function (hItem) {
+      hWrap.appendChild(el("span", {
+        cls: "chip",
+        style: hItem.wired ? "background: var(--c-Done); color: #fff;" : "background: var(--badbg); color: var(--bad); border: 1px solid var(--bad);",
+        text: hItem.file + (hItem.wired ? " ✓" : " (unwired)")
+      }));
+    });
+    hSection.appendChild(hWrap);
+    invCard.appendChild(hSection);
+
+    var cSection = el("div", null, [
+      el("div", { style: "font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 6px;", text: "Detected CLI Tools on PATH" }),
+      el("div", { style: "display: flex; flex-wrap: wrap; gap: 6px;" }, Object.keys(cliTools).map(function (k) {
+        return el("span", {
+          cls: "chip",
+          style: cliTools[k] ? "background: var(--c-Done); color: #fff;" : "",
+          text: k + (cliTools[k] ? " ✓" : " ✗")
+        });
+      }))
+    ]);
+    invCard.appendChild(cSection);
+
+    var gSection = el("div", null, [
+      el("div", { style: "font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 6px;", text: "Enforcement Hooks & Guards" }),
+      el("div", { style: "display: flex; flex-wrap: wrap; gap: 6px;" }, [
+        el("span", { cls: "chip", text: "PreToolUse hooks: " + ((hooks.claude_hooks && hooks.claude_hooks.length) || 0) }),
+        el("span", { cls: "chip", text: "Git pre-commit: " + (hooks.git_pre_commit ? "ON ✓" : "off") }),
+        el("span", { cls: "chip", text: "Git commit-msg: " + (hooks.git_commit_msg ? "ON ✓" : "off") }),
+        el("span", { cls: "chip", text: "Protected paths: " + ((guards.protected && guards.protected.length) || 0) }),
+        el("span", { cls: "chip", text: "Locked tests: " + ((guards.test_locks && guards.test_locks.length) || 0) }),
+        el("span", { cls: "chip", text: "Approval gates: " + ((guards.gates && guards.gates.length) || 0) })
+      ])
+    ]);
+    invCard.appendChild(gSection);
+
+    var rSection = el("div", null, [
+      el("div", { style: "font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 6px;", text: "Active Charter Roles (" + activeRoles.length + ")" }),
+      el("div", { style: "display: flex; flex-wrap: wrap; gap: 4px;" }, activeRoles.map(function (r) {
+        return el("span", { cls: "chip", text: r.name });
+      }))
+    ]);
+    invCard.appendChild(rSection);
+    grid.appendChild(invCard);
+    main.appendChild(grid);
+
+    // Doctor findings section at bottom of Kit page
+    main.appendChild(h(2, "Mechanical Doctor Findings (" + (M.alerts || []).length + ")"));
+    if (!(M.alerts && M.alerts.length)) {
+      main.appendChild(el("p", { cls: "muted", text: "All mechanical doctor checks pass." }));
+    } else {
+      var alertList = el("div", { cls: "alerts" });
+      M.alerts.forEach(function (a) {
+        alertList.appendChild(el("div", { cls: "alert " + a.level }, [
+          el("span", { cls: "chip", text: a.level + " · " + a.check }), " ",
+          a.where ? el("code", { text: a.where }) : null, " ",
+          el("span", { text: a.message })
+        ]));
+      });
+      main.appendChild(alertList);
+    }
+  }
+
   // ---------------------------------------------------------------- router
   function render() {
     var parts = location.hash.replace(/^#\/?/, "").split("/");
     var y = window.scrollY;
     main.textContent = "";
-    var route = parts[0] || "map";
+    var route = parts[0] || "threads";
     if (currentDocScrollSpy && route !== "doc") {
       window.removeEventListener("scroll", currentDocScrollSpy);
       currentDocScrollSpy = null;
     }
-    if (route === "board") {
+    if (route === "threads") viewThreads(decodeURIComponent(parts[1] || ""));
+    else if (route === "kit") viewKit();
+    else if (route === "map") viewMap();
+    else if (route === "board") {
       var focusId = null, stageFilter = null;
       if (parts[1] === "focus") {
         focusId = decodeURIComponent(parts[2] || "");

@@ -61,7 +61,7 @@ effective mode in the plan and worklog.
 
 | Mode | Above the unchanged risk floor |
 | --- | --- |
-| **Lean** | Targeted reading; first sufficient rung of no implementation → repository reuse → stdlib → native platform → installed dependency → minimum custom code; minimum applicable roles; concise required records; smallest meaningful tests, then every tier-required check. |
+| **Lean** | Targeted reading (`CARD.md` only unless a rule is contested); first sufficient rung of no implementation → repository reuse → stdlib → native platform → installed dependency → minimum custom code; minimum applicable roles in a single combined review pass; concise required records (`sdlc.py log --write` one-line worklog); smallest meaningful tests, then every tier-required check. |
 | **Normal** | Current balanced flow, obvious alternatives, standard role and test selection. |
 | **Beast** | Maximum confidence: adjacent flows/history, up to three viable alternatives, materially adjacent roles, and relevant adversarial/recovery/concurrency/scale checks. Never extra product scope or speculative code. |
 

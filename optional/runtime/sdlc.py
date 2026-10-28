@@ -1276,14 +1276,32 @@ def review_records(project, item):
     return found
 
 
+def independent_review_policy(charter):
+    """(policy, tiers, state): policy is 'none', 'Tier 1', or 'Tier 1 and 2'."""
+    raw = labelled(charter, "Independent review required for")
+    if raw is None:
+        return "Tier 1", set(["1"]), "blank"
+    cell = UNFILLED.sub("", raw).strip()
+    has_none = bool(re.search(r"\b(none|off)\b", cell, re.I))
+    has_t12 = "and 2" in cell
+    t1_count = cell.count("Tier 1")
+    if has_none and t1_count == 0:
+        return "none", set(), "decided"
+    if has_t12 and t1_count == 1 and not has_none:
+        return "Tier 1 and 2", set(["1", "2"]), "decided"
+    if t1_count == 1 and not has_t12 and not has_none:
+        return "Tier 1", set(["1"]), "decided"
+    return "Tier 1", set(["1"]), ("blank" if not cell else "undecided")
+
+
 def check_identity(project, out):
     """Tier 1 work (and Tier 2 if the charter says so) needs a review from a different
     model family than the author's. Same-family reviews are recorded as self-checks and
     clear nothing. Only items whose commits carry Agent or Model trailers are judged:
     earlier work has no author identity to compare."""
-    cell = UNFILLED.sub("", labelled(project.charter, "Independent review required for") or "")
-    # The template lists both options; only a cell that names "Tier 1 and 2" alone decides.
-    tiers = {"1", "2"} if "and 2" in cell and cell.count("Tier 1") == 1 else {"1"}
+    _, tiers, _ = independent_review_policy(project.charter)
+    if not tiers:
+        return
     where = os.path.join(project.docs, "project", "backlog.md")
     for item, status, cells in backlog_rows(project.records("backlog.md"), project.prefix,
                                             getattr(project, "legacy_prefixes", None)):
@@ -1807,6 +1825,560 @@ def print_plan_check(result):
               "question. Neither is decided here.")
 
 
+# ---------------------------------------------------------------- kit control & repair
+
+def _word_count(path):
+    return len(read(path).split())
+
+
+def _active_lines(path):
+    return [line.strip() for line in read(path).splitlines()
+            if line.strip() and not line.strip().startswith("#")]
+
+
+def detect_candidate_commands(project):
+    """Inspect repo files to suggest candidate commands for blank checks.* stages without
+    fabricating or writing them automatically."""
+    candidates = {}
+    pkg_text = read(project.path("package.json"))
+    if pkg_text:
+        try:
+            pkg = json.loads(pkg_text)
+        except ValueError:
+            pkg = {}
+        scripts = pkg.get("scripts") if isinstance(pkg, dict) else {}
+        if isinstance(scripts, dict):
+            if "test" in scripts and "no test specified" not in str(scripts.get("test", "")):
+                candidates.setdefault("unit", "npm test")
+            if "lint" in scripts:
+                candidates.setdefault("lint", "npm run lint")
+            if "format" in scripts or "fmt" in scripts:
+                candidates.setdefault("format", "npm run " + ("format" if "format" in scripts else "fmt"))
+            if "typecheck" in scripts or "check-types" in scripts:
+                candidates.setdefault("typecheck", "npm run " + ("typecheck" if "typecheck" in scripts else "check-types"))
+            if "build" in scripts:
+                candidates.setdefault("build", "npm run build")
+            if "e2e" in scripts or "test:e2e" in scripts:
+                candidates.setdefault("e2e", "npm run " + ("e2e" if "e2e" in scripts else "test:e2e"))
+    pyproj = read(project.path("pyproject.toml"))
+    reqs = read(project.path("requirements.txt"))
+    has_py = bool(pyproj or reqs or os.path.isdir(project.path("tests"))
+                  or os.path.isfile(project.path("setup.py")))
+    if has_py:
+        if "pytest" in pyproj or "pytest" in reqs:
+            candidates.setdefault("unit", "pytest")
+        elif os.path.isdir(project.path("tests")):
+            candidates.setdefault("unit", "python3 -m unittest discover -s tests")
+        if "ruff" in pyproj or "ruff" in reqs:
+            candidates.setdefault("lint", "ruff check .")
+            candidates.setdefault("format", "ruff format --check .")
+        if "mypy" in pyproj or "mypy" in reqs:
+            candidates.setdefault("typecheck", "mypy .")
+    if os.path.isfile(project.path("Cargo.toml")):
+        candidates.setdefault("unit", "cargo test")
+        candidates.setdefault("lint", "cargo clippy -- -D warnings")
+        candidates.setdefault("format", "cargo fmt --check")
+        candidates.setdefault("build", "cargo build")
+    if os.path.isfile(project.path("go.mod")):
+        candidates.setdefault("unit", "go test ./...")
+        candidates.setdefault("build", "go build ./...")
+    return candidates
+
+
+def kit_status(project):
+    """Structured inventory of the kit installation, active constraints, token reading
+    budget, wired harnesses/hooks, and safe mechanical repairs."""
+    charter = project.charter
+    effort_val, effort_state = choice(labelled(charter, "Default effort mode"), EFFORT)
+    effort_resolved = effort_val or "Normal"
+    ind_policy, ind_tiers, ind_state = independent_review_policy(charter)
+    tier_val, tier_state = choice(labelled(charter, "Tier rules"), TIER_RULES)
+    tier_resolved = tier_val or "Standard"
+    dec_val, dec_state = choice(labelled(charter, "Decision style"), DECISION_STYLE)
+    dec_resolved = dec_val or "Guide"
+    dev_val, dev_state = choice(labelled(charter, "Development method"), DEV_METHOD)
+    dev_resolved = dev_val or "Item"
+    acq_val, acq_state = choice(labelled(charter, "Acquisition profile"), ACQUISITION)
+    acq_resolved = acq_val or "Standard"
+    budget_cell = UNFILLED.sub("", labelled(charter, "Agent budget per tier") or "").strip()
+
+    has_process_docs = os.path.isfile(
+        project.path(os.path.join(project.docs, "process", "00-operating-model.md"))
+    )
+    doc_profile = project.profile.get("profile") or ("full" if has_process_docs else "compact")
+    token_saving = bool(
+        project.profile.get("token_saving")
+        or (effort_resolved == "Lean" and ind_policy == "none")
+    )
+
+    cli_tools = dict((name, bool(shutil.which(name)))
+                     for name in ("claude", "codex", "gemini", "jq", "git", "python3"))
+    preferred_rev = project.profile.get("preferred_reviewer")
+    if preferred_rev not in ("codex", "claude", "gemini"):
+        preferred_rev = ("codex" if cli_tools.get("codex") else
+                         ("gemini" if cli_tools.get("gemini") else "claude"))
+
+    # Reading budget estimation (words and tokens ~= words * 1.3)
+    base_words = (
+        _word_count(project.path("AGENTS.md"))
+        + _word_count(project.path(os.path.join(project.docs, "CARD.md")))
+        + _word_count(project.path(project.charter_path))
+    )
+    backlog_words = _word_count(project.path(os.path.join(project.docs, "project", "backlog.md")))
+    roles_dir = project.path(os.path.join(project.docs, "roles"))
+    active_roles = [name for name, on, _ in roles(charter) if on]
+    role_words = [
+        _word_count(os.path.join(roles_dir, r + ".md"))
+        for r in active_roles
+        if os.path.isfile(os.path.join(roles_dir, r + ".md"))
+    ]
+    avg_role_words = int(sum(role_words) / len(role_words)) if role_words else 450
+    proc_dir = project.path(os.path.join(project.docs, "process"))
+    proc_words = 0
+    if os.path.isdir(proc_dir):
+        for fname in os.listdir(proc_dir):
+            if fname[:2].isdigit() and fname.endswith(".md"):
+                proc_words += _word_count(os.path.join(proc_dir, fname))
+    if proc_words == 0:
+        proc_words = 6200  # standard full process docs baseline for comparison
+
+    t3_words = base_words + backlog_words
+    # In Lean or Token-Saving mode, agents stay in CARD.md and use minimum roles (1 pass)
+    if effort_resolved == "Lean" or token_saving or doc_profile == "compact":
+        t2_words = t3_words + avg_role_words
+        t1_words = t3_words + (avg_role_words * 2)
+    elif effort_resolved == "Beast":
+        t2_words = t3_words + (avg_role_words * 3) + int(proc_words * 0.45)
+        t1_words = t3_words + sum(role_words or [avg_role_words * 4]) + proc_words
+    else:
+        t2_words = t3_words + (avg_role_words * 2) + int(proc_words * 0.25)
+        t1_words = t3_words + (avg_role_words * 3) + int(proc_words * 0.6)
+
+    if "2" in ind_tiers:
+        t2_words += base_words + avg_role_words
+    if "1" in ind_tiers:
+        t1_words += base_words + (avg_role_words * 2)
+
+    baseline_t1_words = t3_words + (avg_role_words * 3) + int(proc_words * 0.6) + base_words + (avg_role_words * 2)
+    saved_pct = max(0, int(round((1.0 - (float(t1_words) / max(1, baseline_t1_words))) * 100)))
+
+    # Harnesses and pointer files
+    pointer_candidates = list(POINTER_FILES)
+    cursor_rules_dir = project.path(".cursor/rules")
+    if os.path.isdir(cursor_rules_dir):
+        for name in sorted(os.listdir(cursor_rules_dir)):
+            if name.endswith(".mdc"):
+                rel = os.path.join(".cursor/rules", name)
+                if rel not in pointer_candidates:
+                    pointer_candidates.append(rel)
+    elif ".cursor/rules/agents.mdc" not in pointer_candidates:
+        pointer_candidates.insert(2, ".cursor/rules/agents.mdc")
+
+    harnesses = [{
+        "file": "AGENTS.md",
+        "exists": os.path.isfile(project.path("AGENTS.md")),
+        "wired": os.path.isfile(project.path("AGENTS.md")),
+        "role": "contract",
+    }]
+    for rel in pointer_candidates:
+        fpath = project.path(rel)
+        exists = os.path.isfile(fpath)
+        wired = exists and ("AGENTS.md" in read(fpath))
+        if exists or rel in ("CLAUDE.md", "GEMINI.md", ".cursor/rules/agents.mdc", ".github/copilot-instructions.md"):
+            harnesses.append({"file": rel, "exists": exists, "wired": wired, "role": "pointer"})
+
+    # Hooks & guards
+    claude_hooks_dir = project.path(".claude/hooks")
+    claude_hooks = sorted(n for n in os.listdir(claude_hooks_dir) if n.endswith(".sh")) \
+        if os.path.isdir(claude_hooks_dir) else []
+    pre_commit_path = project.path(".git/hooks/pre-commit")
+    commit_msg_path = project.path(".git/hooks/commit-msg")
+    hooks_info = {
+        "claude_hooks": claude_hooks,
+        "claude_settings": os.path.isfile(project.path(".claude/settings.json")),
+        "gemini_settings": os.path.isfile(project.path(".gemini/settings.json")),
+        "cursor_hooks": os.path.isfile(project.path(".cursor/hooks.json")),
+        "git_pre_commit": os.path.isfile(pre_commit_path) and "git-hooks/pre-commit" in read(pre_commit_path),
+        "git_commit_msg": os.path.isfile(commit_msg_path) and "git-hooks/commit-msg" in read(commit_msg_path),
+    }
+
+    protected_rules = _active_lines(project.path(".ai-sdlc/protected.txt"))
+    locked_tests = _active_lines(project.path(".ai-sdlc/test-lock.txt"))
+    gate_rules = _active_lines(project.path(".ai-sdlc/gates.txt"))
+    bite_active = os.path.isfile(project.path(os.path.join(BITE_DIR, "active.json")))
+
+    # Skills
+    skills = set()
+    for sdir in (".claude/skills", ".agents/skills"):
+        full_sdir = project.path(sdir)
+        if os.path.isdir(full_sdir):
+            for name in os.listdir(full_sdir):
+                if os.path.isdir(os.path.join(full_sdir, name)):
+                    skills.add(name)
+
+    cmds = charter_commands(charter)
+    blank_stages = [s for s in STAGES if cmds.get(s, "") == ""]
+    detected_cmds = detect_candidate_commands(project)
+
+    # Check safe mechanical fixables
+    prof_findings = Findings()
+    check_profile(project, prof_findings)
+    ptr_findings = Findings()
+    check_pointer(project, ptr_findings)
+
+    fixable = []
+    if prof_findings.items:
+        fixable.append({
+            "id": "sync-profile",
+            "title": "Sync .ai-sdlc/profile.json with charter.md",
+            "detail": "; ".join(f["message"] for f in prof_findings.items),
+            "level": "fail" if any(f["level"] == "fail" for f in prof_findings.items) else "warn",
+        })
+    if ptr_findings.items:
+        fixable.append({
+            "id": "wire-pointer",
+            "title": "Wire CLAUDE.md pointer to AGENTS.md",
+            "detail": ptr_findings.items[0]["message"],
+            "level": "fail",
+        })
+    if bite_active:
+        fixable.append({
+            "id": "restore-bite",
+            "title": "Restore interrupted bite backup",
+            "detail": "An interrupted `sdlc.py bite` left product files reverted in .ai-sdlc/bite/active.json.",
+            "level": "fail",
+        })
+    if locked_tests:
+        fixable.append({
+            "id": "unlock-tests",
+            "title": "Unlock reproducing test locks (%d locked)" % len(locked_tests),
+            "detail": "Locked in .ai-sdlc/test-lock.txt: " + ", ".join(locked_tests[:5]),
+            "level": "info",
+        })
+
+    available_agent_clis = [k for k in ("claude", "codex", "gemini") if cli_tools.get(k)]
+    reviewer_warning = ""
+    if ind_tiers and len(available_agent_clis) < 2:
+        reviewer_warning = (
+            "Independent review is required for Tier %s, but only %d agent CLI (%s) is on PATH. "
+            "Install a second CLI (codex/claude/gemini) or set Independent Review to 'none' for single-agent work."
+            % (", ".join(sorted(ind_tiers)), len(available_agent_clis),
+               ", ".join(available_agent_clis) or "none")
+        )
+
+    return {
+        "kit_version": project.manifest.get("kit_version") or project.profile.get("kit_version") or "unknown",
+        "docs_dir": project.docs,
+        "prefix": project.prefix,
+        "profile": doc_profile,
+        "has_process_docs": has_process_docs,
+        "token_saving": token_saving,
+        "constraints": {
+            "effort_mode": effort_resolved,
+            "effort_state": effort_state,
+            "independent_review": ind_policy,
+            "independent_review_state": ind_state,
+            "preferred_reviewer": preferred_rev,
+            "tier_rules": tier_resolved,
+            "tier_rules_state": tier_state,
+            "decision_style": dec_resolved,
+            "decision_style_state": dec_state,
+            "dev_method": dev_resolved,
+            "dev_method_state": dev_state,
+            "acquisition_profile": acq_resolved,
+            "acquisition_state": acq_state,
+            "agent_budget": budget_cell,
+        },
+        "reading_tokens": {
+            "tier3_words": t3_words,
+            "tier3_tokens": int(t3_words * 1.3),
+            "tier2_words": t2_words,
+            "tier2_tokens": int(t2_words * 1.3),
+            "tier1_words": t1_words,
+            "tier1_tokens": int(t1_words * 1.3),
+            "baseline_tier1_tokens": int(baseline_t1_words * 1.3),
+            "saved_pct": saved_pct,
+        },
+        "installed": {
+            "harnesses": harnesses,
+            "cli_tools": cli_tools,
+            "hooks": hooks_info,
+            "guards": {
+                "protected": protected_rules,
+                "test_locks": locked_tests,
+                "gates": gate_rules,
+                "bite_active": bite_active,
+            },
+            "skills": sorted(skills),
+            "roles": [{"name": n, "active": on, "reason": UNFILLED.sub("", r).strip()}
+                      for n, on, r in roles(charter)],
+            "commands": cmds,
+            "blank_stages": blank_stages,
+            "detected_commands": detected_cmds,
+        },
+        "fixable": fixable,
+        "reviewer_warning": reviewer_warning,
+    }
+
+
+def _set_charter_row(text, label, formatted_value):
+    """Replace or insert a `| **Label** | value |` row in charter.md."""
+    lines = text.splitlines()
+    target_cell = "**%s**" % label
+    replaced = False
+    for idx, line in enumerate(lines):
+        cells = split_row(line)
+        if cells and len(cells) >= 2 and cells[0] == target_cell:
+            lines[idx] = "| **%s** | %s |" % (label, formatted_value)
+            replaced = True
+            break
+    if not replaced:
+        # Insert at top of Risk defaults table if present
+        for idx, line in enumerate(lines):
+            if line.strip() == "## Risk defaults":
+                for j in range(idx + 1, min(idx + 6, len(lines))):
+                    if lines[j].strip().startswith("| ---"):
+                        lines.insert(j + 1, "| **%s** | %s |" % (label, formatted_value))
+                        replaced = True
+                        break
+                break
+        if not replaced:
+            lines.append("| **%s** | %s |" % (label, formatted_value))
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
+def _set_check_row(text, stage, command):
+    """Update a `| `checks.<stage>` | ... |` row in charter.md."""
+    lines = text.splitlines()
+    target = "`checks.%s`" % stage
+    val_str = "absent" if command.strip().lower() == "absent" else (
+        "`%s`" % command.strip().replace("|", "\\|") if command.strip() else ""
+    )
+    for idx, line in enumerate(lines):
+        cells = split_row(line)
+        if cells and len(cells) >= 2 and cells[0] == target:
+            lines[idx] = "| `checks.%s` | %s |" % (stage, val_str)
+            break
+    return "\n".join(lines) + ("\n" if text.endswith("\n") else "")
+
+
+def sync_profile(project, extra=None):
+    """Synchronise .ai-sdlc/profile.json with charter.md and manifest.json."""
+    profile_path = project.path(".ai-sdlc/profile.json")
+    data = dict(project.profile) if project.profile else {}
+    data["schema"] = 2
+    if project.manifest.get("kit_version"):
+        data["kit_version"] = project.manifest["kit_version"]
+    elif "kit_version" not in data:
+        data["kit_version"] = "4.0.0"
+    data["docs_dir"] = project.docs
+    if project.charter_prefix:
+        data["prefix"] = project.charter_prefix
+    cmds = charter_commands(project.charter)
+    data["commands"] = dict((s, "" if cmds.get(s, "") == "absent" else cmds.get(s, ""))
+                            for s in STAGES if s in cmds or s in (data.get("commands") or {}))
+    for key, label, options, fallback in (
+        ("effort_mode", "Default effort mode", EFFORT, "normal"),
+        ("acquisition_profile", "Acquisition profile", ACQUISITION, "standard"),
+        ("dev_method", "Development method", DEV_METHOD, "item"),
+        ("decision_style", "Decision style", DECISION_STYLE, "guide"),
+    ):
+        val, state = choice(labelled(project.charter, label), options)
+        if state == "decided" and val:
+            data[key] = val.lower()
+        elif key not in data:
+            data[key] = fallback
+    ticked = sorted(name for name, on, _ in roles(project.charter) if on)
+    if ticked:
+        data["roles"] = ticked
+    if extra:
+        for k, v in extra.items():
+            if v is None:
+                data.pop(k, None)
+            else:
+                data[k] = v
+    folder = os.path.dirname(profile_path)
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    with open(profile_path, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    project.__init__(project.root)
+    return data
+
+
+def configure_kit(project, changes):
+    """Apply user-selected constraint changes to charter.md and .ai-sdlc/profile.json.
+    Never modifies kit-owned files tracked in manifest.json."""
+    if not project.charter:
+        return None, "no charter at %s" % project.charter_path
+    text = project.charter
+    extra_profile = {}
+    applied = []
+
+    if "token_saving" in changes and changes["token_saving"] is not None:
+        ts = changes["token_saving"]
+        on = ts in (True, "on", "true", "1", 1)
+        if on:
+            text = _set_charter_row(text, "Default effort mode", "`Lean`")
+            text = _set_charter_row(text, "Independent review required for", "`none`")
+            text = _set_charter_row(text, "Tier rules", "`Standard`")
+            text = _set_charter_row(
+                text, "Agent budget per tier",
+                "Tier 3: 5k tokens, 5 min; Tier 2: 15k tokens, 15 min; Tier 1: 40k tokens, 45 min"
+            )
+            extra_profile["token_saving"] = True
+            extra_profile["profile"] = "compact"
+            applied.append("token_saving=on (Lean, single-agent review, Standard tier rules, compact budget)")
+        else:
+            text = _set_charter_row(text, "Default effort mode", "`Normal`")
+            text = _set_charter_row(text, "Independent review required for", "`Tier 1`")
+            text = _set_charter_row(
+                text, "Agent budget per tier",
+                "Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h"
+            )
+            has_proc = os.path.isfile(
+                project.path(os.path.join(project.docs, "process", "00-operating-model.md"))
+            )
+            extra_profile["token_saving"] = False
+            extra_profile["profile"] = "full" if has_proc else "compact"
+            applied.append("token_saving=off (Normal effort, Tier 1 independent review)")
+
+    if changes.get("effort"):
+        val = next((o for o in EFFORT if o.lower() == str(changes["effort"]).strip().lower()), None)
+        if not val:
+            return None, "effort must be one of: %s" % ", ".join(EFFORT)
+        text = _set_charter_row(text, "Default effort mode", "`%s`" % val)
+        if val != "Lean":
+            extra_profile["token_saving"] = False
+        applied.append("Default effort mode=%s" % val)
+
+    if changes.get("independent_review"):
+        raw = str(changes["independent_review"]).strip().lower()
+        mapping = {
+            "none": ("none", "`none`"),
+            "off": ("none", "`none`"),
+            "tier1": ("Tier 1", "`Tier 1`"),
+            "tier 1": ("Tier 1", "`Tier 1`"),
+            "tier1-2": ("Tier 1 and 2", "`Tier 1 and 2`"),
+            "tier 1 and 2": ("Tier 1 and 2", "`Tier 1 and 2`"),
+        }
+        if raw not in mapping:
+            return None, "independent_review must be none, Tier 1, or Tier 1 and 2"
+        label_val, cell_val = mapping[raw]
+        text = _set_charter_row(text, "Independent review required for", cell_val)
+        if label_val != "none":
+            extra_profile["token_saving"] = False
+        applied.append("Independent review required for=%s" % label_val)
+
+    if changes.get("tier_rules"):
+        val = next((o for o in TIER_RULES if o.lower() == str(changes["tier_rules"]).strip().lower()), None)
+        if not val:
+            return None, "tier_rules must be one of: %s" % ", ".join(TIER_RULES)
+        text = _set_charter_row(text, "Tier rules", "`%s`" % val)
+        applied.append("Tier rules=%s" % val)
+
+    if changes.get("decision_style"):
+        val = next((o for o in DECISION_STYLE if o.lower() == str(changes["decision_style"]).strip().lower()), None)
+        if not val:
+            return None, "decision_style must be one of: %s" % ", ".join(DECISION_STYLE)
+        text = _set_charter_row(text, "Decision style", "`%s`" % val)
+        applied.append("Decision style=%s" % val)
+
+    if changes.get("dev_method"):
+        val = next((o for o in DEV_METHOD if o.lower() == str(changes["dev_method"]).strip().lower()), None)
+        if not val:
+            return None, "dev_method must be one of: %s" % ", ".join(DEV_METHOD)
+        text = _set_charter_row(text, "Development method", "`%s`" % val)
+        applied.append("Development method=%s" % val)
+
+    if changes.get("acquisition_profile"):
+        val = next((o for o in ACQUISITION if o.lower() == str(changes["acquisition_profile"]).strip().lower()), None)
+        if not val:
+            return None, "acquisition_profile must be one of: %s" % ", ".join(ACQUISITION)
+        text = _set_charter_row(text, "Acquisition profile", "`%s`" % val)
+        applied.append("Acquisition profile=%s" % val)
+
+    if changes.get("preferred_reviewer"):
+        rev = str(changes["preferred_reviewer"]).strip().lower()
+        if rev not in ("codex", "claude", "gemini"):
+            return None, "preferred_reviewer must be codex, claude, or gemini"
+        extra_profile["preferred_reviewer"] = rev
+        applied.append("preferred_reviewer=%s" % rev)
+
+    if changes.get("checks") and isinstance(changes["checks"], dict):
+        for stage, cmd in sorted(changes["checks"].items()):
+            stage_clean = stage.replace("checks.", "").strip()
+            if stage_clean not in STAGES:
+                return None, "unknown check stage: %s" % stage
+            text = _set_check_row(text, stage_clean, str(cmd))
+            applied.append("checks.%s=%s" % (stage_clean, cmd))
+
+    charter_full = project.path(project.charter_path)
+    with open(charter_full, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    project.charter = text
+    sync_profile(project, extra_profile)
+    return {"applied": applied, "kit": kit_status(project)}, None
+
+
+def fix_kit(project, action="all", opts=None):
+    """Run safe, non-fabricating mechanical repairs on the kit setup."""
+    opts = opts or {}
+    repaired = []
+
+    if action in ("all", "sync-profile"):
+        sync_profile(project)
+        repaired.append("synced .ai-sdlc/profile.json with charter.md")
+
+    if action in ("all", "wire-pointer"):
+        ptr_findings = Findings()
+        check_pointer(project, ptr_findings)
+        target_rel = opts.get("file") or "CLAUDE.md"
+        if ptr_findings.items or action == "wire-pointer":
+            targets = [target_rel]
+            for rel in project.profile.get("harnesses") or []:
+                if isinstance(rel, str) and rel not in targets:
+                    targets.append(rel)
+            for rel in targets:
+                fpath = project.path(rel)
+                existing = read(fpath)
+                if "AGENTS.md" not in existing:
+                    parent = os.path.dirname(fpath)
+                    if parent and not os.path.isdir(parent):
+                        os.makedirs(parent)
+                    pointer_line = "\nRead and follow [AGENTS.md](AGENTS.md).\n" if existing else \
+                        "Read and follow [AGENTS.md](AGENTS.md).\n"
+                    with open(fpath, "w", encoding="utf-8") as handle:
+                        handle.write(existing + pointer_line)
+                    repaired.append("wired %s -> AGENTS.md" % rel)
+
+    if action in ("all", "restore-bite"):
+        if os.path.isfile(project.path(os.path.join(BITE_DIR, "active.json"))):
+            restored = bite_restore(project)
+            repaired.append("restored bite backup (%d file(s))" % len(restored))
+
+    if action == "unlock-tests" or (action == "all" and opts.get("unlock_tests")):
+        lock_path = project.path(".ai-sdlc/test-lock.txt")
+        if os.path.isfile(lock_path):
+            target_test = opts.get("test")
+            kept = []
+            removed = 0
+            for line in read(lock_path).splitlines():
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    kept.append(line)
+                elif target_test and stripped != target_test:
+                    kept.append(line)
+                else:
+                    removed += 1
+            with open(lock_path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(kept) + "\n")
+            repaired.append("unlocked %d test lock(s) in .ai-sdlc/test-lock.txt" % removed)
+
+    project.__init__(project.root)
+    return {"repaired": repaired, "kit": kit_status(project), "findings": doctor(project)}
+
+
 # ---------------------------------------------------------------- self-test
 
 def selftest():
@@ -1900,6 +2472,16 @@ def selftest():
     assert sensitive_kinds("ask me@eu.example.org or noreply@acme.io") == ([], [])
     assert sensitive_kinds("card 4111 1111 1111 1111")[1] == ["card-number shape"]
     assert sensitive_kinds("plain prose, ACME-12, 2026-01-01") == ([], [])
+    assert independent_review_policy("| **Independent review required for** | `none` |") == \
+        ("none", set(), "decided")
+    assert independent_review_policy("| **Independent review required for** | `Tier 1` |") == \
+        ("Tier 1", set(["1"]), "decided")
+    assert independent_review_policy("| **Independent review required for** | `Tier 1 and 2` |") == \
+        ("Tier 1 and 2", set(["1", "2"]), "decided")
+    updated_c = _set_charter_row(charter, "Default effort mode", "`Lean`")
+    assert choice(labelled(updated_c, "Default effort mode"), EFFORT) == ("Lean", "decided")
+    updated_chk = _set_check_row(charter, "lint", "ruff check .")
+    assert charter_commands(updated_chk)["lint"] == "ruff check ."
     print("sdlc runtime self-test passed")
 
 
@@ -1986,6 +2568,35 @@ def main(argv):
     bt.add_argument("--restore", action="store_true",
                     help="put back files an interrupted bite left reverted")
     bt.add_argument("--json", action="store_true", help="print the result as JSON")
+    cfg = sub.add_parser("config", help="inspect or update kit constraints in charter.md "
+                         "and .ai-sdlc/profile.json")
+    cfg.add_argument("--effort", choices=("Lean", "Normal", "Beast", "lean", "normal", "beast"),
+                     help="set Default effort mode")
+    cfg.add_argument("--independent-review",
+                     choices=("none", "off", "tier1", "tier1-2", "Tier 1", "Tier 1 and 2"),
+                     help="set Independent review required for")
+    cfg.add_argument("--tier-rules", choices=("Standard", "Strict", "standard", "strict"),
+                     help="set Tier rules")
+    cfg.add_argument("--decision-style",
+                     choices=("Ask", "Guide", "Autopilot", "ask", "guide", "autopilot"),
+                     help="set Decision style")
+    cfg.add_argument("--dev-method", choices=("Item", "Epic", "item", "epic"),
+                     help="set Development method")
+    cfg.add_argument("--reviewer", choices=("codex", "claude", "gemini"),
+                     help="set preferred second reviewer CLI")
+    cfg.add_argument("--token-saving", choices=("on", "off"),
+                     help="toggle token-saving mode (Lean effort, single-agent review, "
+                          "Standard tier rules, compact budget)")
+    cfg.add_argument("--set-check", action="append", default=[],
+                     help="set a check command: STAGE=COMMAND or STAGE=absent")
+    cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
+    fx = sub.add_parser("fix", help="run safe mechanical repairs on kit setup")
+    fx.add_argument("action", nargs="?", default="all",
+                    choices=("all", "sync-profile", "wire-pointer", "restore-bite", "unlock-tests"),
+                    help="repair action to run (default: all)")
+    fx.add_argument("--unlock-tests", action="store_true",
+                    help="also unlock tests in .ai-sdlc/test-lock.txt when running 'all'")
+    fx.add_argument("--json", action="store_true", help="print repair result as JSON")
     opts = parser.parse_args(argv)
     if not opts.command:
         parser.print_help()
@@ -2065,6 +2676,65 @@ def main(argv):
             print_plan_check(result)
         gaps = result["unplanned"] or result["untouched"]
         return 1 if opts.strict and gaps else 0
+    if opts.command == "config":
+        changes = {}
+        if opts.effort:
+            changes["effort"] = opts.effort
+        if opts.independent_review:
+            changes["independent_review"] = opts.independent_review
+        if opts.tier_rules:
+            changes["tier_rules"] = opts.tier_rules
+        if opts.decision_style:
+            changes["decision_style"] = opts.decision_style
+        if opts.dev_method:
+            changes["dev_method"] = opts.dev_method
+        if opts.reviewer:
+            changes["preferred_reviewer"] = opts.reviewer
+        if opts.token_saving:
+            changes["token_saving"] = opts.token_saving
+        if opts.set_check:
+            chk_map = {}
+            for item_kv in opts.set_check:
+                if "=" not in item_kv:
+                    parser.error("--set-check must be STAGE=COMMAND")
+                k, v = item_kv.split("=", 1)
+                chk_map[k.strip()] = v.strip()
+            changes["checks"] = chk_map
+        if changes:
+            res, err = configure_kit(project, changes)
+            if err:
+                sys.stderr.write("config: %s\n" % err)
+                return 2
+            if opts.json:
+                print(json.dumps(res, indent=2))
+            else:
+                for line in res["applied"]:
+                    print("updated: %s" % line)
+            return 0
+        status = kit_status(project)
+        if opts.json:
+            print(json.dumps(status, indent=2))
+        else:
+            c = status["constraints"]
+            print("kit v%s (%s profile) · token-saving: %s" % (
+                status["kit_version"], status["profile"],
+                "on" if status["token_saving"] else "off"))
+            print("  effort: %s · independent review: %s · reviewer: %s" % (
+                c["effort_mode"], c["independent_review"], c["preferred_reviewer"]))
+            print("  tier rules: %s · decision style: %s · dev method: %s" % (
+                c["tier_rules"], c["decision_style"], c["dev_method"]))
+        return 0
+    if opts.command == "fix":
+        res = fix_kit(project, opts.action, {"unlock_tests": opts.unlock_tests})
+        if opts.json:
+            print(json.dumps(res, indent=2))
+        else:
+            if res["repaired"]:
+                for line in res["repaired"]:
+                    print("fixed: %s" % line)
+            else:
+                print("nothing needed repair")
+        return 0
     selected = None
     if opts.stage:
         selected = set(s.strip().replace("checks.", "") for s in opts.stage.split(","))

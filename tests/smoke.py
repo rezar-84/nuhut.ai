@@ -15,6 +15,7 @@ import pty
 import re
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -23,7 +24,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INSTALL = os.path.join(ROOT, "install.py")
 VERBOSE = "-v" in sys.argv
-ANSI = re.compile(r"\x1b\[[0-9;]*m")
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 sys.path.insert(0, ROOT)
 import install as installer
@@ -39,12 +40,18 @@ def run(args, cwd=ROOT):
     return p.returncode, out.decode("utf-8", "replace")
 
 
-def drive(args, rules, timeout=60):
+def drive(args, rules, timeout=60, mode="--full", plain=True, env=None):
     """Run the wizard on a pty. `rules` is a list of (substring, answer); the first match
-    against the text printed since the last prompt wins, otherwise Enter."""
+    against the text printed since the last prompt wins, otherwise Enter. plain=False
+    keeps the arrow-key widgets, where an answer is a key sequence ending in Enter."""
+    if mode and "--quick" not in args and "--full" not in args and "--sections" not in args:
+        args = args + [mode]          # every question, as these tests were written for
+    if plain:
+        args = args + ["--plain"]     # numbered, typed prompts: rules stay plain text
     master, slave = pty.openpty()
     p = subprocess.Popen([sys.executable, INSTALL] + args, cwd=ROOT,
-                         stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+                         stdin=slave, stdout=slave, stderr=slave, close_fds=True,
+                         env=dict(os.environ, **dict({"TERM": "xterm"}, **(env or {}))))
     os.close(slave)
     buf, log, deadline = b"", [], time.time() + timeout
     used = set()
@@ -61,6 +68,10 @@ def drive(args, rules, timeout=60):
             log.append(chunk)
             continue
         text = ANSI.sub("", buf.decode("utf-8", "replace"))
+        # A widget reads keys only once it is drawn: a key sent during a slow moment
+        # before that would answer the next question instead.
+        if not plain and not re.search(r"(└  |^'  |› \[|> \[)", text, re.M):
+            continue
         buf = b""
         answer = ""
         for i, (needle, reply) in enumerate(rules):
@@ -241,7 +252,7 @@ def test_custom_docs_dir():
     check("manifest records custom path", manifest.get("docs_dir") == "handbook")
     code, out = run([d, "--upgrade"])
     check("upgrade recovers custom path from manifest",
-          code == 0 and "handbook portable docs" in out)
+          code == 0 and "handbook/process" in out)
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -1187,6 +1198,14 @@ def test_view():
           and items.get("VWX-1", {}).get("steps", {}).get("Ship review") == "done", str(items)[:400])
     check("a row that is not PREFIX-### is reported, not dropped silently",
           any("NOPE-9" in u["reason"] for u in model["unread"]), str(model["unread"]))
+    check("model carries kit status and constraints",
+          "kit" in model and "constraints" in model["kit"] and "reading_tokens" in model["kit"],
+          str(model.get("kit"))[:300])
+    check("items carry chronological thread events",
+          any(e.get("kind") == "frame" for e in items.get("VWX-1", {}).get("thread", []))
+          and any(e.get("kind") == "ship_review" for e in items.get("VWX-1", {}).get("thread", []))
+          and any(e.get("kind") == "worklog" for e in items.get("VWX-1", {}).get("thread", [])),
+          str(items.get("VWX-1", {}).get("thread")))
     p = subprocess.Popen([sys.executable, script, "view", "--no-open"], cwd=d,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     p.communicate()
@@ -1194,6 +1213,8 @@ def test_view():
     check("the page is written with the model inside", "VWX-2" in page and "/*NUHUT_MODEL*/" not in page)
     check("record text cannot close the script tag", "<script>x</script>" not in page, page[-200:])
     check("git view tab present in page", 'data-r="git"' in page and "viewGit" in page)
+    check("threads and kit tabs present in page",
+          'data-r="threads"' in page and 'data-r="kit"' in page and "viewThreads" in page and "viewKit" in page)
     check("the flow chart and verify grid are in the page", "drawFlowChart" in page and "drawVerifyGrid" in page)
     svg_map = read(d, ".ai-sdlc/view/map.svg")
     check("formatted SVG map is written", "<svg" in svg_map and "</svg>" in svg_map and "viewBox" in svg_map)
@@ -1239,6 +1260,37 @@ def test_view():
         check("a request for another host is refused (DNS rebinding)", code == 403, str(code))
         code, _, _ = get("/../../AGENTS.md")
         check("nothing but the page, version and model is served", code == 404, str(code))
+
+        # Test POST /api/config and /api/fix with session token protection
+        live_model = json.loads(body)
+        token = live_model.get("action_token", "")
+        check("live model carries an action token", len(token) == 32, token)
+
+        def post(path, payload, tok=token):
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            raw = json.dumps(payload).encode("utf-8")
+            hdrs = {"Host": "127.0.0.1:%d" % port, "Content-Type": "application/json",
+                    "Content-Length": str(len(raw)), "X-Action-Token": tok}
+            c.request("POST", path, body=raw, headers=hdrs)
+            r = c.getresponse()
+            return r.status, r.read().decode("utf-8", "replace")
+
+        code_bad, _ = post("/api/config", {"effort": "Lean"}, tok="wrong")
+        check("POST without valid action token is refused", code_bad == 403, str(code_bad))
+        code_cfg, out_cfg = post("/api/config", {"token_saving": "on"})
+        check("POST /api/config enables token-saving mode",
+              code_cfg == 200 and json.loads(out_cfg).get("ok") is True, out_cfg)
+        _, body_after, _ = get("/model.json")
+        kit_after = json.loads(body_after).get("kit", {})
+        check("token-saving mode sets Lean effort and none independent review",
+              kit_after.get("token_saving") is True
+              and kit_after.get("constraints", {}).get("effort_mode") == "Lean"
+              and kit_after.get("constraints", {}).get("independent_review") == "none",
+              str(kit_after.get("constraints")))
+        os.remove(os.path.join(d, "CLAUDE.md"))
+        code_fix, out_fix = post("/api/fix", {"action": "wire-pointer"})
+        check("POST /api/fix repairs missing CLAUDE.md pointer",
+              code_fix == 200 and "AGENTS.md" in read(d, "CLAUDE.md"), out_fix)
     finally:
         server.terminate()
         server.wait(timeout=10)
@@ -1601,7 +1653,7 @@ def test_upgrade_from_350():
               all(line in charter for line in charter_before.splitlines() if line.startswith("| **")),
               "")
         code, out = run([d, "OLD", "--upgrade"])
-        check("a second upgrade changes nothing", code == 0 and "Done: 0 updated" in out, out[-300:])
+        check("a second upgrade changes nothing", code == 0 and "Already up to date" in out, out[-300:])
         doctor = subprocess.Popen([sys.executable, os.path.join(d, ".ai-sdlc", "bin", "sdlc.py"), "doctor", "--strict"],
                                   cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         text = doctor.communicate()[0].decode("utf-8", "replace")
@@ -2261,7 +2313,7 @@ def test_deploy_platforms():
     write(d, "wrangler.toml", 'name = "x"\n')
     code, log = drive([d, "WIZ"], [("Where does it deploy", "1,9")])
     check("wizard pre-selects the detected platform",
-          re.search(r"Where does it deploy\? \(numbers, comma-separated\) \[1\]", log),
+          re.search(r"Where does it deploy\? Numbers, comma-separated, 0 = none \[1\]", log),
           log[-400:])
     platforms = os.path.join(d, "docs", "platforms")
     check("wizard answer installs its checklists",
@@ -2338,7 +2390,7 @@ def test_upgrade_ownership():
               for f in fs))
 
     code, out = run([d, "OWN", "--upgrade"])
-    check("a second upgrade changes nothing", code == 0 and "Done: 0 updated" in out, out[-300:])
+    check("a second upgrade changes nothing", code == 0 and "Already up to date" in out, out[-300:])
     with open(agents_path, "a") as fh:
         fh.write("more project rules\n")
     code, out = run([d, "OWN", "--upgrade"])
@@ -2628,8 +2680,252 @@ def test_decision_and_stack():
         shutil.rmtree(path, ignore_errors=True)
 
 
+def test_guided_setup():
+    print("guided setup: modes, menus, new questions, help")
+    # Quick, chosen at the mode question: essentials only, AI tools wired from the answer.
+    d = fixture("next")
+    code, log = drive([d, "QK"], [("How do you want to set this up?", "1"),
+                                  ("Which AI coding tools", "1,2")], mode=None)
+    check("quick: exit 0", code == 0, log[-400:])
+    check("quick: the mode question was offered", "Use these settings" in log and "(recommended)" in log)
+    check("quick: the start screen shows what was detected", "Here is what I found" in log
+          and "Reviewing roles" in log, log[:1500])
+    check("quick: process details defaulted, not asked", "Default effort mode [" not in log, log[-800:])
+    check("quick: sections show progress", re.search(r"-- Project \S* ?\(\d+ of \d+\)", log), log[:600])
+    check("quick: cursor wired from the AI tools answer",
+          "AGENTS.md" in read(d, ".cursor/rules/agents.mdc"))
+    m = re.search(r"(\./install\.sh \S+ QK -y[^\r\n]*)", log)
+    check("quick: the review prints the equivalent command", m and "--harness claude,cursor" in m.group(1),
+          log[-600:])
+    check("quick: the report says no placeholder was left", "no {{...}} placeholder" in log)
+    check("quick: the report says how to start", "/sdlc-plan" in log)
+    if m:
+        e = tempfile.mkdtemp(prefix="sdlc-replay-")
+        args = m.group(1).split()[2:]
+        code, out = run([e] + args)
+        check("the printed command replays the same wiring",
+              code == 0 and os.path.exists(os.path.join(e, ".cursor", "rules", "agents.mdc")), out[-300:])
+        shutil.rmtree(e, ignore_errors=True)
+    shutil.rmtree(d, ignore_errors=True)
+
+    # --quick on the command line skips the mode question.
+    d = fixture("fastapi")
+    code, log = drive([d, "QF", "--quick"], [])
+    check("--quick skips the mode question", code == 0 and "How do you want to set this up?" not in log,
+          log[-300:])
+    shutil.rmtree(d, ignore_errors=True)
+
+    # Full: menus accept a name, and the flag-only options are now questions.
+    d = fixture("next")
+    subprocess.call(["git", "init", "-q", d])
+    code, log = drive([d, "FUL"], [("Default effort mode", "beast"),
+                                   ("Enforce the rules mechanically?", "4"),
+                                   ("Should the kit's own tools", "3"),
+                                   ("Write a starter CI workflow?", "github")])
+    charter = read(d, "docs/project/charter.md")
+    check("full: exit 0", code == 0, log[-400:])
+    check("full: a menu accepts the option's name", "| **Default effort mode** | Beast |" in charter)
+    check("full: every option is described", "maximum investigation and verification" in log)
+    check("full: enforcement installs agent hooks",
+          "hooks" in read(d, ".claude/settings.json"))
+    check("full: enforcement installs git hooks",
+          os.path.isdir(os.path.join(d, ".ai-sdlc", "git-hooks")))
+    check("full: local ignore goes to .git/info/exclude",
+          ".ai-sdlc/" in read(d, ".git/info/exclude"))
+    check("full: starter CI written", os.path.exists(os.path.join(d, ".github", "workflows", "quality.yml")))
+    check("full: slash command count is not hardcoded", "Install the 6 /sdlc-* slash commands" in log)
+    shutil.rmtree(d, ignore_errors=True)
+
+    # Help: short by default, everything on request, values listable.
+    code, out = run(["--help"])
+    check("--help is short and grouped", code == 0 and out.count("\n") < 60 and "Examples" in out,
+          str(out.count("\n")))
+    code, out = run(["--help", "full"])
+    check("--help full keeps every option", code == 0 and "--git-exclude" in out and "--adopt" in out)
+    code, out = run(["--list", "harnesses"])
+    check("--list harnesses names every tool", code == 0 and all(n in out for n in ("cursor", "copilot", "aider")))
+    code, out = run(["--list", "presets"])
+    check("--list presets shows what each sets", code == 0 and "regulated" in out and "strict" in out)
+    code, out = run(["/tmp", "--effort-mode", "turbo"])
+    check("a bad value is one clear error, not the whole help",
+          code == 1 and "lean, normal, or beast" in out and out.count("\n") < 5, out)
+
+    # The managed platform is a menu, and a missing directory says how to create it.
+    d = fixture("next")
+    code, log = drive([d, "MGD"], [("Managed platform co-owning this repo", "lovable")])
+    check("managed platform menu answer reaches the charter",
+          code == 0 and "| **Platform** | Lovable |" in read(d, "docs/project/charter.md"), log[-300:])
+    code, out = run([d, "MGD", "--upgrade"])
+    check("an upgrade with nothing to do says it is up to date",
+          code == 0 and "Already up to date" in out and "run the" in out, out[-400:])
+    shutil.rmtree(d, ignore_errors=True)
+    code, out = run([os.path.join(tempfile.gettempdir(), "sdlc-no-such-dir-xyz"), "-y"])
+    check("a missing directory suggests --create", code == 1 and "--create" in out, out)
+
+    # -y says what it assumed.
+    d = fixture("fastapi")
+    code, out = run([d, "-y"])
+    check("-y lists the defaults it took", code == 0 and "Defaults taken" in out and "--harness" in out,
+          out[-500:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_setup_paths():
+    print("guided setup: customise, pickers, files preview, explain, cancel")
+    # Customise from the menu: only the ticked section is asked.
+    d = fixture("next")
+    code, log = drive([d, "CUS"], [("How do you want to set this up?", "2"),
+                                   ("Which sections do you want to go through?", "8"),
+                                   ("Default effort mode", "3")], mode=None)
+    check("customise: exit 0", code == 0, log[-400:])
+    check("customise: other sections are not asked",
+          "Project name [" not in log and "What kind of project is this?" not in log, log[-1500:])
+    check("customise: the ticked section is asked",
+          "| **Default effort mode** | Beast |" in read(d, "docs/project/charter.md"))
+    shutil.rmtree(d, ignore_errors=True)
+
+    # --sections goes straight there.
+    d = fixture("next")
+    code, log = drive([d, "SEC", "--sections", "install"], [("Enforce the rules mechanically?", "2")])
+    check("--sections asks only the named section",
+          code == 0 and "Default effort mode [" not in log and "Enforce the rules" in log, log[-600:])
+    check("--sections answers are applied", "hooks" in read(d, ".claude/settings.json"))
+    code, out = run([d, "--sections", "nosuch"])
+    check("an unknown section is one clear error", code == 1 and "--list sections" not in out
+          and "project, build" in out, out)
+    shutil.rmtree(d, ignore_errors=True)
+
+    # Change some: pick the rows, so one correction is one question.
+    d = fixture("next")
+    code, log = drive([d, "PIK"], [
+        ("Use these? (y = yes, e = change some)", "e"),
+        ("Which of these are true?", "1,2"),
+        ("Use these? (y = yes, e = change some, n = leave the table blank)", "e"),
+        ("Which ones do you want to change?", "3"),
+        ("Framework(s) [", "Remix"),
+        ("Which skills should be installed?", "1,2"),
+    ])
+    charter = read(d, "docs/project/charter.md")
+    check("pick: exit 0", code == 0, log[-400:])
+    check("pick: only the picked stack row was asked",
+          "Package manager [" not in log and "Remix" in charter, log[-2000:])
+    check("pick: facts ticked in one question switch roles",
+          "| devops-sre | ☐" in charter and "| ux-designer | ☑" in charter)
+    check("pick: the skills menu installs exactly what was ticked",
+          sorted(os.listdir(os.path.join(d, ".claude", "skills"))) == ["sdlc-evidence-check", "sdlc-intake"],
+          str(os.listdir(os.path.join(d, ".claude", "skills"))))
+    shutil.rmtree(d, ignore_errors=True)
+
+    # The review lists the files before writing them, and the list is what gets written.
+    d = fixture("fastapi")
+    code, log = drive([d, "FIL"], [("f = list the files", "f")])
+    m = re.search(r"(\d+) new files\.", log)
+    added = re.search(r"Done: (\d+) added", log)
+    check("files: the preview lists the paths", code == 0 and "Files that would be written" in log
+          and "docs/process/" in log, log[-800:])
+    pointers = len(re.findall(r"  add +\S+ \(pointer to AGENTS\.md\)", log))   # not in "added"
+    check("files: the preview count is what was written",
+          m and added and int(m.group(1)) == int(added.group(1)) + pointers,
+          "%s %s+%d" % (m and m.group(1), added and added.group(1), pointers))
+    check("files: the report summarises what was added", "What you got:" in log)
+    check("files: the report lists charter rows still blank", "Still to fill in" in log
+          and "project/charter.md:" in log)
+    shutil.rmtree(d, ignore_errors=True)
+
+    # Every question explains itself without ?, and every one has a ? answer.
+    d = fixture("next")
+    code, log = drive([d, "HNT"], [])
+    check("hints: free-text questions show an example",
+          "e.g. An online shop" in log and "e.g. checkout" in log, log[:1200])
+    w = installer.Wizard(installer.parse_args([d, "-y"]))
+    missing = [st.sid for st in w.steps if st.kind not in ("show",) and not st.help]
+    check("hints: every question has help behind ?", not [m for m in missing
+          if not m.startswith(("s_", "c_"))], str(missing))
+    shutil.rmtree(d, ignore_errors=True)
+
+    code, out = run(["--explain", "tiers"])
+    check("--explain tiers explains the tiers", code == 0 and "Tier 1" in out and "Tier 3" in out, out)
+    code, out = run(["--explain", "nope"])
+    check("--explain lists its topics on a bad one", code == 1 and "presets" in out, out)
+
+    # Ctrl-C before the review writes nothing and says so.
+    d = fixture("fastapi")
+    before = files(d)
+    master, slave = pty.openpty()
+    p = subprocess.Popen([sys.executable, INSTALL, d, "CTC", "--full", "--plain"], cwd=ROOT,
+                         stdin=slave, stdout=slave, stderr=slave, close_fds=True)
+    os.close(slave)
+    out, deadline = b"", time.time() + 20
+    while time.time() < deadline and b"Project name" not in out:
+        if select.select([master], [], [], 0.2)[0]:
+            out += os.read(master, 8192)
+    p.send_signal(signal.SIGINT)
+    while p.poll() is None and time.time() < deadline:
+        if select.select([master], [], [], 0.2)[0]:
+            try:
+                out += os.read(master, 8192)
+            except OSError:
+                break
+    p.wait(timeout=10)
+    os.close(master)
+    check("ctrl-c: exit 130 and nothing written", p.returncode == 130 and files(d) == before,
+          "code=%s files=%d/%d" % (p.returncode, files(d), before))
+    check("ctrl-c: it says nothing was written", b"Cancelled: nothing was written." in out, out[-300:])
+    shutil.rmtree(d, ignore_errors=True)
+
+    # Piped output carries no escape codes.
+    d = fixture("fastapi")
+    code, out = run([d, "PIP", "-y"])
+    check("piped output is plain text", code == 0 and "\x1b" not in out)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_arrow_keys():
+    print("guided setup: arrow-key widgets")
+    down, up = "\x1b[B", "\x1b[A"
+    d = fixture("next")
+    code, log = drive([d, "ARW"], [
+        ("Which AI coding tools", "?" + down + " "),       # help, then tick Cursor
+        ("Review -- nothing has been written yet", ""),
+    ], mode=None, plain=False)
+    check("arrows: exit 0", code == 0, log[-600:])
+    check("arrows: menus are drawn as menus", "◆" in log and "◼" in log and "›" in log, log[:400])
+    check("arrows: ? opens the explanation in place", "Every tool reads its own instruction file" in log)
+    check("arrows: space ticks an option", "AGENTS.md" in read(d, ".cursor/rules/agents.mdc"))
+    check("arrows: answered questions fold to one line", "◇  AI tools  Claude Code, Cursor" in log,
+          log[-3000:])
+    check("arrows: the copy list is folded into a summary", "  add            AGENTS.md" not in log
+          and "What you got:" in log)
+    shutil.rmtree(d, ignore_errors=True)
+
+    # Every question, moving with arrows: the third mode, a menu answer, a yes/no toggle.
+    d = fixture("next")
+    code, log = drive([d, "ARX"], [
+        ("How do you want to set this up?", down + down),
+        ("Default effort mode", up),                      # Normal -> Lean
+        ("Are direct commits to", "y"),
+        ("Quit without writing", "n"),
+    ], mode=None, plain=False)
+    charter = read(d, "docs/project/charter.md")
+    check("arrows: every-question mode reached the process section", code == 0
+          and "| **Default effort mode** | Lean |" in charter, log[-600:])
+    check("arrows: y answers a yes/no at once", "| **Direct commits to it** | allowed" in charter
+          or "Direct commits to it  Yes" in log, log[-2500:])
+    shutil.rmtree(d, ignore_errors=True)
+
+    # q asks before throwing answers away; ASCII terminals get ASCII glyphs.
+    d = fixture("fastapi")
+    code, log = drive([d, "ASC"], [("What is it, in one sentence", "q"),
+                                   ("Quit without writing anything?", "y")],
+                      plain=False, env={"PYTHONIOENCODING": "ascii"})
+    check("arrows: q confirms, then writes nothing", code == 0 and "Nothing was written." in log
+          and files(d) == 1, log[-400:])
+    check("arrows: an ASCII terminal gets ASCII glyphs", "◆" not in log and "* " in log, log[:600])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
-    for test in (test_guards, test_non_interactive, test_dry_run,
+    for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_git_hooks,
