@@ -42,6 +42,10 @@ Follow `{{DOCS_DIR}}/process/00-operating-model.md`. Specifically:
    `{{DOCS_DIR}}/templates/plan.md` — Tier 1 as a file in `{{DOCS_DIR}}/project/plans/`, Tier 2 inline,
    Tier 3 as a sentence. Include the alternatives you rejected and the reason each lost,
    the failure modes, the rollback, and what you are deliberately not doing.
+   When the charter's **Specs** row is `on` and a Tier 1–2 item changes observable
+   behaviour, also write `{{DOCS_DIR}}/project/specs/changes/<ID>.md` from
+   `{{DOCS_DIR}}/templates/spec-change.md` and link it from the plan's **Spec changes**
+   line (`{{DOCS_DIR}}/process/15-specs.md`); check it with `python3 .ai-sdlc/bin/sdlc.py spec validate`.
 
 4. **Design review.** Run `/sdlc-review` against the plan. Reviews at this stage read the
    plan and the current code, not a diff.

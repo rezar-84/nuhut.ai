@@ -16,6 +16,7 @@
         el("p", { cls: "view-subtitle", text: "Browse charter, architecture decision records, plans, reviews, and process playbooks with freshness tracking." })
       ]),
       el("div", { cls: "view-header-actions" }, [
+        el("button", { cls: "btn", text: "Specs", on: { click: function () { go("docs/specs"); } } }),
         el("button", { cls: "btn", text: "Kit settings ↗", on: { click: function () { go("project/kit"); } } })
       ])
     ]));
@@ -487,3 +488,78 @@
     setTimeout(updateOutlineActive, 80);
   }
 
+  // ---------------------------------------------------------------- specs
+  // What the system does now (living specs), the changes items make to it, and specs
+  // other tools wrote (OpenSpec, Spec Kit), labelled and read-only.
+  var SPECS_STATE = { source: "", sel: "" };
+  function viewSpecs(cap) {
+    tab("docs");
+    crumbs([["Documents", "docs"], ["Specs"]]);
+    var S = M.specs || { capabilities: [], changes: [], imported: [] };
+    var all = (S.capabilities || []).concat(S.imported || []);
+    dashHeader("Specs", S.enabled ? "What the system does now, one capability per file, and the changes work items make to it."
+      : "Specs are off in the charter. Turn them on with python3 .ai-sdlc/bin/sdlc.py config --specs on" + (all.length ? "; specs other tools wrote are shown below." : "."), []);
+    if (S.error) main.appendChild(el("p", { cls: "quiet-note", text: "Specs could not be read: " + S.error }));
+    var pending = {};
+    (S.changes || []).forEach(function (ch) {
+      Object.keys(ch.sections).forEach(function (k) {
+        ch.sections[k].forEach(function (r) {
+          var key = (r.capability || "") + "|" + r.name;
+          (pending[key] = pending[key] || []).push({ kind: k, item: ch.item, source: ch.source });
+        });
+      });
+    });
+    var sources = [];
+    all.forEach(function (c) { if (sources.indexOf(c.source) < 0) sources.push(c.source); });
+    var list = el("div", { cls: "md-list", role: "list", "aria-label": "Capabilities" });
+    var pane = el("div", { cls: "md-pane" });
+    var srcSel = sel("Source", [["", "All sources"]].concat(sources.map(function (x) { return [x, x === "nuhut" ? "This kit" : (x === "openspec" ? "OpenSpec" : "Spec Kit")]; })), SPECS_STATE.source,
+      function (v) { SPECS_STATE.source = v; fill(); });
+    main.appendChild(el("div", { cls: "md" }, [el("div", { cls: "md-left" }, [el("div", { cls: "md-filters" }, [srcSel]), list]), pane]));
+    var current = cap || SPECS_STATE.sel || (all[0] && all[0].source + ":" + all[0].capability) || "";
+    function key(c) { return c.source + ":" + c.capability; }
+    function fill() {
+      list.textContent = "";
+      all.filter(function (c) { return !SPECS_STATE.source || c.source === SPECS_STATE.source; }).forEach(function (c) {
+        var changes = c.requirements.reduce(function (n, r) { return n + ((pending[c.capability + "|" + r.name] || []).length); }, 0);
+        var row = el("div", { cls: "run-row" + (key(c) === current ? " sel" : ""), role: "listitem" }, [
+          el("span", { cls: "rr-dot", "aria-hidden": "true", style: changes ? "background: var(--warn);" : "" }),
+          el("span", { style: "min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" }, [el("strong", { text: c.capability }), el("span", { cls: "muted", text: " " + (c.title || "") })]),
+          el("span", { cls: "muted", text: plural(c.requirements.length, "req") }),
+          el("span", { cls: "muted", text: c.source })
+        ]);
+        var open = function () { SPECS_STATE.sel = key(c); location.replace("#/docs/specs/" + encodeURIComponent(key(c))); };
+        row.addEventListener("click", open); makeInteractive(row, open, c.capability);
+        list.appendChild(row);
+      });
+      if (!all.length) list.appendChild(el("p", { cls: "muted", style: "padding: 10px;", text: "No specs yet. Copy templates/spec.md to project/specs/<capability>.md." }));
+    }
+    fill();
+    var spec = all.filter(function (c) { return key(c) === current; })[0];
+    // New capabilities that only exist in pending changes.
+    var unplaced = (S.changes || []).filter(function (ch) { return Object.keys(ch.sections).some(function (k) { return ch.sections[k].length; }); });
+    if (!spec) {
+      pane.appendChild(el("p", { cls: "muted", text: all.length ? "Pick a capability." : "Nothing to show." }));
+    } else {
+      pane.appendChild(el("div", { cls: "md-pane-hd" }, [el("div", null, [el("strong", { text: spec.title || spec.capability }),
+        el("div", { cls: "muted", style: "font-size: 12px;", text: spec.path + (spec.best_effort ? " · read best-effort" : "") })]),
+        DOC_BY_PATH[spec.path] !== undefined ? link("Open file", docRoute(DOC_BY_PATH[spec.path]), "btn") : null]));
+      if (spec.purpose) pane.appendChild(el("p", { cls: "sec-sub", text: spec.purpose }));
+      spec.requirements.forEach(function (r) {
+        var pend = pending[spec.capability + "|" + r.name] || [];
+        pane.appendChild(el("div", { cls: "req" }, [
+          el("div", { cls: "req-hd" }, [el("strong", { text: r.name })].concat(pend.map(function (p) {
+            return el("span", { cls: "stamp " + (p.kind === "REMOVED" ? "neutral" : "warn"), title: "Pending in " + p.item, text: p.kind.toLowerCase() + " by " + p.item });
+          }))),
+          r.body ? el("p", { cls: "req-body", text: r.body }) : null,
+          el("ul", { cls: "req-scen" }, r.scenarios.map(function (sc) { return el("li", null, [el("strong", { text: sc.name + ": " }), sc.body.replace(/\*\*/g, "").replace(/\n+/g, " ")]); }))
+        ]));
+      });
+    }
+    if (unplaced.length) main.appendChild(section("Pending changes", "Spec changes not yet applied. `sdlc.py spec apply <ID> --write` merges one on close.", [
+      table(["Item", "Source", "Changes", "File"], unplaced.map(function (ch) {
+        return tr([itemLink(ch.item), ch.source, Object.keys(ch.sections).filter(function (k) { return ch.sections[k].length; }).map(function (k) { return ch.sections[k].length + " " + k.toLowerCase(); }).join(", "),
+          el("code", { text: ch.path })]);
+      }))]));
+    if ((S.problems || []).length) main.appendChild(section("Problems", null, [table(["Where", "Problem"], S.problems.map(function (p) { return tr([el("code", { text: p.where }), p.message]); }))]));
+  }

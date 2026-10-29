@@ -8,6 +8,7 @@
   function feedKindOf(ev) {
     if (ev.kind === "commit" || ev.kind === "verify" || ev.kind === "gate" || ev.kind === "worklog") return ev.kind;
     if (ev.kind === "design_review" || ev.kind === "ship_review") return "review";
+    if (ev.kind === "spec_change") return "record";
     if (ev.kind === "frame") return "frame";
     return "record";
   }
@@ -574,6 +575,13 @@
       if (idleStages.length) stageWrap.appendChild(el("span", { cls: "muted", style: "font-size: 12px;", title: idleStages.map(function (s) { return s.stage; }).join(", "),
         text: "+ " + plural(idleStages.length, "stage") + " not run" }));
       bodyNodes.push(stageWrap);
+    } else if (ev.kind === "spec_change") {
+      icon = "SPC";
+      hdrLeft.push(el("strong", { text: ev.applied ? "Spec change applied" : "Spec change (pending)" }));
+      if (ev.date) hdrRight.push(el("span", { cls: "muted", text: ev.date }));
+      bodyNodes.push(el("div", { style: "display: flex; gap: 6px; flex-wrap: wrap; align-items: center;" }, Object.keys(ev.counts || {}).map(function (k) {
+        return el("span", { cls: "stamp " + (k === "REMOVED" ? "neutral" : "ok"), text: ev.counts[k] + " " + k.toLowerCase() });
+      }).concat([link(ev.path.split("/").pop(), docRoute(DOC_BY_PATH[ev.path])), link("Specs →", "docs/specs", "")])));
     } else if (ev.kind === "gate") {
       icon = "GTE";
       hdrLeft.push(el("strong", { style: "color: var(--bad);", text: ev.column + " — Human Gate / Decision Required" }));

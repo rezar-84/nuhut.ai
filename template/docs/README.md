@@ -95,6 +95,7 @@ project facts here.
 | `11-epics.md` | How do several connected items run under one plan, with the human checkpoints the project chooses, instead of one stop per item? |
 | `12-sensitive-data-in-records.md` | What may a record hold, what must it never hold, and what happens when a person pastes a secret or personal data? |
 | `13-stack-evaluation.md` | How is a stack or version chosen: verified from the official source, compared on stated criteria, and recorded with its dates? |
+| `15-specs.md` | When the charter turns Specs on: what a living spec is, when a work item needs a spec change, and how it is applied on close. |
 | `14-decision-style.md` | Who makes a choice the request did not settle (Ask, Guide, Autopilot), how is a non-specialist asked, and what does no style lift? |
 
 ## `roles/` — who reviews
@@ -139,6 +140,8 @@ to hold project content.
 | `performance-budget.md` | `project/performance-budget.md` | A latency, throughput, or cost budget is claimed |
 | `adr.md` | `project/adr/NNNN-slug.md` | Per material decision |
 | `plan.md` | inline in the response, or `project/plans/{{PREFIX}}-###.md` | Per Tier 1–2 task |
+| `spec.md` | `project/specs/<capability>.md` | Specs on: describing what one capability does now |
+| `spec-change.md` | `project/specs/changes/{{PREFIX}}-###.md` | Specs on: a Tier 1–2 item that changes observable behaviour |
 | `epic.md` | `project/epics/{{PREFIX}}-###.md` | Per epic, when the development method is `Epic` |
 | `role-review.md` | `project/reviews/{{PREFIX}}-###-<stage>.md` | Per Tier 1 review only; Tier 2 and 3 record verdicts in the worklog entry |
 | `worklog-entry.md` | appended to `project/worklog.md` | Per completed task |

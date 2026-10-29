@@ -52,7 +52,10 @@ being a string.
 
 ## How this relates to Spec Kit, Kiro, and the AI app builders
 
-**Spec-driven development tools are complementary, not alternatives.** GitHub Spec Kit,
+**Spec-driven development tools are complementary, not alternatives** — and since 4.1 the
+kit carries the part most teams installed them for: opt-in living specs with WHEN/THEN
+scenarios and per-item changes (`process/15-specs.md`), in the same headings OpenSpec uses, so
+an existing `openspec/` or Spec Kit folder is read alongside rather than migrated. GitHub Spec Kit,
 AWS Kiro and Tessl answer *what should this feature do, precisely, before an agent builds
 it*. This kit answers *how does every change get made, reviewed, verified and recorded* —
 risk tiers, sixteen role playbooks, the evidence vocabulary, the severity ladder,

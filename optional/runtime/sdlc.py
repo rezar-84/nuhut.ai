@@ -856,6 +856,7 @@ def doctor(project, today=None):
         check_profile(project, out)
         check_sensitive(project, out)
         check_claims(project, out, today)
+        check_specs(project, out, today)
         return out.items
     finally:
         if own_cache:
@@ -880,6 +881,17 @@ def check_claims(project, out, today):
     cell = labelled(project.charter, "Staleness threshold") or ""
     found = re.search(r"[0-9]+", UNFILLED.sub("", cell))
     claims_mod.check(project, out, view_mod, int(found.group(0)) if found else DEFAULT_STALENESS_DAYS, today)
+
+
+def check_specs(project, out, today):
+    """Only when the charter's Specs row is on: spec validation, and Done items whose spec
+    change was never applied."""
+    try:
+        specs_mod, claims_mod, view_mod = runtime_module("specs"), runtime_module("claims"), runtime_module("view")
+    except ImportError:
+        return
+    done = set(i for i, it in claims_mod.items(project, view_mod).items() if it["column"] == "Done")
+    specs_mod.check(project, out, labelled, done, today)
 
 
 def print_findings(items):
@@ -2419,6 +2431,12 @@ def configure_kit(project, changes):
         extra_profile["decision_style"] = val.lower()
         applied.append("Decision style=%s" % val)
 
+    if changes.get("specs") in ("on", "off"):
+        text = _set_charter_row(text, "Specs", "`%s`" % changes["specs"])
+        if changes["specs"] == "on" and not os.path.isdir(project.path(os.path.join(project.docs, "project", "specs", "changes"))):
+            os.makedirs(project.path(os.path.join(project.docs, "project", "specs", "changes")))
+        applied.append("Specs=%s" % changes["specs"])
+
     if changes.get("dev_method"):
         val = next((o for o in DEV_METHOD if o.lower() == str(changes["dev_method"]).strip().lower()), None)
         if not val:
@@ -2825,6 +2843,7 @@ def main(argv):
                           "Standard tier rules, compact budget)")
     cfg.add_argument("--set-check", action="append", default=[],
                      help="set a check command: STAGE=COMMAND or STAGE=absent")
+    cfg.add_argument("--specs", choices=("on", "off"), help="turn living specs on or off (docs/project/specs/)")
     cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
     fx = sub.add_parser("fix", help="run safe mechanical repairs on kit setup")
     fx.add_argument("action", nargs="?", default="all",
@@ -2840,6 +2859,12 @@ def main(argv):
     ln.add_argument("--user", action="store_true",
                     help="also list user-level skills, commands, subagents, MCP servers and plugins (~/.claude)")
     ln.add_argument("--json", action="store_true", help="print the lens as JSON")
+    sp = sub.add_parser("spec", help="living specs: list, show, validate, apply an item's change")
+    sp.add_argument("action", choices=("list", "show", "validate", "apply"))
+    sp.add_argument("target", nargs="?", help="capability (show) or work item ID (apply)")
+    sp.add_argument("--write", action="store_true", help="apply: write the merge and archive the change")
+    sp.add_argument("--strict", action="store_true", help="validate: exit 1 on any problem")
+    sp.add_argument("--json", action="store_true")
     cl = sub.add_parser("claim", help="take a work item: an atomic claim shared by every worktree, "
                                       "plus its branch and (by default) its own worktree")
     cl.add_argument("item")
@@ -2875,6 +2900,52 @@ def main(argv):
         else:
             print_findings(items)
         return 1 if opts.strict and any(i["level"] == "fail" for i in items) else 0
+    if opts.command == "spec":
+        specs_mod = runtime_module("specs")
+        if opts.action == "apply":
+            if not opts.target:
+                sys.stderr.write("spec apply: give the work item ID\n")
+                return 2
+            steps, error = specs_mod.apply_change(project, opts.target, write=opts.write)
+            if error:
+                sys.stderr.write("spec apply: %s\n" % error)
+                return 1
+            print(("applied:" if opts.write else "would (dry run; add --write):"))
+            for s in steps:
+                print("  " + s)
+            return 0
+        data = specs_mod.load(project)
+        if opts.action == "validate":
+            problems = specs_mod.validate(project, data)
+            if opts.json:
+                print(json.dumps(problems, indent=2))
+            for p in [] if opts.json else problems:
+                print("%-4s  %s  %s" % (p["level"], p["where"], p["message"]))
+            if not problems and not opts.json:
+                print("specs: no problems in %d capability spec(s) and %d change(s)" % (len(data["capabilities"]), len(data["changes"])))
+            return 1 if (opts.strict and problems) else 0
+        if opts.action == "show":
+            spec = next((c for c in data["capabilities"] + data["imported"] if c["capability"] == opts.target), None)
+            if not spec:
+                sys.stderr.write("spec show: no capability %r\n" % opts.target)
+                return 2
+            if opts.json:
+                print(json.dumps(spec, indent=2))
+                return 0
+            print("%s (%s) — %s" % (spec["capability"], spec["source"], spec["path"]))
+            for r in spec["requirements"]:
+                print("  Requirement: %s  (%d scenario%s)" % (r["name"], len(r["scenarios"]), "" if len(r["scenarios"]) == 1 else "s"))
+            return 0
+        if opts.json:
+            print(json.dumps(data, indent=2))
+            return 0
+        print("specs %s in the charter" % ("on" if specs_mod.enabled(project, labelled) else "off"))
+        for c in data["capabilities"] + data["imported"]:
+            print("  %-28s %-9s %3d requirement(s)  %s" % (c["capability"], c["source"], len(c["requirements"]), c["path"]))
+        for ch in data["changes"]:
+            n = dict((k, len(v)) for k, v in ch["sections"].items() if v)
+            print("  change %-21s %-9s %s" % (ch["item"], ch["source"], ", ".join("%d %s" % (v, k) for k, v in n.items())))
+        return 0
     if opts.command in ("claim", "release", "claims", "parallel"):
         claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
         if opts.command == "claim":
@@ -3017,6 +3088,8 @@ def main(argv):
             changes["decision_style"] = opts.decision_style
         if opts.dev_method:
             changes["dev_method"] = opts.dev_method
+        if getattr(opts, "specs", None):
+            changes["specs"] = opts.specs
         if opts.reviewer:
             changes["preferred_reviewer"] = opts.reviewer
         if opts.token_saving:

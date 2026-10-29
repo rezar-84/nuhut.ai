@@ -22,6 +22,11 @@ link to upstream spec: `specs/...md`)_
 _(How. Concrete enough that someone else could implement it. Name the actual files,
 modules, endpoints, tables, or screens. Reference upstream specification if one exists.)_
 
+## Spec changes
+
+_(Only when the charter's Specs row is on: link `project/specs/changes/{{PREFIX}}-###.md`,
+or write `none` and why — a refactor or a change nobody outside the code can observe.)_
+
 ## Files that change
 
 _(One backticked path or glob per line — `src/billing/**`, `db/migrations/0042_*.sql`.

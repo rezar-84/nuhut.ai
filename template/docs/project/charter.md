@@ -248,6 +248,7 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | --- | --- |
 | **Default effort mode** | `Lean` · `Normal` · `Beast` _(default: Normal; changes breadth above the risk-tier floor, never the floor itself)_ |
 | **Development method** | `Item` · `Epic` _(default: Item. Epic plans several items together and stops at the checkpoints its plan chooses; it never removes a tier's checks or approvals. See `process/11-epics.md`)_ |
+| **Specs** | `on` · `off` _(default: off. When on, behaviour lives in `project/specs/<capability>.md` as requirements with WHEN/THEN scenarios, and Tier 1–2 items that change it carry a spec change applied on close. See `process/15-specs.md`)_ |
 | **Decision style** | `Ask` · `Guide` · `Autopilot` _(default: Guide. How much the agent decides for the person and how much it says in chat; it never lifts a Tier 1 stop or a gated command, and never thins a record. See `process/14-decision-style.md`)_ |
 | **Tier rules** | `Standard` · `Strict` _(default on a new install: Standard — tier by blast radius and reversibility; Tier 3's record is the commit; Tier 2 commits and continues. Strict keeps the 3.x rules, and an upgrade from 3.x sets it so nothing changes silently. See `../CARD.md`, "Tiers")_ |
 | **Acquisition profile** | `Standard` · `Advanced` _(advanced tools require an owned or explicitly authorised target and never grant permission)_ |

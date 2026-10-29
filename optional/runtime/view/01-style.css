@@ -322,6 +322,10 @@
   .quiet-note { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; }
   .card .t { hyphens: none; -webkit-hyphens: none; }
   .claim-chip { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: color-mix(in srgb, var(--link) 14%, var(--bg)); color: var(--link); white-space: nowrap; font-weight: 600; }
+  .req { border-top: 1px solid var(--line); padding: 10px 0; }
+  .req-hd { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .req-body { margin: 4px 0; font-size: 13.5px; max-width: 72ch; }
+  .req-scen { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
   /* Project lens */
   .lens-tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 16px; }
   .lens-tabs a { padding: 7px 11px; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; text-decoration: none; }

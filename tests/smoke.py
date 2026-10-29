@@ -3138,6 +3138,74 @@ def test_claims():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_specs():
+    print("living specs: validate, apply, import, doctor")
+    d = tempfile.mkdtemp(prefix="sdlc-specs-")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "SPX", "-y"])
+    check("installs with the spec templates and process doc", code == 0
+          and os.path.isfile(os.path.join(d, "docs", "templates", "spec-change.md"))
+          and os.path.isfile(os.path.join(d, "docs", "process", "15-specs.md"))
+          and "**Specs**" in read(d, "docs/project/charter.md"), out[-300:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+
+    write(d, "docs/project/specs/login.md", "# Login\n\n## Purpose\n\nSign-in.\n\n## Requirements\n\n"
+          "### Requirement: Password sign-in\nThe system SHALL accept a correct password.\n\n"
+          "#### Scenario: right password\n- **WHEN** the password matches\n- **THEN** a session starts\n\n"
+          "### Requirement: Lockout\nThe system SHALL lock after 5 failures.\n\n"
+          "### Requirement: Remember me\nThe system SHALL keep the session for 30 days.\n\n"
+          "#### Scenario: ticked\n- **WHEN** remember me is ticked\n- **THEN** the session lasts 30 days\n")
+    code, out = sdlc("doctor")
+    check("specs off: doctor says nothing about specs", "specs" not in out, out[-300:])
+    code, out = sdlc("config", "--specs", "on")
+    check("config --specs on turns them on", code == 0 and "`on`" in read(d, "docs/project/charter.md").split("**Specs**")[1][:20], out)
+    code, out = sdlc("spec", "validate")
+    check("validate catches a requirement with no scenario", "Lockout" in out and "no scenario" in out, out)
+    write(d, "docs/project/specs/changes/SPX-1.md", "# Spec change\n\nCapability: `login`\n\n## ADDED Requirements\n\n"
+          "### Requirement: Two-factor\nThe system MUST ask for a code.\n\n#### Scenario: code\n- **WHEN** a password matches\n- **THEN** a code is asked\n\n"
+          "## MODIFIED Requirements\n\n### Requirement: Remember me\nThe system SHALL keep the session for 14 days.\n\n"
+          "#### Scenario: ticked\n- **WHEN** remember me is ticked\n- **THEN** the session lasts 14 days\n\n"
+          "## REMOVED Requirements\n\n### Requirement: Lockout\nReplaced by rate limiting.\n")
+    code, out = sdlc("spec", "apply", "SPX-1")
+    check("apply is a dry run by default", code == 0 and "dry run" in out and "Two-factor" not in read(d, "docs/project/specs/login.md"), out)
+    code, out = sdlc("spec", "apply", "SPX-1", "--write")
+    spec = read(d, "docs/project/specs/login.md")
+    check("apply merges ADDED, MODIFIED and REMOVED and archives the change",
+          code == 0 and "Two-factor" in spec and "14 days" in spec and "30 days" not in spec and "Lockout" not in spec
+          and "Capability:" not in spec and not os.path.exists(os.path.join(d, "docs/project/specs/changes/SPX-1.md"))
+          and any(n.endswith("-SPX-1.md") for n in os.listdir(os.path.join(d, "docs/project/specs/changes/archive"))), out + spec[-300:])
+    write(d, "docs/project/specs/changes/SPX-2.md", "Capability: `login`\n\n## MODIFIED Requirements\n\n### Requirement: Logout\nThe system SHALL end the session.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n")
+    code, out = sdlc("spec", "apply", "SPX-2", "--write")
+    check("a MODIFIED name that does not exist is refused, nothing written", code == 1 and "not found" in out
+          and os.path.exists(os.path.join(d, "docs/project/specs/changes/SPX-2.md")), out)
+    backlog = read(d, "docs/project/backlog.md")
+    head, sep, tail = backlog.partition("## Done")
+    t1, s2, t2 = tail.partition("| --- |")
+    line_end = t2.index("\n") + 1
+    write(d, "docs/project/backlog.md", head + sep + t1 + s2 + t2[:line_end] + "| SPX-2 | Logout | 2 | software-engineer |  | Done | 2026-01-01 |\n" + t2[line_end:])
+    code, out = sdlc("doctor")
+    check("doctor flags a Done item whose spec change was never applied", "SPX-2 is Done but its spec change is not applied" in out, out[-500:])
+    write(d, "openspec/specs/billing/spec.md", "# Billing\n\n## Requirements\n\n### Requirement: Invoice\nThe system SHALL invoice monthly.\n\n#### Scenario: m\n- **WHEN** a month ends\n- **THEN** an invoice is sent\n")
+    write(d, ".specify/memory/constitution.md", "x\n")
+    write(d, "specs/001-search/spec.md", "# Feature Specification: Search\n\n- **FR-001**: System MUST search by title.\n\n"
+          "1. **Given** a catalog, **When** I search, **Then** results show\n")
+    code, out = sdlc("spec", "list", "--json")
+    data = json.loads(out) if code == 0 else {}
+    srcs = dict((c["capability"], c["source"]) for c in data.get("imported", []))
+    check("OpenSpec and Spec Kit specs are read, labelled by source", srcs.get("billing") == "openspec" and srcs.get("001-search") == "spec-kit", out[:300])
+    code, out = sdlc("view", "--json")
+    model = json.loads(out) if code == 0 else {}
+    check("the viewer model carries specs and the item thread a spec change",
+          model.get("specs", {}).get("enabled") is True and any(e["kind"] == "spec_change" for e in model.get("items", {}).get("SPX-2", {}).get("thread", [])),
+          str(model.get("specs", {}).get("error", ""))[:200])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_semver():
     print("semver: the next kit version from Conventional Commits")
     d = tempfile.mkdtemp()
@@ -3199,7 +3267,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims):
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs):
         test()
     print("")
     if failures:

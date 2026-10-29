@@ -526,6 +526,38 @@ def _build_inner(rt, project):
     model["runs"] = run_records(project)
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import specs as specs_mod
+        spec_data = specs_mod.load(project)
+        spec_data["enabled"] = specs_mod.enabled(project, rt.labelled) if hasattr(rt, "labelled") else False
+        spec_data["problems"] = specs_mod.validate(project, spec_data) if spec_data["enabled"] else []
+        archived = {}
+        arch_dir = os.path.join(specs_mod.specs_dir(project), "changes", "archive")
+        if os.path.isdir(arch_dir):
+            for name in sorted(os.listdir(arch_dir)):
+                m = re.match(r"^(\d{4}-\d{2}-\d{2})-(.+)\.md$", name)
+                if m:
+                    archived[m.group(2)] = m.group(1)
+        spec_data["archived"] = archived
+        model["specs"] = spec_data
+        # Each item's spec change joins its thread, pending or applied.
+        for ch in spec_data["changes"]:
+            it = model["items"].get(ch["item"])
+            if it is not None:
+                counts = dict((k, len(v)) for k, v in ch["sections"].items() if v)
+                it.setdefault("thread", []).append({"kind": "spec_change", "order": 25, "date": "", "path": ch["path"],
+                                                    "title": "Spec change", "counts": counts, "source": ch["source"], "applied": False})
+        for item, day in archived.items():
+            it = model["items"].get(item)
+            if it is not None:
+                it.setdefault("thread", []).append({"kind": "spec_change", "order": 25, "date": day, "title": "Spec change applied",
+                                                    "counts": {}, "source": "nuhut", "applied": True,
+                                                    "path": os.path.join(project.docs, "project", "specs", "changes", "archive", "%s-%s.md" % (day, item))})
+        for it in model["items"].values():
+            it.get("thread", []).sort(key=lambda e: (e.get("order", 50), e.get("date") or ""))
+    except Exception as exc:
+        model["specs"] = {"capabilities": [], "changes": [], "imported": [], "enabled": False, "error": str(exc)}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import claims as claims_mod
         model["claims"] = claims_mod.list_claims(project)
         model["parallel"] = claims_mod.parallel(project, rt, sys.modules[__name__])

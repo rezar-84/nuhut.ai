@@ -315,6 +315,7 @@ template/
       12-sensitive-data-in-records.md  what project records may and may not hold
       13-stack-evaluation.md     verifying and recording foundational stack choices
       14-decision-style.md       Ask, Guide, and Autopilot decision styles
+      15-specs.md                living specs and per-item spec changes (opt-in)
     roles/                   WHO reviews. One playbook per professional perspective.
       README.md + 16 role playbooks
     templates/               Blank artifacts to copy when a project needs one.

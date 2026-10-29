@@ -29,6 +29,7 @@
     else if (route === "activity") { THREAD_STATE.mode = "feed"; location.replace("#/threads"); return; }
     else if (route === "waiting" || route === "blockages") viewWaiting();
     else if (route === "git") viewGit();
+    else if (route === "docs" && parts[1] === "specs") viewSpecs(decodeURIComponent(parts[2] || ""));
     else if (route === "docs") viewDocs();
     else if (route === "item") viewItem(decodeURIComponent(parts[1] || ""));
     else if (route === "doc") viewDoc(decodeURIComponent(parts[1] || ""), parts[2] !== undefined ? +parts[2] : undefined);

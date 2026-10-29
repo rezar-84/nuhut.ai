@@ -334,6 +334,10 @@
   .quiet-note { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; }
   .card .t { hyphens: none; -webkit-hyphens: none; }
   .claim-chip { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: color-mix(in srgb, var(--link) 14%, var(--bg)); color: var(--link); white-space: nowrap; font-weight: 600; }
+  .req { border-top: 1px solid var(--line); padding: 10px 0; }
+  .req-hd { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .req-body { margin: 4px 0; font-size: 13.5px; max-width: 72ch; }
+  .req-scen { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
   /* Project lens */
   .lens-tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 16px; }
   .lens-tabs a { padding: 7px 11px; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; text-decoration: none; }
@@ -6198,6 +6202,7 @@
         el("p", { cls: "view-subtitle", text: "Browse charter, architecture decision records, plans, reviews, and process playbooks with freshness tracking." })
       ]),
       el("div", { cls: "view-header-actions" }, [
+        el("button", { cls: "btn", text: "Specs", on: { click: function () { go("docs/specs"); } } }),
         el("button", { cls: "btn", text: "Kit settings ↗", on: { click: function () { go("project/kit"); } } })
       ])
     ]));
@@ -6669,6 +6674,81 @@
     setTimeout(updateOutlineActive, 80);
   }
 
+  // ---------------------------------------------------------------- specs
+  // What the system does now (living specs), the changes items make to it, and specs
+  // other tools wrote (OpenSpec, Spec Kit), labelled and read-only.
+  var SPECS_STATE = { source: "", sel: "" };
+  function viewSpecs(cap) {
+    tab("docs");
+    crumbs([["Documents", "docs"], ["Specs"]]);
+    var S = M.specs || { capabilities: [], changes: [], imported: [] };
+    var all = (S.capabilities || []).concat(S.imported || []);
+    dashHeader("Specs", S.enabled ? "What the system does now, one capability per file, and the changes work items make to it."
+      : "Specs are off in the charter. Turn them on with python3 .ai-sdlc/bin/sdlc.py config --specs on" + (all.length ? "; specs other tools wrote are shown below." : "."), []);
+    if (S.error) main.appendChild(el("p", { cls: "quiet-note", text: "Specs could not be read: " + S.error }));
+    var pending = {};
+    (S.changes || []).forEach(function (ch) {
+      Object.keys(ch.sections).forEach(function (k) {
+        ch.sections[k].forEach(function (r) {
+          var key = (r.capability || "") + "|" + r.name;
+          (pending[key] = pending[key] || []).push({ kind: k, item: ch.item, source: ch.source });
+        });
+      });
+    });
+    var sources = [];
+    all.forEach(function (c) { if (sources.indexOf(c.source) < 0) sources.push(c.source); });
+    var list = el("div", { cls: "md-list", role: "list", "aria-label": "Capabilities" });
+    var pane = el("div", { cls: "md-pane" });
+    var srcSel = sel("Source", [["", "All sources"]].concat(sources.map(function (x) { return [x, x === "nuhut" ? "This kit" : (x === "openspec" ? "OpenSpec" : "Spec Kit")]; })), SPECS_STATE.source,
+      function (v) { SPECS_STATE.source = v; fill(); });
+    main.appendChild(el("div", { cls: "md" }, [el("div", { cls: "md-left" }, [el("div", { cls: "md-filters" }, [srcSel]), list]), pane]));
+    var current = cap || SPECS_STATE.sel || (all[0] && all[0].source + ":" + all[0].capability) || "";
+    function key(c) { return c.source + ":" + c.capability; }
+    function fill() {
+      list.textContent = "";
+      all.filter(function (c) { return !SPECS_STATE.source || c.source === SPECS_STATE.source; }).forEach(function (c) {
+        var changes = c.requirements.reduce(function (n, r) { return n + ((pending[c.capability + "|" + r.name] || []).length); }, 0);
+        var row = el("div", { cls: "run-row" + (key(c) === current ? " sel" : ""), role: "listitem" }, [
+          el("span", { cls: "rr-dot", "aria-hidden": "true", style: changes ? "background: var(--warn);" : "" }),
+          el("span", { style: "min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" }, [el("strong", { text: c.capability }), el("span", { cls: "muted", text: " " + (c.title || "") })]),
+          el("span", { cls: "muted", text: plural(c.requirements.length, "req") }),
+          el("span", { cls: "muted", text: c.source })
+        ]);
+        var open = function () { SPECS_STATE.sel = key(c); location.replace("#/docs/specs/" + encodeURIComponent(key(c))); };
+        row.addEventListener("click", open); makeInteractive(row, open, c.capability);
+        list.appendChild(row);
+      });
+      if (!all.length) list.appendChild(el("p", { cls: "muted", style: "padding: 10px;", text: "No specs yet. Copy templates/spec.md to project/specs/<capability>.md." }));
+    }
+    fill();
+    var spec = all.filter(function (c) { return key(c) === current; })[0];
+    // New capabilities that only exist in pending changes.
+    var unplaced = (S.changes || []).filter(function (ch) { return Object.keys(ch.sections).some(function (k) { return ch.sections[k].length; }); });
+    if (!spec) {
+      pane.appendChild(el("p", { cls: "muted", text: all.length ? "Pick a capability." : "Nothing to show." }));
+    } else {
+      pane.appendChild(el("div", { cls: "md-pane-hd" }, [el("div", null, [el("strong", { text: spec.title || spec.capability }),
+        el("div", { cls: "muted", style: "font-size: 12px;", text: spec.path + (spec.best_effort ? " · read best-effort" : "") })]),
+        DOC_BY_PATH[spec.path] !== undefined ? link("Open file", docRoute(DOC_BY_PATH[spec.path]), "btn") : null]));
+      if (spec.purpose) pane.appendChild(el("p", { cls: "sec-sub", text: spec.purpose }));
+      spec.requirements.forEach(function (r) {
+        var pend = pending[spec.capability + "|" + r.name] || [];
+        pane.appendChild(el("div", { cls: "req" }, [
+          el("div", { cls: "req-hd" }, [el("strong", { text: r.name })].concat(pend.map(function (p) {
+            return el("span", { cls: "stamp " + (p.kind === "REMOVED" ? "neutral" : "warn"), title: "Pending in " + p.item, text: p.kind.toLowerCase() + " by " + p.item });
+          }))),
+          r.body ? el("p", { cls: "req-body", text: r.body }) : null,
+          el("ul", { cls: "req-scen" }, r.scenarios.map(function (sc) { return el("li", null, [el("strong", { text: sc.name + ": " }), sc.body.replace(/\*\*/g, "").replace(/\n+/g, " ")]); }))
+        ]));
+      });
+    }
+    if (unplaced.length) main.appendChild(section("Pending changes", "Spec changes not yet applied. `sdlc.py spec apply <ID> --write` merges one on close.", [
+      table(["Item", "Source", "Changes", "File"], unplaced.map(function (ch) {
+        return tr([itemLink(ch.item), ch.source, Object.keys(ch.sections).filter(function (k) { return ch.sections[k].length; }).map(function (k) { return ch.sections[k].length + " " + k.toLowerCase(); }).join(", "),
+          el("code", { text: ch.path })]);
+      }))]));
+    if ((S.problems || []).length) main.appendChild(section("Problems", null, [table(["Where", "Problem"], S.problems.map(function (p) { return tr([el("code", { text: p.where }), p.message]); }))]));
+  }
   // ---------------------------------------------------------------- search
   function viewSearch(term) {
     tab("");
@@ -6850,6 +6930,7 @@
   function feedKindOf(ev) {
     if (ev.kind === "commit" || ev.kind === "verify" || ev.kind === "gate" || ev.kind === "worklog") return ev.kind;
     if (ev.kind === "design_review" || ev.kind === "ship_review") return "review";
+    if (ev.kind === "spec_change") return "record";
     if (ev.kind === "frame") return "frame";
     return "record";
   }
@@ -7416,6 +7497,13 @@
       if (idleStages.length) stageWrap.appendChild(el("span", { cls: "muted", style: "font-size: 12px;", title: idleStages.map(function (s) { return s.stage; }).join(", "),
         text: "+ " + plural(idleStages.length, "stage") + " not run" }));
       bodyNodes.push(stageWrap);
+    } else if (ev.kind === "spec_change") {
+      icon = "SPC";
+      hdrLeft.push(el("strong", { text: ev.applied ? "Spec change applied" : "Spec change (pending)" }));
+      if (ev.date) hdrRight.push(el("span", { cls: "muted", text: ev.date }));
+      bodyNodes.push(el("div", { style: "display: flex; gap: 6px; flex-wrap: wrap; align-items: center;" }, Object.keys(ev.counts || {}).map(function (k) {
+        return el("span", { cls: "stamp " + (k === "REMOVED" ? "neutral" : "ok"), text: ev.counts[k] + " " + k.toLowerCase() });
+      }).concat([link(ev.path.split("/").pop(), docRoute(DOC_BY_PATH[ev.path])), link("Specs →", "docs/specs", "")])));
     } else if (ev.kind === "gate") {
       icon = "GTE";
       hdrLeft.push(el("strong", { style: "color: var(--bad);", text: ev.column + " — Human Gate / Decision Required" }));
@@ -8501,6 +8589,7 @@
     else if (route === "activity") { THREAD_STATE.mode = "feed"; location.replace("#/threads"); return; }
     else if (route === "waiting" || route === "blockages") viewWaiting();
     else if (route === "git") viewGit();
+    else if (route === "docs" && parts[1] === "specs") viewSpecs(decodeURIComponent(parts[2] || ""));
     else if (route === "docs") viewDocs();
     else if (route === "item") viewItem(decodeURIComponent(parts[1] || ""));
     else if (route === "doc") viewDoc(decodeURIComponent(parts[1] || ""), parts[2] !== undefined ? +parts[2] : undefined);

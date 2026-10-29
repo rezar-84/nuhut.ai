@@ -4,6 +4,12 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Living specs, opt-in (`sdlc.py spec`, `config --specs on`, `process/15-specs.md`).**
+  - What the system does now lives in `docs/project/specs/<capability>.md`, as requirements with WHEN/THEN scenarios.
+  - Tier 1–2 items that change behaviour carry a spec change (ADDED/MODIFIED/REMOVED). `/sdlc-log` applies it on close and archives it. `/sdlc-plan` drafts it.
+  - The headings match OpenSpec, so an `openspec/` folder is read as-is, and Spec Kit specs best-effort, both read-only.
+  - Doctor checks the specs only when they are on. The viewer adds Documents ▸ Specs and spec changes in item threads.
+  - New optional skill `sdlc-spec`, including brownfield specs written from code and tests.
 - **Claims, worktrees and parallel work (`sdlc.py claim`, `release`, `claims`, `parallel`).**
   - Taking an item is now an atomic claim shared by every worktree, plus its own branch and worktree.
   - `parallel` groups unclaimed Ready items whose plans touch different files, keeping the charter, migrations and lockfiles single-writer.

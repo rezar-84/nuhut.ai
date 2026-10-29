@@ -39,7 +39,7 @@ RETIRED_STATE = "dashboard-state.js"
 # The mechanical half of /sdlc-doctor and /sdlc-verify. Kit-managed: --upgrade refreshes it.
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
-RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py")
+RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -1122,6 +1122,8 @@ SKILL_RULES = (
     ("sdlc-evidence-check", "always", "fires before any 'done / passing / verified' claim", ""),
     ("sdlc-charter-audit", "always", "keeps the charter's blank and stale cells visible", ""),
     ("sdlc-adr", "always", "captures durable decisions instead of losing them", ""),
+    ("sdlc-spec", "opt_in", "writes living specs and per-item spec changes (charter Specs: on)",
+     "living specs are opt-in; pick it here, or later with --upgrade, when the charter's Specs row is on"),
     ("sdlc-doctor", "always",
      "keeps blank, stale, and drifted project documents from being read as true", ""),
     ("sdlc-accessibility-audit", "ui", "there is an interface to audit",
@@ -1286,6 +1288,8 @@ class Wizard(object):
                 continue
             if rule == "always":
                 on = True
+            elif rule == "opt_in":
+                on = False
             elif rule == "pii_or_deploy":
                 on = bool(self.fact("pii") or self.fact("deploy"))
             elif rule == "multilingual":

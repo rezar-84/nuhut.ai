@@ -37,7 +37,10 @@ $ARGUMENTS
 
 5. **Update the docs the change falsified** — corrected and re-dated, or marked
    `status: stale` with a backlog item (`{{DOCS_DIR}}/process/07-traceability.md`). Leaving a
-   confidently wrong document is not an option.
+   confidently wrong document is not an option. If the item has a spec change
+   (`{{DOCS_DIR}}/project/specs/changes/<ID>.md`), merge it into the living specs with
+   `python3 .ai-sdlc/bin/sdlc.py spec apply <ID> --write`; a refusal (a MODIFIED or REMOVED
+   name that does not match) is fixed in the change file, never forced.
 
 6. **Write an ADR** if a durable decision was made and none exists
    (`{{DOCS_DIR}}/templates/adr.md`). If a decision was durable and you are not writing an ADR,
