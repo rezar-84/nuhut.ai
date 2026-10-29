@@ -5,6 +5,7 @@
     if (section === "tests") return viewDashTests();
     if (section === "runs") return viewDashRuns();
     if (section === "doctor") return viewDashDoctor();
+    if (section === "parallel") return viewDashParallel();
     tab("dashboard");
     crumbs([["Dashboard"]]);
     var f = dashFacts(), lr = f.lr, ev = f.ev;
@@ -121,6 +122,21 @@
     grid.appendChild(ckCard("doctor", "Doctor",
       f.fails.length ? plural(f.fails.length, "failing finding") + " block a clean ship." : (f.warns.length ? "No failures; " + plural(f.warns.length, "warning") + " in " + plural(groups.length, "rule") + "." : "Every mechanical check passes."),
       [docRows, M.alerts.length ? viewAll(M.alerts.length, "dashboard/doctor", "finding") : null]));
+
+    // Parallel work: who holds what, and what else can start without colliding.
+    var par = M.parallel || { groups: [] }, held = M.claims || [];
+    var parRows = el("div", { role: "list" });
+    held.slice(0, 4).forEach(function (c) {
+      var open = function () { openItemDrawer(c.id); };
+      var row = el("div", { cls: "sum-row", role: "listitem" }, [claimChip(c), el("strong", { text: c.id }), el("span", { cls: "muted sum-txt", text: c.branch })]);
+      row.addEventListener("click", open); makeInteractive(row, open, c.id + " claimed by " + c.agent);
+      parRows.appendChild(row);
+    });
+    if (par.groups && par.groups.length) parRows.appendChild(el("p", { style: "font-size: 12.5px; margin: 8px 0 0;" },
+      [el("strong", { text: "Can start together: " }), document.createTextNode(par.groups[0].join(", "))]));
+    if (!held.length && !(par.groups || []).length) parRows.appendChild(el("p", { cls: "muted", text: "Nothing claimed, and no Ready item with a plan to start." }));
+    grid.appendChild(ckCard("parallel", "Parallel work", plural(held.length, "claim") + "; " + plural((par.candidates || []).length, "Ready item") + " with a plan" + ((par.plan_first || []).length ? ", " + (par.plan_first || []).length + " need a plan first" : "") + ".",
+      [parRows, el("a", { cls: "view-all", href: "#/dashboard/parallel", text: "Plan parallel work →" })]));
 
     // Project stats
     var colRows = ["Now", "Next", "Blocked", "Parked", "Later", "Done"].map(function (c) { return [c, f.counts[c] || 0, "var(--c-" + c + ")"]; });

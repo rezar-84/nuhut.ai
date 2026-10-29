@@ -164,7 +164,7 @@
   function routeLabel(r) {
     var p = r.split("/").map(function (x) { try { return decodeURIComponent(x); } catch (e) { return x; } });
     if (p[0] === "threads" || !p[0]) return p[1] ? "Inbox · " + p[1] : "Inbox";
-    if (p[0] === "dashboard") return p[1] ? ({ tests: "Tests & verify", runs: "Runs & logs", doctor: "Doctor" })[p[1]] || "Dashboard" : "Dashboard";
+    if (p[0] === "dashboard") return p[1] ? ({ tests: "Tests & verify", runs: "Runs & logs", doctor: "Doctor", parallel: "Parallel work" })[p[1]] || "Dashboard" : "Dashboard";
     if (p[0] === "board") return "Board";
     if (p[0] === "waiting" || p[0] === "blockages") return "Blockages";
     if (p[0] === "git") return "Git";
@@ -219,3 +219,33 @@
     });
   }
 
+  // ---------------------------------------------------------------- claims & parallel work
+  function claimOf(id) { return (M.claims || []).filter(function (c) { return c.id === id; })[0] || null; }
+  function claimChip(c, long) {
+    var days = c.since ? Math.max(0, Math.floor((Date.now() - Date.parse(c.since)) / 86400000)) : null;
+    return el("span", { cls: "claim-chip", title: "Claimed by " + c.agent + (c.since ? " on " + c.since.slice(0, 10) : "") + (c.worktree ? " · worktree " + c.worktree : "") + " · branch " + c.branch,
+      text: (long ? "claimed by " : "") + c.agent + (days !== null ? " · " + days + "d" : "") });
+  }
+  function viewDashParallel() {
+    tab("dashboard");
+    crumbs([["Dashboard", "dashboard"], ["Parallel work"]]);
+    var par = M.parallel || { groups: [], conflicts: [], plan_first: [], candidates: [] }, held = M.claims || [];
+    dashHeader("Parallel work", "Who holds what, and which Ready items can start side by side without touching the same files.", []);
+    main.appendChild(section("Claimed", held.length ? "Each claim is shared by every worktree on this machine; its branch is what other machines see." : "Nothing is claimed. Take an item with: python3 .ai-sdlc/bin/sdlc.py claim <ID>", [
+      held.length ? table(["Item", "Agent", "Branch", "Worktree", "Since", "Last commit"], held.map(function (c) {
+        return tr([el("strong", { text: c.id }), c.agent, el("code", { text: c.branch }), el("span", { cls: "muted", text: c.worktree || "—" }), (c.since || "").slice(0, 10), (c.last_commit || "").slice(0, 10) || "none"],
+          function () { openItemDrawer(c.id); }, c.id);
+      })) : null]));
+    var byId = {};
+    (par.candidates || []).forEach(function (c) { byId[c.id] = c; });
+    main.appendChild(section("Can start together", "Unclaimed Ready items whose dependencies are done, grouped so that no two in a group touch the same files (from each plan's Files that change). Charter, migrations and lockfiles count as one shared file each.", [
+      (par.groups || []).length ? table(["Group", "Items", "Files they change"], par.groups.map(function (g, n) {
+        return tr([String(n + 1), el("span", null, g.map(function (id, i) { return el("span", null, [i ? ", " : "", itemLink(id)]); })),
+          el("span", { cls: "muted sum-txt", text: g.map(function (id) { return (byId[id] ? byId[id].files : []).slice(0, 3).join(" "); }).join(" · ") })]);
+      })) : el("p", { cls: "muted", text: "No unclaimed Ready item has a plan with Files that change." })]));
+    if ((par.conflicts || []).length) main.appendChild(section("Conflicts", "These pairs must run one after the other.", [
+      table(["Items", "Shared"], par.conflicts.map(function (c) { return tr([c.a + " × " + c.b, c.files.concat(c.single_writer).join(", ")]); }))]));
+    if ((par.plan_first || []).length) main.appendChild(section("Plan first", "Ready items without a plan's Files that change; their files are unknown, so they run alone.", [
+      el("p", null, par.plan_first.map(function (x, i) { return el("span", null, [i ? ", " : "", itemLink(x.id)]); }))]));
+    if (par.error) main.appendChild(el("p", { cls: "quiet-note", text: "Parallel report unavailable: " + par.error }));
+  }

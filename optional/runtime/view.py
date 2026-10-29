@@ -524,6 +524,14 @@ def _build_inner(rt, project):
 
     model["evidence"] = evidence_runs(project)
     model["runs"] = run_records(project)
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import claims as claims_mod
+        model["claims"] = claims_mod.list_claims(project)
+        model["parallel"] = claims_mod.parallel(project, rt, sys.modules[__name__])
+    except Exception as exc:  # claims are a convenience; the page opens without them
+        model["claims"], model["parallel"] = [], {"groups": [], "conflicts": [], "plan_first": [], "candidates": [],
+                                                  "error": str(exc)}
     model["metrics"] = metrics(rt, project, model)
     try:
         model["flow"] = flow(rt, project, model)
@@ -1024,6 +1032,13 @@ def watched_paths(project):
     evidence = project.path(os.path.join(".ai-sdlc", "evidence"))
     if os.path.isdir(evidence):
         paths.extend(os.path.join(evidence, n, "summary.json") for n in os.listdir(evidence))
+    try:
+        import claims as claims_mod
+        reg = claims_mod.registry(project)
+        if reg and os.path.isdir(reg):
+            paths.extend(os.path.join(reg, n) for n in os.listdir(reg))
+    except Exception:
+        pass
     runs = runs_folder(project)
     if os.path.isdir(runs):
         paths.extend(os.path.join(runs, n) for n in os.listdir(runs) if n.endswith(".json"))

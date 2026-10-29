@@ -39,7 +39,7 @@ RETIRED_STATE = "dashboard-state.js"
 # The mechanical half of /sdlc-doctor and /sdlc-verify. Kit-managed: --upgrade refreshes it.
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
-RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py")
+RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.

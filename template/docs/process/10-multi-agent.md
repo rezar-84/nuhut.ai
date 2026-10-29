@@ -19,9 +19,20 @@ failure here, and it is dangerous precisely because it looks like progress: both
 plausible work, both write a worklog entry, and the second merge silently reverts the
 first.
 
-Before starting, take the item: set the backlog row's **Owner** column to your agent
-identity and its status to `In progress`, and commit that edit on its own. Taking an item
-is a write, not an intention. If the row is already owned, pick another item — do not
+Before starting, take the item. With the runtime installed that is one command:
+`python3 .ai-sdlc/bin/sdlc.py claim <ID>`.
+- The claim is a file in the repository's shared git directory, which every worktree of
+  the clone sees. It is created atomically, so a second agent asking for the same item is
+  refused.
+- The command also creates the item's branch and its own worktree.
+- `--mark` sets the backlog row to `In progress`, from the main worktree only. Marking
+  rows in several worktrees produces conflicting backlog edits at merge time.
+
+`sdlc.py claims` lists who holds what, and `sdlc.py release <ID>` frees an item.
+
+Without the runtime, take the claim by hand: set the backlog row's **Owner** column to your
+agent identity and its status to `In progress`, and commit that edit on its own. Taking an
+item is a write, not an intention. If the item is already held, pick another — do not
 "help".
 
 - Release the claim when the item reaches `Done`, `Parked`, or `Deferred`.
@@ -33,8 +44,15 @@ is a write, not an intention. If the row is already owned, pick another item —
 **One item, one working tree.** Parallel sessions on the same checkout overwrite each
 other's files between one command and the next. Give each claimed item its own git
 worktree: a separate checkout on its own branch, which shares the repository but not the
-files. Split work by the files it touches, using the plan's "Files that change". Two items
-that change the same files run one after the other, not side by side.
+files (`claim` does this by default).
+
+Split work by the files it touches, using the plan's "Files that change". Two items that
+change the same files run one after the other, not side by side. `sdlc.py parallel` does
+this split for you:
+- it lists the unclaimed Ready items whose dependencies are done, grouped so that no two
+  in a group touch the same files
+- the charter, migrations and lockfiles count as one shared file each
+- it names the items that need a plan before their files are known
 
 The limit on parallel sessions is how many the human can review properly, not how many the
 machine can run. Add a session only while reviews are keeping up.

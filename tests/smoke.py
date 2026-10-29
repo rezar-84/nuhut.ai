@@ -3053,6 +3053,91 @@ def test_lens():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_claims():
+    print("claims, worktrees and the parallel report")
+    d = tempfile.mkdtemp(prefix="sdlc-claims-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", repo])
+    code, out = run([repo, "CLX", "-y"])
+    check("installs", code == 0, out[-300:])
+    backlog = read(repo, "docs/project/backlog.md")
+    rows = ("| CLX-1 | Login form | 2 | software-engineer |  | Ready |\n"
+            "| CLX-2 | Billing page | 2 | software-engineer |  | Ready |\n"
+            "| CLX-3 | Login rate limit | 2 | security |  | Ready |\n"
+            "| CLX-4 | Schema change | 2 | software-engineer |  | Ready |\n"
+            "| CLX-5 | Second schema change | 2 | software-engineer |  | Ready |\n"
+            "| CLX-6 | Needs CLX-9 | 3 | software-engineer | CLX-9 | Ready |\n"
+            "| CLX-7 | No plan yet | 3 | software-engineer |  | Ready |\n"
+            "| CLX-9 | Shipped | 3 | software-engineer |  | In progress |\n")
+    marker = "## Next"
+    head, _, tail = backlog.partition(marker)
+    tail_head, sep, tail_rest = tail.partition("| --- | --- | --- | --- | --- | --- |\n")
+    write(repo, "docs/project/backlog.md", head + marker + tail_head + sep + rows + tail_rest)
+    plans = {"CLX-1": ["src/auth/login.ts", "src/auth/*.test.ts"], "CLX-2": ["src/billing/page.tsx"],
+             "CLX-3": ["src/auth/login.ts"], "CLX-4": ["prisma/migrations/001_a/migration.sql"],
+             "CLX-5": ["prisma/migrations/002_b/migration.sql"]}
+    for item, files in plans.items():
+        write(repo, "docs/project/plans/%s.md" % item, "# %s\n\n## Files that change\n\n%s\n\n## Order of work\n" % (
+            item, "\n".join("- `%s`" % f for f in files)))
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "CLX-1 backlog"], cwd=repo)
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(cwd, *args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+
+    code, out = sdlc(repo, "parallel", "--json")
+    par = json.loads(out) if code == 0 else {}
+    grouped = dict((i, n) for n, g in enumerate(par.get("groups", [])) for i in g)
+    check("items sharing a file are kept apart, unrelated ones grouped",
+          grouped.get("CLX-1") != grouped.get("CLX-3") and "CLX-2" in grouped, out[:400])
+    check("two migrations conflict as one single-writer resource",
+          any(set((c["a"], c["b"])) == set(("CLX-4", "CLX-5")) and "migrations" in c["single_writer"] for c in par.get("conflicts", [])),
+          str(par.get("conflicts"))[:300])
+    check("an item with an unfinished dependency is not offered", "CLX-6" not in grouped)
+    check("an item without a plan is listed as plan first", [x["id"] for x in par.get("plan_first", [])] == ["CLX-7"], out[:300])
+    code, out = sdlc(repo, "claim", "CLX-1", "--agent", "agent-a", "--mark")
+    wt = os.path.join(d, "repo-CLX-1")
+    check("claim creates the branch and its own worktree", code == 0 and os.path.isdir(wt) and "CLX-1-login-form" in out, out)
+    check("--mark sets the row to In progress in the main worktree",
+          re.search(r"\| CLX-1 \|.*\|\s*In progress\s*\|", read(repo, "docs/project/backlog.md")) is not None)
+    code, out = sdlc(repo, "claim", "CLX-1", "--agent", "agent-b", "--no-worktree")
+    check("a second claim of the same item is refused", code == 1 and "already claimed by agent-a" in out, out)
+    wt_script = os.path.join(wt, ".ai-sdlc", "bin", "sdlc.py")
+    p = subprocess.run([sys.executable, wt_script, "claims", "--json"], cwd=wt, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    shared = p.stdout.decode("utf-8", "replace")
+    check("every worktree sees the same claims", '"CLX-1"' in shared and "agent-a" in shared, shared[:300])
+    p = subprocess.run([sys.executable, wt_script, "claim", "CLX-2", "--no-worktree", "--mark"], cwd=wt,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    check("--mark is refused from a secondary worktree", p.returncode == 1 and "main worktree" in p.stdout.decode("utf-8", "replace"))
+    code, out = sdlc(repo, "parallel", "--json")
+    check("a claimed item is no longer offered", "CLX-1" not in json.dumps(json.loads(out).get("groups", [])))
+    code, out = sdlc(repo, "claim", "CLX-6", "--no-worktree")
+    check("an item with an unfinished dependency cannot be claimed", code == 1 and "CLX-9" in out, out)
+    write(wt, "scratch.txt", "work in progress\n")
+    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree")
+    check("release refuses to remove a dirty worktree", code == 1 and "uncommitted" in out and os.path.isdir(wt), out)
+    os.remove(os.path.join(wt, "scratch.txt"))
+    # A claim on a finished item is reported until it is released.
+    write(repo, "docs/project/backlog.md", read(repo, "docs/project/backlog.md").replace(
+        "| CLX-2 | Billing page | 2 | software-engineer |  | Ready |", "| CLX-2 | Billing page | 2 | software-engineer |  | Ready |"))
+    code, out = sdlc(repo, "claim", "CLX-2", "--no-worktree", "--agent", "agent-c")
+    write(repo, "docs/project/backlog.md", read(repo, "docs/project/backlog.md").replace(
+        "| CLX-2 | Billing page | 2 | software-engineer |  | Ready |", "| CLX-2 | Billing page | 2 | software-engineer |  | Done |"))
+    code, out = sdlc(repo, "doctor")
+    check("doctor flags a claim on a finished item", "claim CLX-2" in out and "still claimed" in out, out[-600:])
+    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree")
+    check("release frees the claim and removes a clean worktree", code == 0 and not os.path.isdir(wt), out)
+    code, out = sdlc(repo, "view", "--json")
+    model = json.loads(out) if code == 0 else {}
+    check("the viewer model carries claims and the parallel report",
+          [c["id"] for c in model.get("claims", [])] == ["CLX-2"] and "groups" in model.get("parallel", {}), out[:300])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_semver():
     print("semver: the next kit version from Conventional Commits")
     d = tempfile.mkdtemp()
@@ -3114,7 +3199,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens):
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims):
         test()
     print("")
     if failures:

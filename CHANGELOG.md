@@ -4,6 +4,11 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Claims, worktrees and parallel work (`sdlc.py claim`, `release`, `claims`, `parallel`).**
+  - Taking an item is now an atomic claim shared by every worktree, plus its own branch and worktree.
+  - `parallel` groups unclaimed Ready items whose plans touch different files, keeping the charter, migrations and lockfiles single-writer.
+  - Doctor flags stale claims, claims on finished items, and two branches for one claimed item.
+  - The viewer shows claim badges on cards and threads, and a Dashboard ▸ Parallel work page. `process/10-multi-agent.md` points at the commands.
 - **Project lens (`sdlc.py lens`, `sdlc.py audit`, viewer ▸ Project).** One read-only view of everything the project is made of:
   - the stack (detected live)
   - direct dependencies and lockfiles

@@ -68,6 +68,7 @@
         el("span", { style: "display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;" }, [
           lastEv ? el("span", { cls: "note-ic " + (stageBad(lastEv.result) ? "bad" : (stageOk(lastEv.result) ? "ok" : "warn")), style: "margin: 0;",
             title: "Last verify: " + lastEv.stage + " " + lastEv.result }) : null,
+          claimOf(id) ? claimChip(claimOf(id)) : null,
           age ? el("span", { cls: "age-badge " + age.tone, title: age.title, text: age.text }) : null,
           el("span", { cls: "muted", style: "font-size: 11px;", text: pipData.stepsDone + "/" + M.steps.length })
         ])

@@ -877,7 +877,8 @@
           colChip(activeItem.column),
           activeItem.tier ? el("span", { cls: "chip", text: "Tier " + activeItem.tier }) : null,
           activeItem.owner ? el("span", { cls: "chip", text: "Owner: " + activeItem.owner }) : null,
-          activeItem.author ? el("span", { cls: "chip", text: "agent: " + activeItem.author }) : null
+          activeItem.author ? el("span", { cls: "chip", text: "agent: " + activeItem.author }) : null,
+          claimOf(activeId) ? claimChip(claimOf(activeId), true) : null
         ]),
         el("div", { style: "display: flex; gap: 6px; flex-wrap: wrap;" }, [
           el("button", { cls: "cmd-btn", style: "padding: 3px 8px; font-size: 11px;", text: "Inspector", on: { click: function () { openItemDrawer(activeId); } } }),

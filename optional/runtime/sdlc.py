@@ -855,10 +855,31 @@ def doctor(project, today=None):
         check_rollback(project, out, today)
         check_profile(project, out)
         check_sensitive(project, out)
+        check_claims(project, out, today)
         return out.items
     finally:
         if own_cache:
             project._build_cache = None
+
+
+def runtime_module(name):
+    """A sibling module of this file (view, lens, claims), imported on demand."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    sys.dont_write_bytecode = True
+    return __import__(name)
+
+
+def check_claims(project, out, today):
+    """Stale claims, claims on finished items, and two branches for one claimed item."""
+    try:
+        claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
+    except ImportError:
+        return
+    cell = labelled(project.charter, "Staleness threshold") or ""
+    found = re.search(r"[0-9]+", UNFILLED.sub("", cell))
+    claims_mod.check(project, out, view_mod, int(found.group(0)) if found else DEFAULT_STALENESS_DAYS, today)
 
 
 def print_findings(items):
@@ -2819,6 +2840,24 @@ def main(argv):
     ln.add_argument("--user", action="store_true",
                     help="also list user-level skills, commands, subagents, MCP servers and plugins (~/.claude)")
     ln.add_argument("--json", action="store_true", help="print the lens as JSON")
+    cl = sub.add_parser("claim", help="take a work item: an atomic claim shared by every worktree, "
+                                      "plus its branch and (by default) its own worktree")
+    cl.add_argument("item")
+    cl.add_argument("--agent", help="who holds it (default: the identity trailers would use)")
+    cl.add_argument("--worktree", help="where to create the worktree (default: ../<repo>-<ID>)")
+    cl.add_argument("--no-worktree", action="store_true", help="create the branch only")
+    cl.add_argument("--base", help="start the branch from this ref (default: HEAD)")
+    cl.add_argument("--mark", action="store_true", help="also set the backlog row to In progress "
+                    "(main worktree only)")
+    cl.add_argument("--json", action="store_true")
+    rl = sub.add_parser("release", help="free a claimed item")
+    rl.add_argument("item")
+    rl.add_argument("--remove-worktree", action="store_true", help="also remove its worktree (refused when dirty)")
+    cs = sub.add_parser("claims", help="list active claims")
+    cs.add_argument("--json", action="store_true")
+    pa = sub.add_parser("parallel", help="Ready items nobody holds, grouped so no two in a group "
+                                         "touch the same files")
+    pa.add_argument("--json", action="store_true")
     au = sub.add_parser("audit", help="run the charter's dependency scanner in JSON mode and keep "
                                       "the vulnerable packages it reports")
     au.add_argument("--timeout", type=int, default=600, help="seconds before the scanner is stopped")
@@ -2836,6 +2875,54 @@ def main(argv):
         else:
             print_findings(items)
         return 1 if opts.strict and any(i["level"] == "fail" for i in items) else 0
+    if opts.command in ("claim", "release", "claims", "parallel"):
+        claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
+        if opts.command == "claim":
+            agent = opts.agent or identity(None, None)[0]
+            record, error = claims_mod.claim(project, view_mod, opts.item, agent, opts.worktree,
+                                             opts.no_worktree, opts.mark, opts.base)
+            if error:
+                sys.stderr.write("claim: %s\n" % error)
+                return 1
+            if opts.json:
+                print(json.dumps(record, indent=2))
+            else:
+                print("claimed %s for %s on branch %s" % (record["id"], record["agent"], record["branch"]))
+                if record["worktree"]:
+                    print("worktree: %s\n  cd %s" % (record["worktree"], record["worktree"]))
+                print("release it when the item is Done, Parked or Deferred: "
+                      "python3 .ai-sdlc/bin/sdlc.py release %s" % record["id"])
+            return 0
+        if opts.command == "release":
+            record, error = claims_mod.release(project, opts.item, opts.remove_worktree)
+            if error:
+                sys.stderr.write("release: %s\n" % error)
+                return 1
+            print("released %s (was %s)" % (record["id"], record.get("agent", "?")))
+            return 0
+        if opts.command == "claims":
+            held = claims_mod.list_claims(project)
+            if opts.json:
+                print(json.dumps(held, indent=2))
+            elif not held:
+                print("no active claims")
+            for c in [] if opts.json else held:
+                print("%-10s %-16s %-36s since %s  last commit %s" % (c["id"], c.get("agent", "?"), c.get("branch", ""),
+                                                                    c.get("since", "")[:10], c.get("last_commit", "")[:10] or "none"))
+            return 0
+        result = claims_mod.parallel(project, sys.modules[__name__], view_mod)
+        if opts.json:
+            print(json.dumps(result, indent=2))
+            return 0
+        for n, group in enumerate(result["groups"], 1):
+            print("group %d (can run together): %s" % (n, ", ".join(group)))
+        for c in result["conflicts"]:
+            print("conflict %s × %s: %s" % (c["a"], c["b"], ", ".join(c["files"] + c["single_writer"])))
+        if result["plan_first"]:
+            print("plan first (no Files that change): %s" % ", ".join(x["id"] for x in result["plan_first"]))
+        if not (result["groups"] or result["plan_first"]):
+            print("no unclaimed Ready items with finished dependencies")
+        return 0
     if opts.command in ("lens", "audit"):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         sys.dont_write_bytecode = True

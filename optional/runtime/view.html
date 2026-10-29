@@ -333,6 +333,7 @@
   .plain-details > summary { cursor: pointer; font-size: 12.5px; color: var(--muted); margin-top: 10px; }
   .quiet-note { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; }
   .card .t { hyphens: none; -webkit-hyphens: none; }
+  .claim-chip { font-size: 11px; padding: 1px 6px; border-radius: 8px; background: color-mix(in srgb, var(--link) 14%, var(--bg)); color: var(--link); white-space: nowrap; font-weight: 600; }
   /* Project lens */
   .lens-tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); margin: 0 0 16px; }
   .lens-tabs a { padding: 7px 11px; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; text-decoration: none; }
@@ -1867,6 +1868,7 @@
     if (section === "tests") return viewDashTests();
     if (section === "runs") return viewDashRuns();
     if (section === "doctor") return viewDashDoctor();
+    if (section === "parallel") return viewDashParallel();
     tab("dashboard");
     crumbs([["Dashboard"]]);
     var f = dashFacts(), lr = f.lr, ev = f.ev;
@@ -1983,6 +1985,21 @@
     grid.appendChild(ckCard("doctor", "Doctor",
       f.fails.length ? plural(f.fails.length, "failing finding") + " block a clean ship." : (f.warns.length ? "No failures; " + plural(f.warns.length, "warning") + " in " + plural(groups.length, "rule") + "." : "Every mechanical check passes."),
       [docRows, M.alerts.length ? viewAll(M.alerts.length, "dashboard/doctor", "finding") : null]));
+
+    // Parallel work: who holds what, and what else can start without colliding.
+    var par = M.parallel || { groups: [] }, held = M.claims || [];
+    var parRows = el("div", { role: "list" });
+    held.slice(0, 4).forEach(function (c) {
+      var open = function () { openItemDrawer(c.id); };
+      var row = el("div", { cls: "sum-row", role: "listitem" }, [claimChip(c), el("strong", { text: c.id }), el("span", { cls: "muted sum-txt", text: c.branch })]);
+      row.addEventListener("click", open); makeInteractive(row, open, c.id + " claimed by " + c.agent);
+      parRows.appendChild(row);
+    });
+    if (par.groups && par.groups.length) parRows.appendChild(el("p", { style: "font-size: 12.5px; margin: 8px 0 0;" },
+      [el("strong", { text: "Can start together: " }), document.createTextNode(par.groups[0].join(", "))]));
+    if (!held.length && !(par.groups || []).length) parRows.appendChild(el("p", { cls: "muted", text: "Nothing claimed, and no Ready item with a plan to start." }));
+    grid.appendChild(ckCard("parallel", "Parallel work", plural(held.length, "claim") + "; " + plural((par.candidates || []).length, "Ready item") + " with a plan" + ((par.plan_first || []).length ? ", " + (par.plan_first || []).length + " need a plan first" : "") + ".",
+      [parRows, el("a", { cls: "view-all", href: "#/dashboard/parallel", text: "Plan parallel work →" })]));
 
     // Project stats
     var colRows = ["Now", "Next", "Blocked", "Parked", "Later", "Done"].map(function (c) { return [c, f.counts[c] || 0, "var(--c-" + c + ")"]; });
@@ -2301,7 +2318,7 @@
   function routeLabel(r) {
     var p = r.split("/").map(function (x) { try { return decodeURIComponent(x); } catch (e) { return x; } });
     if (p[0] === "threads" || !p[0]) return p[1] ? "Inbox · " + p[1] : "Inbox";
-    if (p[0] === "dashboard") return p[1] ? ({ tests: "Tests & verify", runs: "Runs & logs", doctor: "Doctor" })[p[1]] || "Dashboard" : "Dashboard";
+    if (p[0] === "dashboard") return p[1] ? ({ tests: "Tests & verify", runs: "Runs & logs", doctor: "Doctor", parallel: "Parallel work" })[p[1]] || "Dashboard" : "Dashboard";
     if (p[0] === "board") return "Board";
     if (p[0] === "waiting" || p[0] === "blockages") return "Blockages";
     if (p[0] === "git") return "Git";
@@ -2356,6 +2373,36 @@
     });
   }
 
+  // ---------------------------------------------------------------- claims & parallel work
+  function claimOf(id) { return (M.claims || []).filter(function (c) { return c.id === id; })[0] || null; }
+  function claimChip(c, long) {
+    var days = c.since ? Math.max(0, Math.floor((Date.now() - Date.parse(c.since)) / 86400000)) : null;
+    return el("span", { cls: "claim-chip", title: "Claimed by " + c.agent + (c.since ? " on " + c.since.slice(0, 10) : "") + (c.worktree ? " · worktree " + c.worktree : "") + " · branch " + c.branch,
+      text: (long ? "claimed by " : "") + c.agent + (days !== null ? " · " + days + "d" : "") });
+  }
+  function viewDashParallel() {
+    tab("dashboard");
+    crumbs([["Dashboard", "dashboard"], ["Parallel work"]]);
+    var par = M.parallel || { groups: [], conflicts: [], plan_first: [], candidates: [] }, held = M.claims || [];
+    dashHeader("Parallel work", "Who holds what, and which Ready items can start side by side without touching the same files.", []);
+    main.appendChild(section("Claimed", held.length ? "Each claim is shared by every worktree on this machine; its branch is what other machines see." : "Nothing is claimed. Take an item with: python3 .ai-sdlc/bin/sdlc.py claim <ID>", [
+      held.length ? table(["Item", "Agent", "Branch", "Worktree", "Since", "Last commit"], held.map(function (c) {
+        return tr([el("strong", { text: c.id }), c.agent, el("code", { text: c.branch }), el("span", { cls: "muted", text: c.worktree || "—" }), (c.since || "").slice(0, 10), (c.last_commit || "").slice(0, 10) || "none"],
+          function () { openItemDrawer(c.id); }, c.id);
+      })) : null]));
+    var byId = {};
+    (par.candidates || []).forEach(function (c) { byId[c.id] = c; });
+    main.appendChild(section("Can start together", "Unclaimed Ready items whose dependencies are done, grouped so that no two in a group touch the same files (from each plan's Files that change). Charter, migrations and lockfiles count as one shared file each.", [
+      (par.groups || []).length ? table(["Group", "Items", "Files they change"], par.groups.map(function (g, n) {
+        return tr([String(n + 1), el("span", null, g.map(function (id, i) { return el("span", null, [i ? ", " : "", itemLink(id)]); })),
+          el("span", { cls: "muted sum-txt", text: g.map(function (id) { return (byId[id] ? byId[id].files : []).slice(0, 3).join(" "); }).join(" · ") })]);
+      })) : el("p", { cls: "muted", text: "No unclaimed Ready item has a plan with Files that change." })]));
+    if ((par.conflicts || []).length) main.appendChild(section("Conflicts", "These pairs must run one after the other.", [
+      table(["Items", "Shared"], par.conflicts.map(function (c) { return tr([c.a + " × " + c.b, c.files.concat(c.single_writer).join(", ")]); }))]));
+    if ((par.plan_first || []).length) main.appendChild(section("Plan first", "Ready items without a plan's Files that change; their files are unknown, so they run alone.", [
+      el("p", null, par.plan_first.map(function (x, i) { return el("span", null, [i ? ", " : "", itemLink(x.id)]); }))]));
+    if (par.error) main.appendChild(el("p", { cls: "quiet-note", text: "Parallel report unavailable: " + par.error }));
+  }
   // ---------------------------------------------------------------- map & dependencies
   function computeDependencies() {
     var blockers = [], blockedItems = [], readyItems = [];
@@ -4316,6 +4363,7 @@
         el("span", { style: "display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;" }, [
           lastEv ? el("span", { cls: "note-ic " + (stageBad(lastEv.result) ? "bad" : (stageOk(lastEv.result) ? "ok" : "warn")), style: "margin: 0;",
             title: "Last verify: " + lastEv.stage + " " + lastEv.result }) : null,
+          claimOf(id) ? claimChip(claimOf(id)) : null,
           age ? el("span", { cls: "age-badge " + age.tone, title: age.title, text: age.text }) : null,
           el("span", { cls: "muted", style: "font-size: 11px;", text: pipData.stepsDone + "/" + M.steps.length })
         ])
@@ -7671,7 +7719,8 @@
           colChip(activeItem.column),
           activeItem.tier ? el("span", { cls: "chip", text: "Tier " + activeItem.tier }) : null,
           activeItem.owner ? el("span", { cls: "chip", text: "Owner: " + activeItem.owner }) : null,
-          activeItem.author ? el("span", { cls: "chip", text: "agent: " + activeItem.author }) : null
+          activeItem.author ? el("span", { cls: "chip", text: "agent: " + activeItem.author }) : null,
+          claimOf(activeId) ? claimChip(claimOf(activeId), true) : null
         ]),
         el("div", { style: "display: flex; gap: 6px; flex-wrap: wrap;" }, [
           el("button", { cls: "cmd-btn", style: "padding: 3px 8px; font-size: 11px;", text: "Inspector", on: { click: function () { openItemDrawer(activeId); } } }),
