@@ -2618,6 +2618,94 @@ def default_root():
     return os.getcwd()
 
 
+def run_audit(project, lens_mod, opts):
+    """Run the charter's scan command in its JSON form, keep the raw output and the parsed
+    vulnerabilities under .ai-sdlc/evidence/<stamp>-audit/. The kit never fetches advisory
+    data itself; the project's own scanner does."""
+    scan = charter_commands(project.charter).get("scan", "")
+    cmd, parser = lens_mod.audit_command(scan)
+    if not cmd:
+        sys.stderr.write("audit: the charter's scan stage (%r) is not a scanner this command can read "
+                         "(npm/pnpm/yarn audit, pip-audit, osv-scanner, cargo audit, govulncheck)\n" % scan)
+        return 2
+    folder = evidence_dir(project, "-audit")
+    started = time.time()
+    try:
+        proc = subprocess.run(cmd, shell=True, cwd=project.root, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=opts.timeout)
+        out, err, code = proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace"), proc.returncode
+    except subprocess.TimeoutExpired:
+        out, err, code = "", "timed out after %ds" % opts.timeout, None
+    vulns = lens_mod.parse_audit(parser, out) if out else None
+    clean, _ = redact(out + ("\n" + err if err else ""))
+    with open(os.path.join(folder, "audit.log"), "w", encoding="utf-8") as handle:
+        handle.write(clean)
+    record = {"generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "command": cmd, "tool": parser, "exit_code": code, "seconds": round(time.time() - started, 2),
+              "git_head": project.git("rev-parse", "--short", "HEAD").strip(),
+              "vulns": vulns or [], "error": "" if vulns is not None else "could not read the scanner's JSON output"}
+    with open(os.path.join(folder, "audit.json"), "w", encoding="utf-8") as handle:
+        json.dump(record, handle, indent=2)
+    if opts.json:
+        print(json.dumps(record, indent=2))
+    else:
+        by = {}
+        for v in record["vulns"]:
+            by[v["severity"]] = by.get(v["severity"], 0) + 1
+        parts = ", ".join("%d %s" % (n, k) for k, n in sorted(by.items(), key=lambda x: lens_mod.SEVERITY_RANK.get(x[0], 5)))
+        print("audit: %s -> %d vulnerable package(s)%s" % (cmd, len(record["vulns"]), " (" + parts + ")" if parts else ""))
+        if record["error"]:
+            print("audit: " + record["error"] + "; raw output kept in " + os.path.relpath(folder, project.root))
+    worst = any(v["severity"] in ("critical", "high") for v in record["vulns"])
+    return 1 if (opts.strict and worst) else 0
+
+
+def print_lens(data, area=None):
+    s = data["summary"]
+
+    def show(a):
+        return area in (None, a)
+    if show("stack"):
+        print("Stack")
+        for g in data["stack"]["groups"]:
+            print("  %-16s %s" % (g["label"], ", ".join(g["values"])))
+    if show("deps"):
+        print("Dependencies: %d across %d manifest(s)" % (s["stack"]["dependencies"], s["stack"]["manifests"]))
+        for m in data["dependencies"]["manifests"]:
+            print("  %-40s %-7s %4d  lockfile: %s" % (m["path"], m["kind"], m["count"], m["lockfile"] or "none"))
+    if show("build"):
+        b = data["build"]
+        failing = s["build"]["failing"]
+        print("Build (verify run %s): %s" % (b["run"] or "none", ", ".join(failing) + " failing" if failing else "nothing failing"))
+        for st in b["stages"]:
+            for e in st["errors"][:10]:
+                print("  %-10s %s%s  %s" % (st["stage"], e["file"], ":%d" % e["line"] if e["line"] else "", e["message"]))
+    if show("security"):
+        print("Security: %d fail, %d warn%s" % (s["security"]["fail"], s["security"]["warn"],
+              "" if s["security"]["audited"] else " (no audit yet: python3 .ai-sdlc/bin/sdlc.py audit)"))
+        for x in data["security"][:30]:
+            print("  %-4s %-10s %s  %s" % (x["level"], x["area"], x["title"], x["detail"]))
+    if show("deploy"):
+        d = s["deploy"]
+        print("Deploy: %s · %d workflow(s), %d deploying · %d Dockerfile(s) · %d compose service(s)" % (
+            ", ".join(d["platforms"]) or "no platform evidence", d["workflows"], d["deploying_workflows"],
+            d["dockerfiles"], d["compose_services"]))
+    if show("env"):
+        e = data["env"]
+        print("Env: %d variable(s), %d used but not in a template" % (len(e["variables"]), len(e["missing_from_template"])))
+        for n in e["missing_from_template"][:20]:
+            print("  missing from template: %s" % n)
+    if show("agents"):
+        a = data["agents"]
+        print("Agents: %s" % ", ".join("%d %s" % (sum(v.values()), k) for k, v in sorted(a["counts"].items())))
+        print("  always-loaded skill descriptions: ~%d tokens; kit files: %d managed, %d modified, %d missing" % (
+            a["always_loaded_tokens"], a["kit_files"]["managed"], a["kit_files"]["modified"], a["kit_files"]["missing"]))
+        for o in a["other_kits"]:
+            print("  other kit: %s (%s)" % (o["name"], o["path"]))
+        for i in a["issues"]:
+            print("  %s  %s  %s" % (i["level"], i["title"], i["detail"]))
+
+
 def main(argv):
     if argv == ["--selftest"]:
         selftest()
@@ -2648,6 +2736,10 @@ def main(argv):
                         "(.ai-sdlc/view/index.html, git-ignored)")
     vw.add_argument("--no-open", action="store_true", help="write the page, do not open it")
     vw.add_argument("--json", action="store_true", help="print the model instead")
+    vw.add_argument("--github", action="store_true", help="live mode: also show open GitHub issues "
+                    "and pull requests (needs the gh CLI, signed in); never written to a static page")
+    vw.add_argument("--no-user", action="store_true", help="live mode: leave user-level skills, "
+                    "commands and MCP servers (~/.claude) out of the Project lens")
     vw.add_argument("--serve", action="store_true", help="live mode: serve the page on "
                      "127.0.0.1 and update it as the records change")
     vw.add_argument("--port", type=int, default=8765, help="live mode port (default 8765; "
@@ -2720,6 +2812,18 @@ def main(argv):
     fx.add_argument("--unlock-tests", action="store_true",
                     help="also unlock tests in .ai-sdlc/test-lock.txt when running 'all'")
     fx.add_argument("--json", action="store_true", help="print repair result as JSON")
+    ln = sub.add_parser("lens", help="the project lens: stack, dependencies, build errors, "
+                                     "security, deploy, containers, env names and the agentic stack")
+    ln.add_argument("--area", choices=("stack", "deps", "build", "security", "deploy", "env", "agents"),
+                    help="print one area only")
+    ln.add_argument("--user", action="store_true",
+                    help="also list user-level skills, commands, subagents, MCP servers and plugins (~/.claude)")
+    ln.add_argument("--json", action="store_true", help="print the lens as JSON")
+    au = sub.add_parser("audit", help="run the charter's dependency scanner in JSON mode and keep "
+                                      "the vulnerable packages it reports")
+    au.add_argument("--timeout", type=int, default=600, help="seconds before the scanner is stopped")
+    au.add_argument("--strict", action="store_true", help="exit 1 on a critical or high vulnerability")
+    au.add_argument("--json", action="store_true", help="print the stored result as JSON")
     opts = parser.parse_args(argv)
     if not opts.command:
         parser.print_help()
@@ -2732,6 +2836,21 @@ def main(argv):
         else:
             print_findings(items)
         return 1 if opts.strict and any(i["level"] == "fail" for i in items) else 0
+    if opts.command in ("lens", "audit"):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        sys.dont_write_bytecode = True
+        import lens as lens_mod
+        if opts.command == "audit":
+            return run_audit(project, lens_mod, opts)
+        import view
+        model = {"kit": kit_status(project), "alerts": doctor(project), "evidence": view.evidence_runs(project)}
+        data = lens_mod.lens(sys.modules[__name__], project, model, include_user=opts.user)
+        if opts.json:
+            key = {"deps": "dependencies", "deploy": "workflows"}.get(opts.area, opts.area)
+            print(json.dumps(data if not opts.area else data.get(key), indent=2))
+            return 0
+        print_lens(data, opts.area)
+        return 0
     if opts.command in ("view", "metrics"):
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         sys.dont_write_bytecode = True  # no __pycache__ next to kit files in a project

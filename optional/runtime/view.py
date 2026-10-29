@@ -1056,7 +1056,63 @@ class Live(object):
         self.model = None
         self.model_json = b""
         self.page = b""
+        self.lens_full = None
+        self.lens_print = None
+        self.include_user = True
+        self.github = False
+        self.github_cache = (0.0, None)
         self.refresh(force=True)
+
+    def lens(self):
+        """The full lens, rebuilt only when a file it reads (or HEAD) has changed."""
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import lens as lens_mod
+            digest = hashlib.sha256()
+            for path in lens_mod.watched(self.project):
+                try:
+                    st = os.stat(path)
+                except OSError:
+                    continue
+                digest.update(("%s %d %d\n" % (path, st.st_mtime_ns, st.st_size)).encode("utf-8"))
+            digest.update(self.project.git("rev-parse", "HEAD").encode("utf-8"))
+            print_ = digest.hexdigest()
+        except Exception:
+            print_ = None
+        with self.lock:
+            if self.lens_full is not None and print_ and print_ == self.lens_print:
+                return self.lens_full
+            model = self.model or {}
+        full = lens_report(self.rt, self.project, model, include_user=self.include_user)
+        with self.lock:
+            self.lens_full, self.lens_print = full, print_
+        return full
+
+    def github_work(self):
+        """Open issues and pull requests through the gh CLI, cached for five minutes. Only
+        when the server was started with --github; a failure is reported, never raised."""
+        if not self.github:
+            return None
+        at, cached = self.github_cache
+        if cached is not None and time.time() - at < 300:
+            return cached
+        out = {"issues": [], "pulls": [], "error": ""}
+        for key, args in (("issues", ["issue", "list"]), ("pulls", ["pr", "list"])):
+            try:
+                proc = subprocess.run(["gh"] + args + ["--state", "open", "--limit", "50", "--json",
+                                      "number,title,labels,updatedAt,url,author"],
+                                      cwd=self.project.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+                if proc.returncode:
+                    out["error"] = proc.stderr.decode("utf-8", "replace").strip()[:200]
+                    continue
+                out[key] = [{"number": x.get("number"), "title": x.get("title", ""), "url": x.get("url", ""),
+                             "updated": x.get("updatedAt", ""), "labels": [l.get("name", "") for l in x.get("labels", [])],
+                             "author": (x.get("author") or {}).get("login", "")}
+                            for x in json.loads(proc.stdout.decode("utf-8", "replace") or "[]")]
+            except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+                out["error"] = str(exc)[:200]
+        self.github_cache = (time.time(), out)
+        return out
 
     def update_kit(self, kit_data, alerts=None):
         """Fast in-memory update for /api/config and /api/fix without full git rebuild."""
@@ -1095,6 +1151,8 @@ class Live(object):
                 sys.stderr.write("view: rebuild failed, keeping the last model: %s\n" % exc)
                 return self.version
             model["version"] = version
+            if self.lens_full is not None:
+                model["lens"] = lens_summary(self.lens_full)
             model["live_interval"] = self.interval
             model["action_token"] = self.token
             new_json = json.dumps(model, ensure_ascii=False,
@@ -1131,6 +1189,8 @@ def serve(rt, project, template, opts):
         raise SystemExit("--serve needs Python 3.7 or newer")
     interval = max(1, int(getattr(opts, "interval", 2) or 2))
     live = Live(rt, project, template, interval)
+    live.github = bool(getattr(opts, "github", False))
+    live.include_user = not getattr(opts, "no_user", False)
 
     class LocalServer(ThreadingHTTPServer):
         allow_reuse_address = True
@@ -1169,6 +1229,13 @@ def serve(rt, project, template, opts):
             if path == "/model.json":
                 live.refresh()
                 return self._send(200, live.model_json, "application/json; charset=utf-8")
+            if path == "/api/lens":
+                data = dict(live.lens())
+                gh = live.github_work()
+                if gh is not None:
+                    data["github"] = gh
+                body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                return self._send(200, body, "application/json; charset=utf-8")
             if path == "/api/log":
                 query = {}
                 for pair in (self.path.split("?", 1) + [""])[1].split("&"):
@@ -1230,7 +1297,7 @@ def serve(rt, project, template, opts):
                 return self._send(200, body, "application/json; charset=utf-8")
             if path == "/api/run":
                 sub = str(payload.get("subcommand") or "").strip()
-                allowed = ("verify", "plan-check", "doctor", "log", "trailers", "metrics", "status")
+                allowed = ("verify", "plan-check", "doctor", "log", "trailers", "metrics", "status", "audit")
                 if sub not in allowed:
                     body = json.dumps({"ok": False, "error": "unsupported command: %s" % sub}).encode("utf-8")
                     return self._send(400, body, "application/json; charset=utf-8")
@@ -1641,6 +1708,24 @@ def build_map_svg(model, interactive=True):
     return '\n'.join(lines)
 
 
+def lens_report(rt, project, model, include_user):
+    """The Project lens (lens.py), or a note saying why it could not be built; never a
+    reason for the page not to open."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import lens
+        return lens.lens(rt, project, model, include_user=include_user)
+    except Exception as exc:
+        return {"error": "the project lens could not be built: %s" % exc}
+
+
+def lens_summary(full):
+    if "error" in full:
+        return full
+    import lens
+    return lens.lens_summary(full)
+
+
 def run(rt, project, opts):
     here = os.path.dirname(os.path.abspath(__file__))
     template = rt.read(os.path.join(here, "view.html"))
@@ -1650,6 +1735,8 @@ def run(rt, project, opts):
     if getattr(opts, "serve", False):
         return serve(rt, project, template, opts)
     model = build(rt, project)
+    # A static page carries the lens's counts and worst findings only, never user-level items.
+    model["lens"] = lens_summary(lens_report(rt, project, model, include_user=False))
     out_dir = project.path(os.path.join(".ai-sdlc", "view"))
     if not os.path.isdir(out_dir):
         os.makedirs(out_dir)

@@ -4,6 +4,17 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Project lens (`sdlc.py lens`, `sdlc.py audit`, viewer ▸ Project).** One read-only view of everything the project is made of:
+  - the stack (detected live)
+  - direct dependencies and lockfiles
+  - build errors lifted from the failing verify logs
+  - security: vulnerable packages from the project's own scanner, secrets risks, container risks, open security-review findings
+  - deployment, CI and containers
+  - environment variable names (code vs templates; values never read)
+  - open work, with GitHub issues and PRs via `--github`
+  - the agentic stack: skills, commands, subagents, hooks, MCP servers, plugins and harness files across kit, project and user levels, plus other kits in the repo
+
+  Kit & Control moves under Project ▸ Kit settings. Stack detection moved from the installer into `optional/runtime/detect.py`, so the installer and the live viewer share one detector. The viewer is now built from parts in `optional/runtime/view/` (`tools/build_view.py`).
 - **Automatic semantic versioning.** `tools/semver.py` works out the next version from
   the Conventional Commits since `VERSION` last changed, and `.github/workflows/version.yml`
   runs it on every push: a merge or push to `main` is validated, bumped, tagged and

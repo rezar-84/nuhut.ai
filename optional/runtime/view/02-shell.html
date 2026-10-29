@@ -1,0 +1,27 @@
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main" onclick="document.getElementById('main').focus(); return false;">Skip to content</a>
+<header>
+  <div class="brand"><i></i><span id="pname">Nuhut</span></div>
+  <nav class="tabs" id="tabs" aria-label="Primary navigation">
+    <a href="#/threads" data-r="threads" id="tab-threads">Inbox</a><a href="#/board" data-r="board" id="tab-board">Board</a><a href="#/dashboard" data-r="dashboard" id="tab-dashboard">Dashboard</a>
+    <a href="#/waiting" data-r="waiting" id="tab-waiting">Blockages</a><a href="#/git" data-r="git" id="tab-git">Git</a><a href="#/docs" data-r="docs" id="tab-docs">Documents</a><a href="#/project" data-r="project" id="tab-project">Project</a>
+  </nav>
+  <input id="q" type="search" placeholder="Search or ⌘K…" aria-label="Search or open Command Palette">
+  <div id="context-bar" class="profile-slot"></div>
+  <div class="meta" id="meta"></div>
+</header>
+<nav id="crumbs" aria-label="Location"></nav>
+<main id="main" tabindex="-1"></main>
+<div id="toast-bar" class="toast-bar" role="status" aria-live="polite"></div>
+<div id="drawer-backdrop" class="drawer-backdrop"></div>
+<div id="drawer" class="drawer" role="dialog" aria-modal="true" aria-label="Inspector drawer"></div>
+<div id="activity-bar" class="activity-bar" role="contentinfo" aria-label="Activity bar"></div>
+<div id="map-tooltip" class="map-tooltip" role="tooltip"></div>
+<div id="palette-backdrop" class="palette-backdrop"></div>
+<div id="palette" class="palette" role="dialog" aria-modal="true" aria-label="Command Palette"></div>
+<div id="shortcuts-modal" class="shortcuts-modal" role="dialog" aria-modal="true" aria-label="Keyboard Shortcuts"></div>
+<script>var M = /*NUHUT_MODEL*/null;</script>
+<script>
+(function () {

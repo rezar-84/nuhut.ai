@@ -1216,7 +1216,7 @@ def test_view():
     check("record text cannot close the script tag", "<script>x</script>" not in page, page[-200:])
     check("git view tab present in page", 'data-r="git"' in page and "viewGit" in page)
     check("threads and kit tabs present in page",
-          'data-r="threads"' in page and 'data-r="kit"' in page and "viewThreads" in page and "viewKit" in page)
+          'data-r="threads"' in page and 'data-r="project"' in page and "viewProject" in page and "viewThreads" in page and "viewKit" in page)
     check("the flow chart and verify grid are in the page", "drawFlowChart" in page and "drawVerifyGrid" in page)
     sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
     import view as _view
@@ -2969,6 +2969,90 @@ def test_arrow_keys():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_lens():
+    print("project lens: stack, build errors, security, deploy, env, agents")
+    d = tempfile.mkdtemp(prefix="sdlc-lens-")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", d])
+    write(d, "package.json", json.dumps({"name": "app", "dependencies": {"next": "15.0.0", "react": "^19"},
+                                        "devDependencies": {"typescript": "^5"}}))
+    write(d, "pnpm-lock.yaml", "lockfileVersion: 9\n")
+    write(d, "Dockerfile", "FROM node:latest AS base\nFROM base AS build\nRUN npm ci\nEXPOSE 3000\n")
+    write(d, "docker-compose.yml", "services:\n  db:\n    image: postgres\n    environment:\n"
+                                   "      POSTGRES_PASSWORD: hunter2secret\n    ports:\n      - \"5432:5432\"\n")
+    write(d, ".env.example", "FOO=\nUNUSED_VAR=\n")
+    write(d, "src/app.ts", "const a = process.env.FOO;\nconst b = process.env.BAR_TOKEN;\n")
+    write(d, ".env", "BAR_TOKEN=supersecretvalue123\n")
+    write(d, ".mcp.json", json.dumps({"mcpServers": {"tracker": {"command": "npx", "args": ["tracker-mcp"],
+                                                                 "env": {"TRACKER_KEY": "mcp-secret-value-999"}}}}))
+    write(d, ".claude/skills/house-style/SKILL.md", "---\nname: house-style\ndescription: Our style rules. Use when writing UI.\n---\nbody\n")
+    write(d, ".agents/skills/house-style/SKILL.md", "---\nname: house-style\ndescription: Copy of the style rules.\n---\n")
+    write(d, ".github/workflows/deploy.yml", "name: Deploy\non:\n  push:\n    branches: [main]\njobs:\n  ship:\n"
+                                            "    runs-on: ubuntu-latest\n    steps:\n      - run: npx vercel deploy --prod\n")
+    code, out = run([d, "LNX", "-y"])
+    check("installs next to an existing app", code == 0, out[-300:])
+    subprocess.call(["git", "add", "-A"], cwd=d)
+    subprocess.call(["git", "add", "-f", ".env"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "LNX-1 app"], cwd=d)
+    check("the detector and the lens ship with the runtime",
+          os.path.isfile(os.path.join(d, ".ai-sdlc", "bin", "detect.py")) and os.path.isfile(os.path.join(d, ".ai-sdlc", "bin", "lens.py")))
+    # A failing verify run, as sdlc.py verify would leave it.
+    run_dir = ".ai-sdlc/evidence/20260105T000000Z"
+    write(d, run_dir + "/summary.json", json.dumps({"generated": "2026-01-05T00:00:00Z", "git_head": "abc", "dirty": False,
+          "stages": [{"stage": "typecheck", "result": "Verified: fail", "seconds": 3.0},
+                     {"stage": "lint", "result": "Verified: pass", "seconds": 1.0}]}))
+    write(d, run_dir + "/typecheck.log", "> tsc --noEmit\nsrc/app.ts(2,7): error TS2304: Cannot find name 'x'.\n"
+                                        "src/app.ts:9:1 - error TS2322: Type 'string' is not assignable to type 'number'.\n")
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    p = subprocess.run([sys.executable, script, "lens", "--json"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    raw = p.stdout.decode("utf-8", "replace")
+    lens = json.loads(raw) if p.returncode == 0 else {}
+    check("sdlc.py lens --json runs", p.returncode == 0, p.stderr.decode("utf-8", "replace")[-400:])
+    if not lens:
+        shutil.rmtree(d, ignore_errors=True)
+        return
+    groups = dict((g["label"], g["values"]) for g in lens["stack"]["groups"])
+    check("the stack is detected live", "Next.js" in groups.get("frameworks", []), str(groups))
+    deps = lens["dependencies"]["manifests"][0]
+    check("direct dependencies come from the manifest with scope and lockfile",
+          deps["count"] == 3 and deps["lockfile"] == "pnpm-lock.yaml"
+          and any(x["name"] == "typescript" and x["scope"] == "dev" for x in deps["deps"]), str(deps)[:300])
+    errors = [e for s in lens["build"]["stages"] for e in s["errors"]]
+    check("build errors are lifted from the failing stage's log with file and line",
+          lens["build"]["stages"][0]["stage"] == "typecheck" and any(e["file"] == "src/app.ts" and e["line"] == 2 for e in errors)
+          and any(e["line"] == 9 for e in errors), str(errors)[:300])
+    titles = " | ".join(x["title"] for x in lens["security"])
+    check("an unpinned base image and a root container are flagged, a stage alias is not",
+          "node:latest is not pinned" in titles and "runs as root" in titles and "base is not pinned" not in titles, titles)
+    check("a literal secret in compose is flagged by key", "POSTGRES_PASSWORD" in titles, titles)
+    check("a committed .env is a failure", any(x["title"] == ".env is committed to git" and x["level"] == "fail" for x in lens["security"]), titles)
+    env = lens["env"]
+    check("env names used in code but missing from the template, and the unused ones",
+          env["missing_from_template"] == ["BAR_TOKEN"] and env["unused_in_code"] == ["UNUSED_VAR"], str(env)[:300])
+    check("no secret value reaches the lens", "hunter2secret" not in raw and "supersecretvalue123" not in raw
+          and "mcp-secret-value-999" not in raw and "tracker-mcp" not in raw)
+    items = lens["agents"]["items"]
+    check("project skills, MCP servers and the kit's own commands are listed",
+          any(i["kind"] == "skill" and i["name"] == "house-style" for i in items)
+          and any(i["kind"] == "mcp" and i["name"] == "tracker" and i["description"] == "stdio" for i in items)
+          and any(i["kind"] == "command" and i["owner"] == "kit" for i in items), str(items)[:400])
+    check("a skill defined twice is reported", any("house-style is defined 2 times" in x["title"] for x in lens["agents"]["issues"]))
+    check("user-level items are left out unless asked", not any(i["source"] == "user" for i in items))
+    check("CI and deploy are read", lens["workflows"][0]["deploys"] and lens["workflows"][0]["triggers"] == ["push"], str(lens["workflows"]))
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import lens as _lens
+    npm = {"vulnerabilities": {"lodash": {"severity": "high", "range": "<4.17.21", "isDirect": True, "fixAvailable": True,
+                                          "via": [{"title": "Prototype Pollution", "url": "https://github.com/advisories/GHSA-x"}]}}}
+    vulns = _lens.parse_audit("npm", json.dumps(npm))
+    check("npm audit JSON becomes vulnerable packages", vulns and vulns[0]["package"] == "lodash" and vulns[0]["severity"] == "high", str(vulns))
+    check("the scan command maps to its JSON form", _lens.audit_command("pnpm audit --audit-level high") == ("pnpm audit --json", "npm"))
+    p = subprocess.run([sys.executable, script, "view", "--no-open"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    page = read(d, ".ai-sdlc/view/index.html")
+    check("a static page carries the lens summary only, without secrets",
+          '"summary_only":true' in page and "hunter2secret" not in page and "mcp-secret-value-999" not in page, page[:200] if not page else "")
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_semver():
     print("semver: the next kit version from Conventional Commits")
     d = tempfile.mkdtemp()
@@ -3030,7 +3114,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver):
+                 test_epics, test_decision_and_stack, test_semver, test_lens):
         test()
     print("")
     if failures:

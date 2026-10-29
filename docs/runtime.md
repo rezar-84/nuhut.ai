@@ -38,6 +38,8 @@ python3 .ai-sdlc/bin/sdlc.py fix all            # sync profile, repair harness p
 | **`verify`** | `--parallel` (`-j`), `--stage`, `--timeout` | Runs the charter's check pipeline in order, writing immutable test evidence (`summary.md`, `summary.json`, and stage `.log` files) to `.ai-sdlc/evidence/<timestamp>/`. `--parallel` runs independent steps concurrently using a worker pool. |
 | **`plan-check <ID>`** | | Compares branch changes against the approved plan (`docs/project/plans/<ID>.md` or `.sdlc/specs/<ID>/spec.md`). Highlights unapproved file modifications and planned files left untouched with ANSI terminal colors. |
 | **`view`** | `--serve`, `--port`, `--interval`, `--export-html <file>`, `--svg`, `--no-open` | Generates the rich interactive developer dashboard. Opens with per-item **Action Threads** (chat-like chronological timelines), a project Mind Map, Kanban Board with cumulative-flow chart, Activity, Blockages & Flow, Git Graph, Documents, and a **Kit & Control** panel. `--serve` runs a reactive local server on `127.0.0.1` with live constraint and repair controls. `--export-html` bundles an offline read-only single-file report for CI/CD artifacts or PR previews. |
+| **`lens`** | `--area stack\|deps\|build\|security\|deploy\|env\|agents`, `--user`, `--json` | The **Project lens**, read-only:<br>- the stack, detected live<br>- direct dependencies per manifest, with lockfiles<br>- `file:line` errors from the latest failing verify stages<br>- security: vulnerable packages from the last `audit`, doctor's sensitive-data findings, a committed or un-ignored `.env`, container risks, open security-review findings<br>- deployment platforms, CI workflows and containers (Dockerfiles, compose services)<br>- environment variable **names** (templates vs code; values are never read)<br>- the agentic stack: skills, commands, subagents, hooks, MCP servers, plugins, harness files and other kits; `--user` adds `~/.claude` |
+| **`audit`** | `--strict`, `--timeout`, `--json` | Runs the charter's `scan` stage in its JSON form (npm/pnpm/yarn audit, pip-audit, osv-scanner, cargo audit, govulncheck). It keeps the vulnerable packages under `.ai-sdlc/evidence/<stamp>-audit/` for the lens. The kit fetches nothing itself. |
 | **`metrics`** | `--json` | Calculates quantitative project health metrics: work-in-progress (WIP), verification pass rate, cycle time, lead time, time waiting on humans, lifecycle record gaps, and usage against the charter's optional agent budget per tier. |
 | **`log`** | `--since <ref>`, `--write` | Drafts worklog lines, one per work item, from the commits since `<ref>` (IDs from subjects or `Work-Item` trailers) and the verify runs recorded on them. `--write` inserts them under the worklog's marker, newest first, skipping items the worklog already names. Records become byproducts, not essays. |
 | **`bite`** | `--base`, `--timeout`, `--restore`, `--json` | Puts the changed product files (never tests, never the kit's paths) back to the base, runs the test command, and restores them. It passes only when the tests pass with the change and fail without it. A backup and marker under `.ai-sdlc/bite/` make an interrupted run recoverable with `--restore`, and the doctor flags one. |
@@ -101,7 +103,18 @@ and an activity bar along the bottom:
   - Uncommitted working tree summary banner and local branches overview.
 - **Documents:** every project artifact with frontmatter status (`draft`, `approved`, `stale`),
   accountable owner, and age. Click to open with interactive outlines and cross-linked IDs.
-- **Kit & Control:** an interactive control panel for adjusting kit constraints (`Default effort mode`, `Independent review required for`, `Tier rules`, `Decision style`, `Development method`, `Default reviewer`), toggling **Token-Saving Mode** (`Lean` + single-agent review + compact budgets), inspecting installed harnesses/hooks/CLI tools and per-tier reading budgets, and running 1-click safe repairs (`sync-profile`, `wire-pointer`, `restore-bite`, `unlock-tests`).
+- **Project:** everything the project is made of. Its overview has one card per area, each with its own page:
+  - Stack & dependencies
+  - Build & errors (errors lifted from the logs, one click from the full log)
+  - Security (a *Run dependency audit* button on the live page)
+  - Deploy & runtime (platforms, CI, Dockerfiles, compose services, dev container)
+  - Environment (names used in code vs templates; values are never read)
+  - Work (backlog, plus open GitHub issues and PRs with `view --serve --github`)
+  - Agents & skills (kit, project and user-level skills, commands, subagents, hooks, MCP servers and plugins; duplicates, kit files changed locally, the context that skill descriptions cost every turn)
+  - Kit settings
+
+  The live page loads it on demand from `/api/lens` and caches it until a file it reads changes. User-level items appear only there (`--no-user` hides them). A static page carries the summary only. Build and security failures reach *Needs you* and the Issues tab.
+- **Kit settings** (Project ▸ Kit settings): an interactive control panel for adjusting kit constraints (`Default effort mode`, `Independent review required for`, `Tier rules`, `Decision style`, `Development method`, `Default reviewer`), toggling **Token-Saving Mode** (`Lean` + single-agent review + compact budgets), inspecting installed harnesses/hooks/CLI tools and per-tier reading budgets, and running 1-click safe repairs (`sync-profile`, `wire-pointer`, `restore-bite`, `unlock-tests`).
 
 **Side panel.** On screens 1100px and wider a panel sits beside the page with three tabs:
 - **Item:** the card, run, commit, document or finding you clicked, while the list stays usable (j/k move the selection and the panel follows). Links inside it stack, with a back arrow.
@@ -131,7 +144,7 @@ fault.
 | --- | --- |
 | **`⌘K`** or **`Ctrl+K`** | Open Command Palette to search all work items, documents, and headings. |
 | **`?`** | Toggle the Keyboard Shortcuts & Help modal. |
-| **`1` - `7`** | Switch views: `1` Inbox, `2` Board, `3` Dashboard, `4` Blockages, `5` Git Graph, `6` Documents, `7` Kit & Control. Old `#/activity` and `#/cockpit` links still resolve; `#/map` opens the map. |
+| **`1` - `7`** | Switch views: `1` Inbox, `2` Board, `3` Dashboard, `4` Blockages, `5` Git Graph, `6` Documents, `7` Project. Old `#/activity` and `#/cockpit` links still resolve; `#/map` opens the map. |
 | **`j` / `k`**, **`h` / `l`** | Move through the Inbox or Board cards (arrows work too); the inspector follows. `o` opens the item's page. |
 | **`]`** | Show or hide the inspector. |
 | **`n`** | Notifications. |

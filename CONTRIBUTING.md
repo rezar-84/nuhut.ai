@@ -48,6 +48,10 @@ the kit, and the kit plus hooks. Change a task's checks only with a crafted work
 `tests/smoke.py` (`test_kit_value_checks`) that shows the misfire passing and a real
 violation failing.
 
+## The viewer
+
+`optional/runtime/view.html` is generated. Edit its parts in `optional/runtime/view/` (the head, stylesheet and shell, plus one file per section of the script, under `js/`). Then run `python3 tools/build_view.py`. `validate.py` fails when the two differ. Stack detection lives in `optional/runtime/detect.py`, shared by the installer and the runtime.
+
 ## Versioning
 
 The kit is versioned automatically, with semantic versioning, from Conventional Commit

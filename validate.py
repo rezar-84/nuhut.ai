@@ -235,6 +235,11 @@ def single_viewer(errors):
         errors.append("template/docs/dashboard.html is back; sdlc.py view --export-html is "
                       "the static option")
     html = (ROOT / "optional" / "runtime" / "view.html").read_text(encoding="utf-8")
+    # view.html is built from optional/runtime/view/ parts; the shipped file must match them.
+    built = subprocess.run([sys.executable, str(ROOT / "tools" / "build_view.py"), "--check"],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    if built.returncode:
+        errors.append(built.stdout.strip() or "view.html differs from its parts")
     if re.search(r"<script[^>]+src=", html):
         errors.append("view.html loads an external script; the export must be self-contained")
     if "contenteditable" in html or "<form" in html:
