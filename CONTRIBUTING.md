@@ -48,6 +48,23 @@ the kit, and the kit plus hooks. Change a task's checks only with a crafted work
 `tests/smoke.py` (`test_kit_value_checks`) that shows the misfire passing and a real
 violation failing.
 
+## Versioning
+
+The kit is versioned automatically, with semantic versioning, from Conventional Commit
+subjects (`tools/semver.py`, run by `.github/workflows/version.yml` on every push):
+
+- `feat(...)` → minor, a `!` after the type or a `BREAKING CHANGE:` footer → major,
+  anything else (fix, docs, chore, refactor) → patch. A subject with several types
+  (`docs,feat(kit): ...`) takes the largest.
+- **Push or merge to `main`:** after `validate.py` and the smoke tests pass, the workflow
+  bumps `VERSION`, `.claude-plugin/plugin.json` and `CHANGELOG.md` (the Unreleased section
+  becomes the release), commits `chore(release): vX.Y.Z`, tags it and publishes a release.
+- **Push to any other branch:** the job summary shows the prerelease it would become
+  (`4.1.0-dev.7+abc1234`); nothing is committed.
+
+Do not edit `VERSION` by hand; write the change under `## Unreleased` in the changelog.
+`python3 tools/semver.py next` shows what the next merge will release.
+
 ## Pull requests
 
 Describe the risk, the compatibility impact, the test evidence, and any migration or

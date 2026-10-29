@@ -1,0 +1,63 @@
+name: Version
+
+# Semantic versioning on every push. A push or merge to main is released: the version is
+# bumped from the Conventional Commit subjects since VERSION last changed, VERSION,
+# plugin.json and CHANGELOG.md are updated in a `chore(release)` commit, which is tagged
+# and published. A push to any other branch only reports the prerelease it would become.
+
+on:
+  push:
+    branches: ["**"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    # The release commit itself must not start another release.
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Report the prerelease version (branches)
+        if: github.ref != 'refs/heads/main'
+        run: |
+          v=$(python3 tools/semver.py next --prerelease)
+          python3 tools/semver.py next --json
+          echo "### Next kit version: \`$v\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Merging this branch to main releases \`$(python3 tools/semver.py next)\`." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate before releasing (main)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          python3 validate.py
+          python3 tests/smoke.py
+
+      - name: Bump, tag and publish (main)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          level=$(python3 -c "import json,subprocess;print(json.loads(subprocess.check_output(['python3','tools/semver.py','next','--json']))['level'])")
+          if [ "$level" = "none" ]; then echo "Nothing to release."; exit 0; fi
+          v=$(python3 tools/semver.py bump)
+          python3 validate.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION CHANGELOG.md .claude-plugin/plugin.json
+          git commit -m "chore(release): v$v [skip ci]"
+          git tag -a "v$v" -m "v$v"
+          git push origin HEAD:main "v$v"
+          # A tag pushed with GITHUB_TOKEN does not start release.yml, so publish here.
+          gh release create "v$v" --verify-tag --generate-notes
+          echo "### Released \`v$v\` ($level)" >> "$GITHUB_STEP_SUMMARY"

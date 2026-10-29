@@ -19,7 +19,7 @@ jobs:
         run: test "$RELEASE_TAG" = "v$(tr -d '\n' < VERSION)"
       - name: Validate release
         run: |
-          python3 -m py_compile install.py install_ui.py validate.py tests/smoke.py optional/runtime/sdlc.py optional/runtime/view.py
+          python3 -m py_compile install.py install_ui.py validate.py tests/smoke.py optional/runtime/sdlc.py optional/runtime/view.py tools/semver.py
           python3 validate.py
           python3 tests/smoke.py
       - name: Publish GitHub release
