@@ -8,11 +8,15 @@ This project follows semantic versioning. User-visible changes are recorded here
   the Conventional Commits since `VERSION` last changed, and `.github/workflows/version.yml`
   runs it on every push: a merge or push to `main` is validated, bumped, tagged and
   released; a branch push reports its prerelease version.
-- **Viewer: Inbox, Cockpit, inspector and activity bar.** The Activity tab merges into
-  the **Inbox** (threads plus a grouped, filterable activity feed with read state). A new
-  **Cockpit** leads with what needs you, then health, flow, tests, runs and logs, doctor
-  and project stats. Items, runs, commits and findings open in an **inspector** docked
-  beside the page; a bottom **activity bar** and notification bell report what changed.
+- **Viewer: Inbox, Dashboard, side panel and activity bar.** The Activity tab merges into
+  the **Inbox** (threads plus a grouped, filterable activity feed with read state). The
+  **Dashboard** leads with what needs you, then health and flow, and links to full pages
+  for **Tests & verify**, **Runs & logs** and **Doctor**. A **side panel** (Item,
+  Activity, Issues) docks beside every page and folds to a rail; warnings live there and
+  in the bottom **activity bar** instead of above the content. Pages opened from a list
+  get a Back link to it. Recommendations follow the record (a blocked item is told who
+  unblocks it; a worklog's "Not done" outranks "ready to close"), and the board maps
+  common status words (Planned, Completed, On hold, …) to its columns.
   Commands run from the page are kept under `.ai-sdlc/runs/` and their logs (and each
   verify stage's log) are served by `GET /api/log`.
 - **Action Threads & Kit Control panel (`sdlc.py view`, `sdlc.py config`, `sdlc.py fix`).**

@@ -42,10 +42,33 @@ def plain(cell):
     return cell.strip()
 
 
+# Statuses projects write that mean one of the kit's columns. Matched without case; the
+# item keeps the status text it was written with.
+STATUS_SYNONYMS = {
+    "doing": "Now", "wip": "Now", "in development": "Now", "in-progress": "Now", "active": "Now",
+    "planned": "Next", "pending": "Next", "to do": "Next", "todo": "Next", "backlog": "Next",
+    "proposed": "Next", "open": "Next", "queued": "Next",
+    "on hold": "Parked", "on-hold": "Parked", "waiting": "Parked",
+    "completed": "Done", "complete": "Done", "closed": "Done", "shipped": "Done",
+    "merged": "Done", "released": "Done", "verified": "Done",
+    "cancelled": "Dropped", "canceled": "Dropped", "won't do": "Dropped", "wont do": "Dropped",
+    "rejected": "Dropped", "abandoned": "Dropped",
+}
+
+
 def column_of(status):
     for name, statuses in COLUMNS:
         if status in statuses:
             return name
+    key = re.sub(r"\s+", " ", plain(status or "")).strip().lower()
+    for name, statuses in COLUMNS:
+        if key in (s.lower() for s in statuses):
+            return name
+    if key in STATUS_SYNONYMS:
+        return STATUS_SYNONYMS[key]
+    # "Done on epic branch", "Done (owner sign-off pending)": done, with a note.
+    if re.match(r"^done\b", key):
+        return "Done"
     return "Other"
 
 

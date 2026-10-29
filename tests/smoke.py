@@ -1218,8 +1218,14 @@ def test_view():
     check("threads and kit tabs present in page",
           'data-r="threads"' in page and 'data-r="kit"' in page and "viewThreads" in page and "viewKit" in page)
     check("the flow chart and verify grid are in the page", "drawFlowChart" in page and "drawVerifyGrid" in page)
-    check("the page has the cockpit, inspector, activity bar and inbox feed",
-          'data-r="cockpit"' in page and "viewCockpit" in page and 'id="activity-bar"' in page
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import view as _view
+    check("common legacy statuses land in the kit's columns",
+          [_view.column_of(x) for x in ("Completed", "Planned", "Done on epic branch", "On hold", "Cancelled", "In progress", "Weird")]
+          == ["Done", "Next", "Done", "Parked", "Dropped", "Now", "Other"])
+    check("the page has the dashboard and its pages, side panel, activity bar and inbox feed",
+          'data-r="dashboard"' in page and "viewDashboard" in page and "viewDashTests" in page
+          and "viewDashRuns" in page and "viewDashDoctor" in page and 'id="activity-bar"' in page
           and "openLogDrawer" in page and "buildFeed" in page and 'data-r="activity"' not in page)
     svg_map = read(d, ".ai-sdlc/view/map.svg")
     check("formatted SVG map is written", "<svg" in svg_map and "</svg>" in svg_map and "viewBox" in svg_map)
