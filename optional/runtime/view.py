@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -499,6 +500,7 @@ def _build_inner(rt, project):
         it["thread"] = build_item_thread(it, model)
 
     model["evidence"] = evidence_runs(project)
+    model["runs"] = run_records(project)
     model["metrics"] = metrics(rt, project, model)
     try:
         model["flow"] = flow(rt, project, model)
@@ -761,6 +763,102 @@ def evidence_runs(project):
     return runs
 
 
+MAX_RUNS = 50
+MAX_LOG_BYTES = 200000
+RUN_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z[A-Za-z0-9-]*$")
+
+
+def runs_folder(project):
+    return project.path(os.path.join(".ai-sdlc", "runs"))
+
+
+def save_run(rt, project, record):
+    """Keep one command the live page ran, redacted, under the git-ignored runs folder,
+    so the cockpit can show it after the response is gone. Only the newest MAX_RUNS stay."""
+    folder = runs_folder(project)
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    ignore = os.path.join(folder, ".gitignore")
+    if not os.path.exists(ignore):
+        with open(ignore, "w", encoding="utf-8") as handle:
+            handle.write("*\n!.gitignore\n")
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    base = "%s-%s" % (stamp, re.sub(r"[^a-z-]", "", record.get("sub", "run")))
+    name, n = base, 1
+    while os.path.exists(os.path.join(folder, name + ".json")):
+        n += 1
+        name = "%s-%d" % (base, n)
+    if hasattr(rt, "redact"):
+        record["output"], _ = rt.redact(record.get("output", ""))
+    record["output"] = record.get("output", "")[-MAX_LOG_BYTES:]
+    with open(os.path.join(folder, name + ".json"), "w", encoding="utf-8") as handle:
+        json.dump(record, handle, ensure_ascii=False)
+    kept = sorted(f for f in os.listdir(folder) if f.endswith(".json"))
+    for old in kept[:-MAX_RUNS]:
+        try:
+            os.remove(os.path.join(folder, old))
+        except OSError:
+            pass
+    return name
+
+
+def run_records(project):
+    """The saved runs, oldest first, without their output (the page asks for a log)."""
+    out = []
+    folder = runs_folder(project)
+    if not os.path.isdir(folder):
+        return out
+    for name in sorted(f for f in os.listdir(folder) if f.endswith(".json"))[-MAX_RUNS:]:
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as h:
+                data = json.load(h)
+        except (IOError, OSError, ValueError):
+            continue
+        out.append({"id": name[:-5], "sub": data.get("sub", ""), "args": data.get("args", []),
+                    "exit_code": data.get("exit_code"), "seconds": data.get("seconds"),
+                    "generated": data.get("generated", ""), "git_head": data.get("git_head", ""),
+                    "doctor": data.get("doctor")})
+    return out
+
+
+def read_log(rt, project, kind, run_id, stage):
+    """The text of one evidence stage log or one saved run, or None. Names are checked
+    against a strict shape and the resolved path must stay inside its folder."""
+    if not RUN_ID.match(run_id or ""):
+        return None
+    if kind == "evidence":
+        stages = getattr(rt, "STAGES", ())
+        if stage not in stages:
+            return None
+        root = project.path(os.path.join(".ai-sdlc", "evidence"))
+        path = os.path.join(root, run_id, stage + ".log")
+    elif kind == "run":
+        root = runs_folder(project)
+        path = os.path.join(root, run_id + ".json")
+    else:
+        return None
+    real_root = os.path.realpath(root)
+    real = os.path.realpath(path)
+    if not real.startswith(real_root + os.sep) or not os.path.isfile(real):
+        return None
+    try:
+        with open(real, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - MAX_LOG_BYTES))
+            text = handle.read().decode("utf-8", "replace")
+    except (IOError, OSError):
+        return None
+    if kind == "run":
+        try:
+            text = json.loads(text).get("output", "")
+        except ValueError:
+            return None
+    elif size > MAX_LOG_BYTES:
+        text = "[... first %d bytes cut ...]\n" % (size - MAX_LOG_BYTES) + text
+    return text
+
+
 def metrics(rt, project, model, today=None):
     """Process measures computed only from what the records and git already hold. Each is
     labelled leading (moves early) or lagging (confirms later), and says what it is from."""
@@ -903,6 +1001,9 @@ def watched_paths(project):
     evidence = project.path(os.path.join(".ai-sdlc", "evidence"))
     if os.path.isdir(evidence):
         paths.extend(os.path.join(evidence, n, "summary.json") for n in os.listdir(evidence))
+    runs = runs_folder(project)
+    if os.path.isdir(runs):
+        paths.extend(os.path.join(runs, n) for n in os.listdir(runs) if n.endswith(".json"))
     return sorted(paths)
 
 
@@ -1045,6 +1146,17 @@ def serve(rt, project, template, opts):
             if path == "/model.json":
                 live.refresh()
                 return self._send(200, live.model_json, "application/json; charset=utf-8")
+            if path == "/api/log":
+                query = {}
+                for pair in (self.path.split("?", 1) + [""])[1].split("&"):
+                    if "=" in pair:
+                        k, v = pair.split("=", 1)
+                        query[k] = v
+                text = read_log(rt, live.project, query.get("kind", ""), query.get("id", ""),
+                                query.get("stage", ""))
+                if text is None:
+                    return self._send(404, b"not found\n", "text/plain; charset=utf-8")
+                return self._send(200, text.encode("utf-8"), "text/plain; charset=utf-8")
             return self._send(404, b"not found\n", "text/plain; charset=utf-8")
 
         do_HEAD = do_GET
@@ -1057,7 +1169,7 @@ def serve(rt, project, template, opts):
                 return self._send(403, b'{"ok":false,"error":"invalid action token"}\n',
                                   "application/json; charset=utf-8")
             path = self.path.split("?", 1)[0]
-            if path not in ("/api/config", "/api/fix"):
+            if path not in ("/api/config", "/api/fix", "/api/run"):
                 return self._send(404, b"not found\n", "text/plain; charset=utf-8")
             try:
                 length = min(65536, max(0, int(self.headers.get("Content-Length") or "0")))
@@ -1092,6 +1204,109 @@ def serve(rt, project, template, opts):
                         "alerts": res.get("findings"),
                         "version": live.version,
                     }).encode("utf-8")
+                return self._send(200, body, "application/json; charset=utf-8")
+            if path == "/api/run":
+                sub = str(payload.get("subcommand") or "").strip()
+                allowed = ("verify", "plan-check", "doctor", "log", "trailers", "metrics", "status")
+                if sub not in allowed:
+                    body = json.dumps({"ok": False, "error": "unsupported command: %s" % sub}).encode("utf-8")
+                    return self._send(400, body, "application/json; charset=utf-8")
+                safe_re = re.compile(r"^[A-Za-z0-9_./:-]+$")
+                cmd_args = [sub]
+                raw_args = payload.get("args")
+                if isinstance(raw_args, list) and raw_args:
+                    for a in raw_args[:12]:
+                        sa = str(a).strip()
+                        if not sa or not safe_re.match(sa):
+                            return self._send(400, b'{"ok":false,"error":"invalid argument"}\n',
+                                              "application/json; charset=utf-8")
+                        cmd_args.append(sa)
+                elif sub == "verify":
+                    if payload.get("parallel", True):
+                        cmd_args.append("--parallel")
+                    st = str(payload.get("stage") or "").strip()
+                    if st and safe_re.match(st):
+                        cmd_args.extend(["--stage", st])
+                elif sub == "plan-check":
+                    iid = str(payload.get("item_id") or "").strip()
+                    if not iid or not safe_re.match(iid):
+                        return self._send(400, b'{"ok":false,"error":"missing or invalid item_id"}\n',
+                                          "application/json; charset=utf-8")
+                    cmd_args.append(iid)
+                    if payload.get("strict"):
+                        cmd_args.append("--strict")
+                elif sub == "doctor":
+                    if payload.get("strict"):
+                        cmd_args.append("--strict")
+                elif sub == "log":
+                    since = str(payload.get("since") or "main").strip()
+                    if safe_re.match(since):
+                        cmd_args.extend(["--since", since])
+                    iid = str(payload.get("item_id") or "").strip()
+                    if iid and safe_re.match(iid):
+                        cmd_args.extend(["--id", iid])
+                    if payload.get("write", True):
+                        cmd_args.append("--write")
+                elif sub == "trailers":
+                    iid = str(payload.get("item_id") or "").strip()
+                    if not iid or not safe_re.match(iid):
+                        return self._send(400, b'{"ok":false,"error":"missing or invalid item_id"}\n',
+                                          "application/json; charset=utf-8")
+                    cmd_args.append(iid)
+                    ag = str(payload.get("agent") or "").strip()
+                    if ag and safe_re.match(ag):
+                        cmd_args.extend(["--agent", ag])
+                sdlc_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sdlc.py")
+                t0 = time.time()
+                try:
+                    proc = subprocess.Popen(
+                        [sys.executable, sdlc_bin] + cmd_args,
+                        cwd=live.project.root,
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                    )
+                    out_bytes, _ = proc.communicate(timeout=120)
+                    exit_code = proc.returncode
+                    output_text = out_bytes.decode("utf-8", "replace")
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    exit_code = 124
+                    output_text = "Command timed out after 120s.\n"
+                except Exception as exc:
+                    exit_code = 1
+                    output_text = "Failed to execute command: %s\n" % exc
+                elapsed = round(time.time() - t0, 2)
+                record = {"sub": sub, "args": cmd_args[1:], "exit_code": exit_code,
+                          "seconds": elapsed, "output": output_text,
+                          "generated": datetime.datetime.now(datetime.timezone.utc)
+                          .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                          "git_head": live.project.git("rev-parse", "HEAD").strip()}
+                if sub == "doctor":
+                    try:
+                        found = rt.doctor(live.project)
+                        record["doctor"] = dict((lvl, sum(1 for f in found
+                                                          if f.get("level") == lvl))
+                                                for lvl in ("fail", "warn", "ok"))
+                    except Exception:
+                        pass
+                try:
+                    run_id = save_run(rt, live.project, record)
+                except (IOError, OSError) as exc:
+                    run_id = ""
+                    sys.stderr.write("view: could not keep the run: %s\n" % exc)
+                live.refresh(force=True)
+                with live.lock:
+                    body = json.dumps({
+                        "ok": True,
+                        "exit_code": exit_code,
+                        "command": "python3 .ai-sdlc/bin/sdlc.py " + " ".join(cmd_args),
+                        "output": output_text,
+                        "seconds": elapsed,
+                        "run_id": run_id,
+                        "model": live.model,
+                        "version": live.version,
+                    }, ensure_ascii=False).encode("utf-8")
                 return self._send(200, body, "application/json; charset=utf-8")
 
         def log_message(self, *args):  # the terminal shows rebuilds, not every poll

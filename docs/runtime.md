@@ -71,16 +71,26 @@ it and opens one comprehensive, navigable page joined by work item ID:
   <img src="../assets/viewer-preview.svg" alt="Nuhut SDLC Interactive Viewer Dashboard: Git Graph, Blockages & Flow, Lifecycle Inspector, and Map" width="100%">
 </p>
 
-The viewer organizes project reality across eight dedicated views:
+The viewer organizes project reality across seven views, with an inspector beside them
+and an activity bar along the bottom:
 
-- **Threads:** a chat-like chronological and causal action stream per work item (`Frame` ➔ `Plan` ➔ `Design Review` ➔ `Build` commits with `Agent`/`Model`/`Tokens` trailers ➔ `Verify` stage gates ➔ `Ship Review` ➔ `Worklog`), paired with a searchable left work-item rail, a live Plan-vs-Actual file scope inspector on the right, and a 1-click `Threads | Mind Map` switcher.
-- **Map:** the whole project as a mind map (status, owner role, documents), folding and
-  unfolding, with clipped titles, child count badges, doctor findings, and a quick-jump
-  `Blockages & Flow` button.
-- **Board:** Kanban columns (Now, Next, Blocked, Parked, Later, Done), filtered by owner,
-  tier, or text search. Cards show dependency blockers and downstream impact.
-- **Activity:** what is in flight right now, recent worklog entries, and a collapsible
-  summary of uncommitted working tree changes.
+- **Inbox:** two modes over the same work items.
+  - **Items** groups work items into *Needs you* (Blocked/Parked), Active, Ready and Completed. Unread items get a dot.
+  - **Activity feed** lists every item's events newest day first: commits, verify runs, reviews, gates, worklog entries and records. Each item gets one row per day ("5 commits · 1 verify run"). Kind filter chips and an *Unread only* switch narrow it.
+  - Picking a thread shows its lifecycle stream (`Frame` ➔ `Plan` ➔ `Design Review` ➔ `Build` commits with `Agent`/`Model`/`Tokens` trailers ➔ `Verify` ➔ `Ship Review` ➔ `Worklog`) and the Command Dock.
+  - Read state stays in this browser only. The first visit marks everything read.
+- **Board:** Kanban columns (Now, Next, Blocked, Parked, Later, Done), filtered by owner, tier or text.
+  - Cards show dependency blockers, an unread dot, the last verify result and an age badge (days in column from the `Since` cell; amber at 3, red at 7).
+  - A `wip_limit` in the charter constraints shows the Now count as `n/limit`.
+- **Cockpit:** one page for health, each card leading with what it means.
+  - **Status tiles** (with trend lines): verify pass rate, Done, in flight, waiting, git traceability, doctor.
+  - **Flow** chart.
+  - **Tests & verify:** the run × stage grid plus each stage's last result and duration trend.
+  - **Runs & logs:** verify runs and the commands run from the page. Click one to read its log; a failed run opens on its failing stage.
+  - **Doctor** findings, grouped by check.
+  - **Project stats:** by column, by owner, epic progress, process measures.
+  - **Since you looked.**
+  - A link to the radial **Map** of epics, items and records.
 - **Blockages & Flow:** a dedicated dependency and blockage command center:
   - **Directed Flow Board:** 3-column triage (`Root Blockers` ➔ `Blocked Tasks` ➔ `Waiting on Human`).
   - **Bottleneck Matrix:** items ranked by blast radius (number of downstream tasks blocked).
@@ -94,6 +104,24 @@ The viewer organizes project reality across eight dedicated views:
 - **Documents:** every project artifact with frontmatter status (`draft`, `approved`, `stale`),
   accountable owner, and age. Click to open with interactive outlines and cross-linked IDs.
 - **Kit & Control:** an interactive control panel for adjusting kit constraints (`Default effort mode`, `Independent review required for`, `Tier rules`, `Decision style`, `Development method`, `Default reviewer`), toggling **Token-Saving Mode** (`Lean` + single-agent review + compact budgets), inspecting installed harnesses/hooks/CLI tools and per-tier reading budgets, and running 1-click safe repairs (`sync-profile`, `wire-pointer`, `restore-bite`, `unlock-tests`).
+
+**Inspector.** On screens 1100px and wider, clicking a card, run, commit or document opens it in a panel docked beside the page, not over it.
+- The list or board stays usable, and j/k moves the selection with the panel following.
+- Drag its left edge to resize it. Links inside it stack, with a back arrow.
+- Narrower screens use a slide-over instead.
+
+**Activity bar and notifications.** The bar at the bottom shows:
+- live state
+- branch
+- the latest verify result
+- doctor status
+- waiting items
+- a running or last-run command
+- unread count
+
+Each one links to where it comes from.
+
+In live mode the page compares each new model with the last one. Items added or moved, new commits, reviews and verify runs, and doctor changes all go to the bell (`n`). Only verify failures, doctor regressions, items becoming blocked and finished commands also raise a toast.
 
 #### Item Lifecycle Stepper
 
@@ -110,13 +138,15 @@ fault.
 | --- | --- |
 | **`⌘K`** or **`Ctrl+K`** | Open Command Palette to search all work items, documents, and headings. |
 | **`?`** | Toggle the Keyboard Shortcuts & Help modal. |
-| **`1` - `8`** | Switch views instantly: `1` Threads, `2` Map, `3` Board, `4` Activity, `5` Blockages, `6` Git Graph, `7` Documents, `8` Kit & Control. |
+| **`1` - `7`** | Switch views: `1` Inbox, `2` Board, `3` Cockpit, `4` Blockages, `5` Git Graph, `6` Documents, `7` Kit & Control. Old `#/activity` links open the Inbox feed; `#/map` still opens the map. |
+| **`j` / `k`**, **`h` / `l`** | Move through the Inbox or Board cards (arrows work too); the inspector follows. `o` opens the item's page. |
+| **`]`** | Show or hide the inspector. |
+| **`n`** | Notifications. |
 | **`t`** | Toggle Dark / Light theme. |
 | **`/`** | Open the Command Palette search input. |
 | **`Esc`** | Close open modal, commit drawer, or clear active search filter. |
 
-**A daily routine that works:** open **Threads** or **Blockages & Flow** first to clear bottlenecks, then
-**Activity**. Before calling an item done, open its thread or inspector and check that no step is amber.
+**A daily routine that works:** open the **Cockpit** for anything red, then the **Inbox** feed with *Unread only* to see what changed, then **Blockages & Flow** to clear what waits on you. Before calling an item done, open its thread or inspector and check that no step is amber.
 
 With `--serve` the page is live: leave it open while agents work, and it redraws
 within a couple of seconds of any record changing or a new commit, keeping your place, folds
@@ -124,7 +154,10 @@ and filters. It serves only on 127.0.0.1 and refuses requests addressed to any o
 In `--serve` mode, the **Kit & Control** tab can apply charter constraint changes and safe kit
 repairs directly via session-token-protected (`X-Action-Token`) local endpoints (`/api/config`
 and `/api/fix`); in static HTML exports (`--export-html`), those controls automatically copy
-the equivalent `sdlc.py config` or `sdlc.py fix` CLI command to your clipboard. Ctrl+C stops
+the equivalent `sdlc.py config` or `sdlc.py fix` CLI command to your clipboard. Commands run
+from the page (`/api/run`) are kept, redacted, under the git-ignored `.ai-sdlc/runs/` (newest 50)
+and listed in the Cockpit. Their output and each verify stage's log are read on demand through
+`GET /api/log?kind=evidence|run&id=…[&stage=…]`, which serves only a known stage log or kept run. Ctrl+C stops
 the server; `--port` and `--interval` tune it. Rows the view cannot read are listed on the
 page rather than dropped.
 

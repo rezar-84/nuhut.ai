@@ -64,12 +64,12 @@
   h1 { font-size: 20px; letter-spacing: -0.02em; margin: 8px 0 12px; text-wrap: balance; }
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
     margin: 24px 0 8px; font-family: var(--mono); }
-  .chip { display: inline-block; padding: 1px 7px; border-radius: 6px; background: var(--chip);
+  .chip { display: inline-block; padding: 2px 7px; border-radius: 6px; background: var(--chip);
     font-size: 11.5px; margin-right: 4px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .chip.col { color: #fff; font-weight: 600; }
   .stamp { display: inline-flex; align-items: center; justify-content: center; font-family: var(--mono);
-    font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
-    padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); }
+    font-size: 11px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); }
   .stamp.ok { background: var(--okbg); border-color: var(--accent); color: var(--accent); }
   .stamp.warn { background: var(--warnbg); border-color: var(--warn); color: var(--warn); }
   .stamp.bad { background: var(--badbg); border-color: var(--bad); color: var(--bad); }
@@ -99,6 +99,9 @@
   .chart-svg { width: 100%; max-width: 960px; height: auto; display: block; }
   .chart-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
   .chart-label { fill: var(--muted); font-size: 11px; font-family: var(--mono); }
+  /* The verify grid keeps its drawn size (labels stay legible) and scrolls sideways instead of shrinking. */
+  .chart-svg.grid-svg { width: auto; max-width: none; }
+  .ck-card .chart { overflow-x: auto; }
 
   /* mind map */
   .mapbar { display: flex; gap: 8px; margin: 4px 0 8px; flex-wrap: wrap; align-items: center; }
@@ -160,6 +163,101 @@
   .drawer-close { background: none; border: none; font-size: 16px; cursor: pointer; color: var(--muted);
     padding: 2px 8px; border-radius: 4px; }
   .drawer-close:hover { background: var(--chip); color: var(--text); }
+  /* Wide screens: the drawer docks as a non-modal inspector beside the page. */
+  body.docked { padding-right: var(--insp-w, 440px); }
+  body.docked header #q { max-width: 200px; }
+  .drawer.docked { width: var(--insp-w, 440px); max-width: 60vw; bottom: 28px; box-shadow: none; z-index: 30; }
+  .drawer .insp-grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; display: none; z-index: 2; }
+  .drawer.docked .insp-grip { display: block; }
+  .drawer.docked .insp-grip:hover, .drawer.docked .insp-grip.drag { background: var(--link); opacity: .35; }
+  .insp-empty { padding: 24px 18px; color: var(--muted); font-size: 13px; }
+  .insp-back { background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); cursor: pointer; font-size: 12px; padding: 1px 7px; margin-right: 6px; }
+  /* Activity bar: always-on status along the bottom edge. */
+  body { padding-bottom: 28px; }
+  .activity-bar { position: fixed; left: 0; right: 0; bottom: 0; height: 28px; z-index: 45; display: flex; align-items: center; gap: 2px;
+    padding: 0 8px; background: var(--panel); border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  .activity-bar .ab-item { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 4px; color: var(--muted);
+    background: none; border: none; font: inherit; cursor: pointer; white-space: nowrap; text-decoration: none; }
+  .activity-bar .ab-item:hover { background: var(--chip); color: var(--text); text-decoration: none; }
+  .activity-bar .ab-item.bad { color: var(--bad); font-weight: 600; }
+  .activity-bar .ab-item.warn { color: var(--warn); font-weight: 600; }
+  .activity-bar .ab-item.ok { color: var(--accent); }
+  .activity-bar .ab-spacer { flex: 1; }
+  .activity-bar .ab-badge { min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--link); color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+  .ab-spin { width: 9px; height: 9px; border: 2px solid var(--line); border-top-color: var(--link); border-radius: 50%; display: inline-block; animation: abspin .8s linear infinite; }
+  @keyframes abspin { to { transform: rotate(360deg); } }
+  .notes-pop { position: fixed; bottom: 34px; right: 12px; width: 380px; max-width: calc(100vw - 24px); max-height: 60vh; overflow: auto; z-index: 46;
+    background: var(--bg); border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,.08), 0 12px 28px rgba(0,0,0,.16); display: none; }
+  .notes-pop.open { display: block; }
+  .notes-pop header { position: sticky; top: 0; padding: 8px 12px; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+  .note-row { display: flex; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; cursor: pointer; }
+  .note-row:hover { background: var(--panel); }
+  .note-row.unseen { font-weight: 600; }
+  .note-ic { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; background: var(--muted); }
+  .note-ic.bad { background: var(--bad); } .note-ic.ok { background: var(--accent); } .note-ic.warn { background: var(--warn); } .note-ic.info { background: var(--link); }
+  /* Cockpit */
+  .cockpit { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 14px; }
+  .cockpit .wide { grid-column: 1 / -1; }
+  .ck-card { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .ck-card > h2 { margin: 0 0 2px; font-size: 15px; font-weight: 650; line-height: 1.3; font-family: inherit; text-transform: none; letter-spacing: -0.01em; color: var(--text); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .ck-card .sowhat { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; max-width: 72ch; }
+  .ck-card h3 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 12px 0 4px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  /* Needs you: the decisions waiting on a person, ahead of every metric. */
+  .needs { border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
+  .needs-row { display: grid; grid-template-columns: 76px 1fr auto; gap: 12px; align-items: center; padding: 10px 14px; border-top: 1px solid var(--line); cursor: pointer; font-size: 13px; }
+  .needs-row:first-of-type { border-top: 0; }
+  .needs-row:hover { background: var(--panel); }
+  .needs-row .nr-kind { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; font-family: var(--mono); }
+  .needs-row.bad .nr-kind { color: var(--bad); } .needs-row.warn .nr-kind { color: var(--warn); }
+  .needs-row .nr-what { min-width: 0; } .needs-row .nr-what div:last-child { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .needs-clear { padding: 14px; color: var(--accent); font-weight: 600; font-size: 13px; }
+  .kpis.secondary .kpi { padding: 6px 10px; background: transparent; }
+  .kpis.secondary .k-val { font-size: 16px; }
+  .kpi .k-sub { font-size: 11.5px; color: var(--muted); }
+  .doc-line { display: grid; grid-template-columns: 44px 1fr; gap: 8px; padding: 5px 4px; border-top: 1px solid var(--line); font-size: 12.5px; cursor: pointer; align-items: baseline; }
+  .doc-line:hover { background: var(--panel); }
+  .doc-line .dl-lvl { font-family: var(--mono); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+  .doc-line .dl-lvl.fail { color: var(--bad); } .doc-line .dl-lvl.warn { color: var(--warn); }
+  .doc-line .dl-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .doc-line .dl-where { color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+  /* Agent profile: one chip in the context bar; the controls open beneath it. */
+  .profile-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+  .profile-chip:hover, .profile-chip[aria-expanded="true"] { border-color: var(--link); }
+  .profile-chip b { font-weight: 600; }
+  .profile-pop { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  .insp-title { margin: 0 0 8px; font-size: 15px; font-weight: 600; line-height: 1.35; font-family: inherit; text-transform: none; letter-spacing: -0.01em; color: var(--text);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .verify-badge { font-size: 11px; font-weight: 600; }
+  .verify-badge.bad { color: var(--bad); }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .kpi { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); cursor: default; min-width: 0; }
+  .kpi.link { cursor: pointer; } .kpi.link:hover { border-color: var(--link); }
+  .kpi .k-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .k-val { font-size: 20px; font-weight: 700; line-height: 1.2; }
+  .kpi.bad .k-val { color: var(--bad); } .kpi.warn .k-val { color: var(--warn); } .kpi.ok .k-val { color: var(--accent); }
+  .kpi svg { display: block; margin-top: 4px; }
+  .run-row { display: grid; grid-template-columns: 14px 1fr auto auto; gap: 8px; align-items: center; padding: 5px 6px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  .run-row:hover, .run-row.sel { background: var(--panel); }
+  .run-row .rr-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .run-row .rr-dot.ok { background: var(--accent); } .run-row .rr-dot.bad { background: var(--bad); }
+  .log-pre { font-family: var(--mono); font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; max-height: 60vh; overflow: auto; margin: 0; }
+  .hbar { display: grid; grid-template-columns: 110px 1fr 40px; gap: 8px; align-items: center; font-size: 12px; margin: 3px 0; }
+  .hbar .track { height: 8px; background: var(--chip); border-radius: 99px; overflow: hidden; }
+  .hbar .fill { height: 100%; background: var(--link); border-radius: 99px; }
+  /* Inbox feed */
+  .feed-row { padding: 7px 10px; border-bottom: 1px solid var(--line); font-size: 12px; cursor: pointer; display: grid; grid-template-columns: 8px 1fr auto; gap: 8px; align-items: start; }
+  .feed-row:hover, .feed-row.sel { background: var(--panel); }
+  .feed-row.unread .fr-title { font-weight: 700; }
+  .feed-row .fr-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; background: transparent; }
+  .feed-row.unread .fr-dot { background: var(--link); }
+  .feed-row .fr-kinds { color: var(--muted); font-size: 11px; }
+  .feed-day { padding: 8px 10px 4px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--link); display: inline-block; flex: none; }
+  .age-badge { font-size: 10px; padding: 0 5px; border-radius: 8px; background: var(--chip); color: var(--muted); }
+  .age-badge.warn { background: var(--warnbg); color: var(--warn); } .age-badge.bad { background: var(--badbg); color: var(--bad); }
+  .card.kbd-sel { outline: 2px solid var(--link); outline-offset: 1px; }
+  @media (prefers-reduced-motion: reduce) { .drawer, .ab-spin { transition: none; animation: none; } }
   .map-node text { font-size: 13px; fill: var(--text); cursor: pointer; }
   .map-node text.nav { fill: var(--link); font-weight: 500; }
   .map-node text.nav:hover { text-decoration: underline; }
@@ -384,7 +482,7 @@
   .thread-hdr-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .thread-feed { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
   .msg-bubble { display: flex; gap: 12px; align-items: flex-start; position: relative; }
-  .msg-avatar { width: 34px; height: 26px; border-radius: 5px; background: var(--panel); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 10px; font-family: var(--mono); flex-shrink: 0; font-weight: 700; color: var(--muted); letter-spacing: 0.04em; }
+  .msg-avatar { width: 34px; height: 26px; border-radius: 5px; background: var(--panel); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 11px; font-family: var(--mono); flex-shrink: 0; font-weight: 700; color: var(--muted); letter-spacing: 0.03em; }
   .msg-card { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 15px; }
   .msg-card.kind-frame { border-color: var(--link); }
   .msg-card.kind-plan { border-color: var(--c-Next); }
@@ -396,13 +494,33 @@
   .msg-hdr { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; font-size: 12px; }
   .msg-hdr-left { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .msg-body { font-size: 13px; color: var(--text); line-height: 1.5; }
-  .thread-composer { border-top: 1px solid var(--line); background: var(--panel); padding: 12px 18px; display: flex; flex-direction: column; gap: 10px; }
-  .composer-next { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12px; }
-  .composer-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .thread-composer { border-top: 1px solid var(--line); background: var(--panel); padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .composer-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .composer-tabs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .composer-tab { font: inherit; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all .12s ease; }
+  .composer-tab:hover { color: var(--text); border-color: var(--link); }
+  .composer-tab.active { background: var(--link); color: #fff; border-color: var(--link); }
+  .composer-params { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  .composer-cmd-box { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  .composer-cmd-code { flex: 1; min-width: 220px; font-family: var(--mono); font-size: 12.5px; color: var(--text); overflow-x: auto; white-space: nowrap; padding: 2px 0; }
+  .composer-cmd-code .prompt-sigil { color: var(--accent); font-weight: 700; margin-right: 6px; user-select: none; }
+  .composer-terminal { margin-top: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
+  .composer-terminal-hdr { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; background: var(--chip); border-bottom: 1px solid var(--line); font-size: 11px; font-family: var(--mono); }
+  .composer-terminal pre { margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; max-height: 220px; overflow: auto; white-space: pre-wrap; color: var(--text); background: var(--bg); }
   .cmd-btn { font: inherit; font-size: 12px; font-weight: 600; padding: 6px 11px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all .12s ease; }
   .cmd-btn:hover { border-color: var(--link); color: var(--link); }
   .cmd-btn.primary { background: var(--link); color: #fff; border-color: var(--link); }
   .cmd-btn.primary:hover { opacity: 0.92; color: #fff; }
+  .cmd-btn.run-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .cmd-btn.run-btn:hover { opacity: 0.92; color: #fff; }
+  /* Global Persistent Agent & Kit Control Bar */
+  .context-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px 14px; flex-wrap: wrap; padding: 6px 16px; background: var(--bg); border-bottom: 1px solid var(--line); font-size: 12px; }
+  .context-bar-left, .context-bar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .context-ctrl { display: inline-flex; align-items: center; gap: 5px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; font-size: 11.5px; }
+  .context-ctrl-lbl { color: var(--muted); font-size: 11.5px; font-family: var(--mono); text-transform: uppercase; font-weight: 600; margin-right: 2px; }
+  .view-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 10px; margin: 4px 0 12px; border-bottom: 1px solid var(--line); }
+  .view-header h1 { margin: 0; font-size: 19px; letter-spacing: -0.02em; }
+  .view-subtitle { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
   /* Kit Control & Repair Panel */
   .kit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; margin: 14px 0 22px; }
   .kit-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
@@ -418,11 +536,12 @@
   .seg-btn { border: none; background: transparent; color: var(--muted); font: inherit; font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 5px; cursor: pointer; transition: all .12s ease; }
   .seg-btn:hover { color: var(--text); background: var(--chip); }
   .seg-btn.active { background: var(--link); color: #fff; font-weight: 600; }
-  .seg-btn.pending { outline: 1px dashed var(--warn); color: var(--warn); font-weight: 600; }
+  .seg-btn.pending { outline: 1px dashed var(--warn); font-weight: 600; }
   .meter-bar { height: 10px; background: var(--chip); border-radius: 99px; overflow: hidden; border: 1px solid var(--line); }
   .meter-fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .25s ease; }
-  .cli-staging-bar { position: sticky; bottom: 12px; z-index: 35; background: var(--bg); border: 1px solid var(--link); border-radius: 10px; padding: 12px 16px; box-shadow: 0 6px 14px rgba(0,0,0,0.16); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
-  .toast-bar { position: fixed; bottom: 20px; right: 20px; z-index: 2000; max-width: 540px; background: var(--bg); border: 1px solid var(--link); border-radius: 10px; padding: 12px 16px; box-shadow: 0 6px 14px rgba(0,0,0,0.18); font-size: 12px; display: none; flex-direction: column; gap: 6px; }
+  .cli-staging-bar { position: sticky; bottom: 12px; z-index: 35; background: var(--bg); border: 1px solid var(--link); border-radius: 10px; padding: 10px 14px; box-shadow: 0 6px 14px rgba(0,0,0,0.16); display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 12px 16px; }
+  .toast-bar { position: fixed; bottom: 38px; right: 20px; z-index: 2000; max-width: 540px; font-size: 12px; display: none; flex-direction: column; gap: 8px; }
+  .toast-item { background: var(--bg); border: 1px solid var(--link); border-radius: 10px; padding: 12px 16px; box-shadow: 0 6px 14px rgba(0,0,0,0.18); display: flex; flex-direction: column; gap: 6px; }
   .toast-bar.show { display: flex; }
 </style>
 </head>
@@ -430,17 +549,21 @@
 <header>
   <div class="brand"><i></i><span id="pname">Nuhut</span></div>
   <nav class="tabs" id="tabs" aria-label="Primary navigation">
-    <a href="#/threads" data-r="threads">Threads</a><a href="#/map" data-r="map">Map</a><a href="#/board" data-r="board">Board</a><a href="#/activity" data-r="activity">Activity</a>
-    <a href="#/waiting" data-r="waiting">Blockages & Waiting</a><a href="#/git" data-r="git">Git</a><a href="#/docs" data-r="docs">Documents</a><a href="#/kit" data-r="kit" id="tab-kit">Kit & Control</a>
+    <a href="#/threads" data-r="threads" id="tab-threads">Inbox</a><a href="#/board" data-r="board" id="tab-board">Board</a><a href="#/cockpit" data-r="cockpit" id="tab-cockpit">Cockpit</a>
+    <a href="#/waiting" data-r="waiting" id="tab-waiting">Blockages</a><a href="#/git" data-r="git" id="tab-git">Git</a><a href="#/docs" data-r="docs" id="tab-docs">Documents</a><a href="#/kit" data-r="kit" id="tab-kit">Kit & Control</a>
   </nav>
   <input id="q" type="search" placeholder="Search or ⌘K…" aria-label="Search or open Command Palette">
   <div class="meta" id="meta"></div>
 </header>
+<div id="context-bar" class="context-bar" role="region" aria-label="Agent harness and kit controls"></div>
 <div id="crumbs"></div>
 <main id="main"></main>
+<div id="global-staging-bar"></div>
 <div id="toast-bar" class="toast-bar" role="status" aria-live="polite"></div>
 <div id="drawer-backdrop" class="drawer-backdrop"></div>
 <div id="drawer" class="drawer" role="dialog" aria-modal="true" aria-label="Inspector drawer"></div>
+<div id="activity-bar" class="activity-bar" role="contentinfo" aria-label="Activity bar"></div>
+<div id="notes-pop" class="notes-pop" role="region" aria-label="Notifications"></div>
 <div id="map-tooltip" class="map-tooltip" role="tooltip"></div>
 <div id="palette-backdrop" class="palette-backdrop"></div>
 <div id="palette" class="palette" role="dialog" aria-modal="true" aria-label="Command Palette"></div>
@@ -455,6 +578,7 @@
     return;
   }
   var ITEMS, DOCS, WL, ID_RE, DOC_BY_PATH;
+  var INITIAL_KIT = JSON.parse(JSON.stringify((M && M.kit) || {}));
   // Everything derived from the model, so live mode can swap in a new one.
   function load(model) {
     M = model;
@@ -470,6 +594,7 @@
   function el(tag, attrs, kids) {
     var n = document.createElement(tag);
     if (attrs) Object.keys(attrs).forEach(function (k) {
+      if (attrs[k] === null || attrs[k] === undefined) return;
       if (k === "text") n.textContent = attrs[k];
       else if (k === "cls") n.className = attrs[k];
       else if (k === "on") Object.keys(attrs.on).forEach(function (e) { n.addEventListener(e, attrs.on[e]); });
@@ -506,6 +631,22 @@
     return Math.floor((Date.now() - new Date(+m[1], m[2] - 1, +m[3]).getTime()) / 86400000);
   }
   function clip(s, n) { s = s || ""; return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+  // "1 item", "3 items"; the irregular plural is passed in when there is one.
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+  // Seconds as a person reads them: 42s, 7m, 1h 12m.
+  function fmtDur(sec) {
+    if (sec === null || sec === undefined || sec === "" || isNaN(+sec)) return "";
+    sec = +sec;
+    if (sec < 90) return (sec < 10 ? Math.round(sec * 10) / 10 : Math.round(sec)) + "s";
+    if (sec < 5400) return Math.round(sec / 60) + "m";
+    var h = Math.floor(sec / 3600), m = Math.round((sec - h * 3600) / 60);
+    return h + "h" + (m ? " " + m + "m" : "");
+  }
+  // The backlog's owner cell, whichever header the project used for it.
+  function ownerOf(it) {
+    var x = (it && it.extra) || {};
+    return (it && it.owner) || x.Owner || x["Owner role"] || x["Owner Role"] || "";
+  }
   function h(level, text) { return el("h" + level, { text: text }); }
 
   // Inline markdown: code, bold, links, and work item IDs. Text nodes only.
@@ -726,6 +867,8 @@
   }
 
   var STAGED_KIT = { config: {}, fixes: [] };
+  var TERMINAL_STATE = { running: false, cmd: "", output: "", exitCode: null, seconds: null, visible: false };
+
   function buildStagedKitCommand() {
     var cmds = [];
     var cfg = STAGED_KIT.config || {};
@@ -754,30 +897,36 @@
     return cmds.join(" && ");
   }
 
-  var toastTimer = null;
+  // Toasts stack (newest at the bottom, three at most) so a run finishing does not wipe
+  // the copy confirmation before it; every one is also in the bell.
   function showToast(title, detail, cmd) {
     var box = document.getElementById("toast-bar");
     if (!box) return;
-    box.textContent = "";
-    var top = el("div", { style: "display: flex; align-items: center; justify-content: space-between; gap: 10px;" }, [
+    var card = el("div", { cls: "toast-item" });
+    function dismiss() {
+      if (card.parentNode) card.parentNode.removeChild(card);
+      if (!box.children.length) box.className = "toast-bar";
+    }
+    card.appendChild(el("div", { style: "display: flex; align-items: center; justify-content: space-between; gap: 10px;" }, [
       el("strong", { text: title }),
-      el("button", { text: "✕", "aria-label": "Dismiss notification", style: "border: none; background: transparent; cursor: pointer; color: var(--muted);", on: { click: function () { box.className = "toast-bar"; } } })
-    ]);
-    box.appendChild(top);
-    if (detail) box.appendChild(el("div", { cls: "muted", text: detail }));
+      el("button", { text: "✕", "aria-label": "Dismiss notification", style: "border: none; background: transparent; cursor: pointer; color: var(--muted);", on: { click: dismiss } })
+    ]));
+    if (detail) card.appendChild(el("div", { cls: "muted", text: detail }));
     if (cmd) {
-      var codeRow = el("div", { style: "display: flex; align-items: center; gap: 8px; margin-top: 4px;" }, [
+      card.appendChild(el("div", { style: "display: flex; align-items: center; gap: 8px; margin-top: 4px;" }, [
         el("code", { style: "flex: 1; padding: 4px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow-x: auto;", text: cmd }),
         el("button", { cls: "cmd-btn", text: "Copy", on: { click: function (e) {
           copyText(cmd);
           e.target.textContent = "Copied!";
         } } })
-      ]);
-      box.appendChild(codeRow);
+      ]));
     }
+    box.appendChild(card);
+    while (box.children.length > 3) box.removeChild(box.firstChild);
     box.className = "toast-bar show";
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { box.className = "toast-bar"; }, cmd ? 8500 : 4000);
+    var timer = setTimeout(dismiss, cmd ? 8500 : 4500);
+    card.addEventListener("mouseenter", function () { clearTimeout(timer); });
+    card.addEventListener("mouseleave", function () { timer = setTimeout(dismiss, 2500); });
   }
 
   function copyCmd(cmd, label) {
@@ -849,10 +998,29 @@
     render();
   }
 
+  function recordStagedChange(endpoint, payload) {
+    payload = payload || {};
+    if (endpoint === "/api/config") {
+      Object.keys(payload).forEach(function (k) {
+        if (k === "checks") {
+          STAGED_KIT.config.checks = STAGED_KIT.config.checks || {};
+          Object.keys(payload.checks).forEach(function (st) { STAGED_KIT.config.checks[st] = payload.checks[st]; });
+        } else {
+          STAGED_KIT.config[k] = payload[k];
+        }
+      });
+    } else if (endpoint === "/api/fix") {
+      var act = payload.action || "all";
+      if (act === "all") STAGED_KIT.fixes = ["all"];
+      else if (STAGED_KIT.fixes.indexOf("all") < 0 && STAGED_KIT.fixes.indexOf(act) < 0) STAGED_KIT.fixes.push(act);
+    }
+  }
+
   function kitApi(endpoint, payload, fallbackCmd, desc) {
+    var prevKit = JSON.parse(JSON.stringify(M.kit || {}));
+    // Always update the UI immediately so toggles feel responsive in both Live and Static modes
+    applyOptimisticKitChange(endpoint, payload);
     if (LIVE && M.action_token) {
-      var prevKit = JSON.parse(JSON.stringify(M.kit || {}));
-      applyOptimisticKitChange(endpoint, payload);
       fetch(endpoint.replace(/^\//, ""), {
         method: "POST",
         headers: {
@@ -869,62 +1037,899 @@
       }).then(function (resp) {
         var res = resp.body;
         if (!res || !res.ok) {
+          if (resp.status === 404) {
+            recordStagedChange(endpoint, payload);
+            var combined404 = buildStagedKitCommand() || fallbackCmd;
+            copyText(combined404);
+            paintMeta();
+            render();
+            showToast("Preview Applied · Server Restart Needed", "Running `view --serve` is an older process. Command copied to clipboard:", combined404);
+            return;
+          }
           M.kit = prevKit;
           paintMeta();
           render();
           copyText(fallbackCmd);
-          var errMsg = (res && res.error) || (resp.status === 404
-            ? "Running view server is from an older kit version — command copied to clipboard (or restart `sdlc.py view --serve`)"
-            : "Could not apply change on server (HTTP " + resp.status + ") — reverted UI and copied CLI command");
+          var errMsg = (res && res.error) || ("Could not apply change on server (HTTP " + resp.status + ") — reverted UI and copied CLI command");
           showToast("Server Error · Reverted & Copied CLI Command", errMsg, fallbackCmd);
           return;
         }
         if (res.kit) M.kit = res.kit;
         if (res.alerts) M.alerts = res.alerts;
         if (res.version) M.version = res.version;
+        INITIAL_KIT = JSON.parse(JSON.stringify(M.kit || {}));
         liveAt = new Date();
         paintMeta();
         render();
         var msg = (res.applied && res.applied.join(", ")) || (res.repaired && res.repaired.join(", ")) || desc || "Applied";
-        showToast("Saved to Kit", msg);
+        showToast("✓ Saved to Kit (charter.md & profile.json)", msg);
       }).catch(function () {
-        M.kit = prevKit;
+        recordStagedChange(endpoint, payload);
+        var combinedErr = buildStagedKitCommand() || fallbackCmd;
+        copyText(combinedErr);
         paintMeta();
         render();
-        copyCmd(fallbackCmd, desc);
+        showToast("Preview Applied · Server Unreachable", "Copied CLI command to persist change in terminal:", combinedErr);
       });
     } else {
-      payload = payload || {};
-      if (endpoint === "/api/config") {
-        Object.keys(payload).forEach(function (k) {
-          if (k === "checks") {
-            STAGED_KIT.config.checks = STAGED_KIT.config.checks || {};
-            Object.keys(payload.checks).forEach(function (st) { STAGED_KIT.config.checks[st] = payload.checks[st]; });
-          } else {
-            STAGED_KIT.config[k] = payload[k];
-          }
-        });
-      } else if (endpoint === "/api/fix") {
-        var act = payload.action || "all";
-        if (act === "all") STAGED_KIT.fixes = ["all"];
-        else if (STAGED_KIT.fixes.indexOf("all") < 0 && STAGED_KIT.fixes.indexOf(act) < 0) STAGED_KIT.fixes.push(act);
-      }
+      recordStagedChange(endpoint, payload);
       var combined = buildStagedKitCommand() || fallbackCmd;
       copyText(combined);
+      paintMeta();
       render();
       showToast(
-        "Staged for CLI · Combined Command Copied",
-        LIVE
-          ? "Running `view --serve` is an older process — restart it for 1-click writes, or run the staged command:"
-          : "Static snapshot cannot write files directly. Run the combined CLI command in your terminal (or start `sdlc.py view --serve`):",
+        "✓ Toggle Preview Applied · CLI Command Copied",
+        "Static HTML cannot write files directly. Paste & run in terminal to persist (or run `sdlc.py view --serve`):",
         combined
       );
     }
   }
 
+  function runKitCmd(runPayload, fallbackCmd, desc) {
+    if (LIVE && M.action_token && runPayload && runPayload.subcommand) {
+      TERMINAL_STATE.running = true;
+      TERMINAL_STATE.cmd = fallbackCmd;
+      TERMINAL_STATE.output = "Running `" + fallbackCmd + "` in project root…";
+      TERMINAL_STATE.exitCode = null;
+      TERMINAL_STATE.seconds = null;
+      TERMINAL_STATE.visible = true;
+      render();
+      paintActivityBar();
+      fetch("api/run", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Action-Token": M.action_token
+        },
+        body: JSON.stringify(runPayload)
+      }).then(function (r) {
+        return r.text().then(function (txt) {
+          var parsed = null;
+          try { parsed = JSON.parse(txt); } catch (e) {}
+          return { status: r.status, ok: r.ok, body: parsed };
+        });
+      }).then(function (resp) {
+        TERMINAL_STATE.running = false;
+        var res = resp.body;
+        if (!res || !res.ok) {
+          TERMINAL_STATE.exitCode = resp.status || 1;
+          TERMINAL_STATE.output = (res && res.error) || ("Server does not support /api/run (HTTP " + resp.status + "). Restart `sdlc.py view --serve` or run in terminal:\n$ " + fallbackCmd);
+          copyText(fallbackCmd);
+          render();
+          return;
+        }
+        TERMINAL_STATE.cmd = res.command || fallbackCmd;
+        TERMINAL_STATE.output = res.output || "(completed with no output)";
+        TERMINAL_STATE.exitCode = res.exit_code;
+        TERMINAL_STATE.seconds = res.seconds;
+        LAST_RUN = { label: runPayload.subcommand, exit_code: res.exit_code, seconds: res.seconds, run_id: res.run_id || "" };
+        pushNote({ level: res.exit_code === 0 ? "ok" : "bad", title: (res.exit_code === 0 ? "✓ " : "✗ ") + runPayload.subcommand + " finished",
+          detail: "exit " + res.exit_code + " · " + (res.seconds || 0) + "s", log: res.run_id ? { kind: "run", id: res.run_id, title: runPayload.subcommand } : null });
+        if (res.model) diffModels(M, res.model);
+        if (res.model) {
+          load(res.model);
+          INITIAL_KIT = JSON.parse(JSON.stringify(M.kit || {}));
+        }
+        liveAt = new Date();
+        paintMeta();
+        render();
+        showToast(
+          res.exit_code === 0 ? ("✓ Completed: " + (desc || res.command)) : ("! Exited " + res.exit_code + ": " + (desc || res.command)),
+          "Finished in " + (res.seconds || 0) + "s — see Terminal Output below."
+        );
+      }).catch(function (err) {
+        TERMINAL_STATE.running = false;
+        TERMINAL_STATE.exitCode = 1;
+        TERMINAL_STATE.output = "Network error while calling local server: " + err + "\nCopied CLI command to clipboard:\n$ " + fallbackCmd;
+        copyText(fallbackCmd);
+        render();
+      });
+    } else {
+      copyCmd(fallbackCmd, desc);
+    }
+  }
+
+  var PROFILE_OPEN = false;
+  function paintContextBar() {
+    var bar = document.getElementById("context-bar");
+    if (!bar) return;
+    bar.textContent = "";
+    var kit = M.kit || {};
+    var c = kit.constraints || {};
+    var rt = kit.reading_tokens || {};
+    var fixable = (kit.fixable || []).filter(function (f) { return f.level !== "info"; });
+    var fails = (M.alerts || []).filter(function (a) { return a.level === "fail"; });
+
+    var left = el("div", { cls: "profile-pop", id: "profile-pop", role: "group", "aria-label": "Agent profile settings" });
+
+    // 2. Interactive Token-Saving Toggle
+    var tsOn = !!kit.token_saving;
+    var tsBtn = el("button", {
+      cls: "seg-btn" + (tsOn ? " active" : ""),
+      "aria-pressed": tsOn ? "true" : "false",
+      style: "padding: 2px 8px; font-size: 11px; border: 1px solid " + (tsOn ? "var(--accent)" : "var(--line)") + "; background: " + (tsOn ? "var(--okbg)" : "var(--panel)") + "; color: " + (tsOn ? "var(--accent)" : "var(--text)") + "; font-weight: 600;",
+      title: "Click to toggle Token-Saving Mode (Lean effort, single-agent review, compact logs)",
+      text: tsOn ? ("Token saver on (−" + (rt.saved_pct || 65) + "%)") : "Token saver off",
+      on: { click: function () {
+        var nextState = !tsOn ? "on" : "off";
+        kitApi("/api/config", { token_saving: nextState }, "python3 .ai-sdlc/bin/sdlc.py config --token-saving " + nextState, "Token-Saving Mode " + nextState);
+      } }
+    });
+    left.appendChild(tsBtn);
+
+    // 3. Interactive Effort Segmented Switcher
+    var effCtrl = el("div", { cls: "context-ctrl", role: "group", "aria-label": "Default Effort Level" }, [
+      el("span", { cls: "context-ctrl-lbl", text: "Effort" })
+    ]);
+    ["Lean", "Normal", "Beast"].forEach(function (eff) {
+      var isAct = String(c.effort_mode || "Normal").toLowerCase() === eff.toLowerCase();
+      effCtrl.appendChild(el("button", {
+        cls: "seg-btn" + (isAct ? " active" : ""),
+        "aria-pressed": isAct ? "true" : "false",
+        style: "padding: 1px 7px; font-size: 11px;",
+        text: eff,
+        on: { click: function () {
+          kitApi("/api/config", { effort: eff }, "python3 .ai-sdlc/bin/sdlc.py config --effort " + eff, "Effort=" + eff);
+        } }
+      }));
+    });
+    left.appendChild(effCtrl);
+
+    // 4. Interactive 2nd-Agent Review Policy Switcher
+    var revCtrl = el("div", { cls: "context-ctrl", role: "group", "aria-label": "Second Agent Review Policy" }, [
+      el("span", { cls: "context-ctrl-lbl", text: "2nd Review" })
+    ]);
+    [["none", "Off"], ["Tier 1", "T1"], ["Tier 1 and 2", "T1+2"]].forEach(function (opt) {
+      var isAct = String(c.independent_review || "none").toLowerCase() === opt[0].toLowerCase();
+      revCtrl.appendChild(el("button", {
+        cls: "seg-btn" + (isAct ? " active" : ""),
+        "aria-pressed": isAct ? "true" : "false",
+        style: "padding: 1px 7px; font-size: 11px;",
+        text: opt[1],
+        on: { click: function () {
+          var cliVal = opt[0] === "none" ? "none" : (opt[0] === "Tier 1 and 2" ? "tier1-2" : "tier1");
+          kitApi("/api/config", { independent_review: opt[0] }, "python3 .ai-sdlc/bin/sdlc.py config --independent-review " + cliVal, "Independent review=" + opt[0]);
+        } }
+      }));
+    });
+    left.appendChild(revCtrl);
+
+    // 5. Preferred Reviewer Harness Switcher
+    var cliCtrl = el("div", { cls: "context-ctrl", role: "group", "aria-label": "Preferred Reviewer CLI" }, [
+      el("span", { cls: "context-ctrl-lbl", text: "Reviewer CLI" })
+    ]);
+    ["codex", "claude", "gemini"].forEach(function (cliName) {
+      var isAct = String(c.preferred_reviewer || "codex").toLowerCase() === cliName;
+      cliCtrl.appendChild(el("button", {
+        cls: "seg-btn" + (isAct ? " active" : ""),
+        "aria-pressed": isAct ? "true" : "false",
+        style: "padding: 1px 6px; font-size: 11px;",
+        text: cliName,
+        on: { click: function () {
+          if (typeof THREAD_STATE !== "undefined") THREAD_STATE.reviewer = cliName;
+          kitApi("/api/config", { preferred_reviewer: cliName }, "python3 .ai-sdlc/bin/sdlc.py config --reviewer " + cliName, "Reviewer=" + cliName);
+        } }
+      }));
+    });
+    left.appendChild(cliCtrl);
+
+    var right = el("div", { cls: "context-bar-right" });
+    var totalIssues = fails.length + fixable.length;
+    right.appendChild(el("button", {
+      cls: "cmd-btn",
+      style: "padding: 2px 8px; font-size: 11px; border-color: " + (fails.length ? "var(--bad)" : (fixable.length ? "var(--warn)" : "var(--line)")) + ";",
+      text: totalIssues ? (plural(totalIssues, "kit issue") + " · repair") : "Kit healthy · ~" + ((rt.tier1_tokens || 0) / 1000).toFixed(1) + "k tokens per Tier 1 read",
+      on: { click: function () { go("kit"); } }
+    }));
+
+    // The settings change how agents work, so they stay one deliberate click away.
+    var revLabel = { "none": "no 2nd review", "Tier 1": "2nd review T1", "Tier 1 and 2": "2nd review T1–2" }[c.independent_review || "none"] || c.independent_review;
+    var chip = el("button", { cls: "profile-chip", "aria-expanded": PROFILE_OPEN ? "true" : "false", "aria-controls": "profile-pop",
+      title: "Agent profile: effort, independent review, reviewer CLI, token saver",
+      on: { click: function () { PROFILE_OPEN = !PROFILE_OPEN; paintContextBar(); } } }, [
+      el("span", { cls: "muted", text: "Agent profile" }),
+      el("b", { text: (c.effort_mode || "Normal") + " · " + revLabel + " · " + (c.preferred_reviewer || "codex") + (kit.token_saving ? " · lean" : "") }),
+      el("span", { cls: "muted", "aria-hidden": "true", text: PROFILE_OPEN ? "▴" : "▾" })
+    ]);
+    bar.appendChild(chip);
+    bar.appendChild(right);
+    if (PROFILE_OPEN) bar.appendChild(left);
+  }
+
+  function paintGlobalStagingBar() {
+    var holder = document.getElementById("global-staging-bar");
+    if (!holder) return;
+    holder.textContent = "";
+    var stagedCmd = buildStagedKitCommand();
+    if (!stagedCmd) return;
+    holder.appendChild(el("div", { cls: "cli-staging-bar" }, [
+      el("div", { style: "display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" }, [
+        el("span", { cls: "stamp warn", text: "UNSAVED PREVIEW CHANGES" }),
+        el("span", { cls: "muted", style: "font-size: 12px;", text: "Run in terminal to write to charter.md & profile.json:" })
+      ]),
+      el("code", { style: "flex: 1; min-width: 240px; padding: 5px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; font-family: var(--mono); font-size: 12px; overflow-x: auto;", text: stagedCmd }),
+      el("div", { style: "display: flex; gap: 6px;" }, [
+        el("button", {
+          cls: "cmd-btn primary",
+          text: "⧉ Copy CLI Command",
+          on: { click: function (e) {
+            copyText(stagedCmd);
+            e.target.textContent = "✓ Copied!";
+            setTimeout(function () { e.target.textContent = "⧉ Copy CLI Command"; }, 1800);
+          } }
+        }),
+        el("button", {
+          cls: "cmd-btn",
+          text: "Reset Preview",
+          on: { click: function () {
+            STAGED_KIT = { config: {}, fixes: [] };
+            M.kit = JSON.parse(JSON.stringify(INITIAL_KIT || {}));
+            paintMeta();
+            render();
+          } }
+        })
+      ])
+    ]));
+  }
+
+  // ---------------------------------------------------------------- read state
+  // Per item, the newest event date you have looked at. Kept in this browser only; a
+  // first visit marks everything read, so only what changes afterwards shows as new.
+  var SEEN_KEY = "nuhut-seen:" + (M.project || "project");
+  var SEEN = null;
+  function itemLatest(id) {
+    var it = ITEMS[id], best = "";
+    ((it && it.thread) || []).forEach(function (ev) {
+      var d = ev.time || ev.date || "";
+      if (d > best) best = d;
+    });
+    return best;
+  }
+  function loadSeen() {
+    if (SEEN) return SEEN;
+    var raw = null;
+    try { raw = localStorage.getItem(SEEN_KEY); } catch (e) {}
+    try { SEEN = raw ? JSON.parse(raw) : null; } catch (e) { SEEN = null; }
+    if (!SEEN || typeof SEEN !== "object") {
+      SEEN = {};
+      (M.order || []).forEach(function (id) { SEEN[id] = itemLatest(id); });
+      saveSeen();
+    }
+    return SEEN;
+  }
+  function saveSeen() {
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify(SEEN || {})); } catch (e) {}
+  }
+  function isUnread(id) {
+    var latest = itemLatest(id);
+    if (!latest) return false;
+    var seen = loadSeen()[id];
+    return seen === undefined ? true : latest > seen;
+  }
+  function markSeen(id) {
+    if (!ITEMS[id]) return;
+    loadSeen()[id] = itemLatest(id);
+    saveSeen();
+  }
+  function markAllSeen() {
+    loadSeen();
+    (M.order || []).forEach(function (id) { SEEN[id] = itemLatest(id); });
+    saveSeen();
+    paintActivityBar();
+  }
+  function unreadIds() {
+    return (M.order || []).filter(isUnread);
+  }
+
+  // ---------------------------------------------------------------- notifications
+  // A live redraw diffs the old model against the new one; what changed lands here and
+  // in the bell. Only high-signal changes also raise a toast.
+  var NOTES = [];
+  try { NOTES = JSON.parse(sessionStorage.getItem("nuhut-notes") || "[]") || []; } catch (e) { NOTES = []; }
+  function saveNotes() {
+    try { sessionStorage.setItem("nuhut-notes", JSON.stringify(NOTES.slice(0, 100))); } catch (e) {}
+  }
+  function pushNote(note, toast) {
+    note.t = new Date().toISOString();
+    note.seen = false;
+    NOTES.unshift(note);
+    if (NOTES.length > 100) NOTES.length = 100;
+    saveNotes();
+    if (toast) showToast(note.title, note.detail || "");
+  }
+  function unseenNotes() {
+    return NOTES.filter(function (n) { return !n.seen; }).length;
+  }
+  function lastStageResults(runs) {
+    var last = (runs || [])[runs.length - 1];
+    if (!last) return null;
+    var fails = last.stages.filter(function (s) { return /fail/i.test(s.result || ""); }).map(function (s) { return s.stage; });
+    return { run: last, fails: fails };
+  }
+  function diffModels(prev, next) {
+    if (!prev || !next) return;
+    var prevItems = prev.items || {}, nextItems = next.items || {};
+    Object.keys(nextItems).forEach(function (id) {
+      var a = prevItems[id], b = nextItems[id];
+      if (!a) {
+        pushNote({ level: "info", title: id + " added", detail: b.title || "", item: id });
+        return;
+      }
+      if (a.column !== b.column) {
+        pushNote({ level: b.column === "Blocked" ? "warn" : (b.column === "Done" ? "ok" : "info"),
+          title: id + " moved " + a.column + " → " + b.column, detail: b.title || "", item: id },
+          b.column === "Blocked" || b.column === "Parked");
+      }
+      var seenKinds = {};
+      (a.thread || []).forEach(function (ev) { seenKinds[ev.kind + "|" + (ev.sha || ev.path || ev.time || ev.title || ev.date)] = 1; });
+      (b.thread || []).forEach(function (ev) {
+        var key = ev.kind + "|" + (ev.sha || ev.path || ev.time || ev.title || ev.date);
+        if (seenKinds[key] || ev.kind === "frame" || ev.kind === "gate") return;
+        pushNote({ level: ev.kind === "verify" && (ev.stages || []).some(function (s) { return /fail/i.test(s.result || ""); }) ? "bad" : "info",
+          title: id + " · " + threadKindLabel(ev.kind), detail: ev.subject || ev.title || "", item: id });
+      });
+    });
+    var pr = (prev.evidence || []).length ? prev.evidence[prev.evidence.length - 1].folder : "";
+    var lr = lastStageResults(next.evidence || []);
+    if (lr && lr.run.folder !== pr) {
+      pushNote({ level: lr.fails.length ? "bad" : "ok", route: "cockpit",
+        title: lr.fails.length ? "Verify failed: " + lr.fails.join(", ") : "Verify passed",
+        detail: "Run " + lr.run.folder, log: { kind: "evidence", id: lr.run.folder, stage: lr.fails[0] || (lr.run.stages[0] || {}).stage } }, true);
+    }
+    var pf = (prev.alerts || []).filter(function (a) { return a.level === "fail"; }).length;
+    var nf = (next.alerts || []).filter(function (a) { return a.level === "fail"; }).length;
+    if (nf > pf) pushNote({ level: "bad", route: "cockpit", title: "Doctor: " + nf + " failing check(s)", detail: "was " + pf }, true);
+    else if (nf < pf) pushNote({ level: "ok", route: "cockpit", title: "Doctor: failing checks down to " + nf, detail: "was " + pf });
+  }
+  function threadKindLabel(kind) {
+    return ({ frame: "framed", plan: "plan", design_review: "design review", ship_review: "ship review",
+      commit: "commit", verify: "verify run", gate: "human gate", worklog: "worklog" })[kind] || kind.replace(/_/g, " ");
+  }
+  function openNote(n) {
+    n.seen = true;
+    saveNotes();
+    closeNotes();
+    if (n.log) openLogDrawer(n.log);
+    else if (n.item && ITEMS[n.item]) { markSeen(n.item); openItemDrawer(n.item); }
+    else if (n.route) go(n.route);
+    paintActivityBar();
+  }
+  var notesEl = document.getElementById("notes-pop");
+  function closeNotes() { if (notesEl) notesEl.className = "notes-pop"; }
+  function toggleNotes() {
+    if (!notesEl) return;
+    if (notesEl.classList.contains("open")) { closeNotes(); return; }
+    notesEl.textContent = "";
+    notesEl.appendChild(el("header", null, [
+      el("span", { text: "Notifications (" + NOTES.length + ")" }),
+      el("span", null, [
+        el("button", { cls: "btn", style: "font-size: 11px; padding: 1px 8px;", text: "Mark all read", on: { click: function () {
+          NOTES.forEach(function (n) { n.seen = true; });
+          saveNotes(); paintActivityBar(); closeNotes(); toggleNotes();
+        } } }),
+        el("button", { cls: "drawer-close", text: "✕", "aria-label": "Close notifications", on: { click: closeNotes } })
+      ])
+    ]));
+    if (!NOTES.length) {
+      notesEl.appendChild(el("div", { cls: "insp-empty", text: LIVE
+        ? "Nothing new yet. Changes to records, commits, verify runs and doctor findings appear here while the page is open."
+        : "Notifications need the live page: run python3 .ai-sdlc/bin/sdlc.py view --serve" }));
+    }
+    NOTES.forEach(function (n) {
+      var row = el("div", { cls: "note-row" + (n.seen ? "" : " unseen"), on: { click: function () { openNote(n); } } }, [
+        el("span", { cls: "note-ic " + (n.level || "info") }),
+        el("div", { style: "min-width: 0; flex: 1;" }, [
+          el("div", { text: n.title }),
+          n.detail ? el("div", { cls: "muted", style: "font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;", text: n.detail }) : null
+        ]),
+        el("span", { cls: "muted", style: "font-weight: 400; font-size: 11px;", text: (n.t || "").slice(11, 16) })
+      ]);
+      makeInteractive(row, function () { openNote(n); }, n.title);
+      notesEl.appendChild(row);
+    });
+    notesEl.className = "notes-pop open";
+  }
+
+  // ---------------------------------------------------------------- activity bar
+  var LAST_RUN = null;
+  function paintActivityBar() {
+    var bar = document.getElementById("activity-bar");
+    if (!bar) return;
+    bar.textContent = "";
+    function item(cls, text, title, onClick, kids) {
+      var b = el(onClick ? "button" : "span", { cls: "ab-item " + (cls || ""), title: title || "", on: onClick ? { click: onClick } : undefined }, kids || []);
+      if (text) b.appendChild(document.createTextNode(text));
+      return b;
+    }
+    if (LIVE) {
+      bar.appendChild(item(liveState === "live" ? "ok" : "bad", (liveState === "live" ? "Live · " : "Disconnected · ") + liveAt.toTimeString().slice(0, 8),
+        liveState === "live" ? "Following the records; last refreshed at this time" : "The local server stopped. Restart: sdlc.py view --serve",
+        null, [el("span", { cls: "dot " + liveState })]));
+    } else {
+      bar.appendChild(item("", "Snapshot " + (M.generated || ""), "A static export. Run sdlc.py view --serve for a live page.",
+        function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py view --serve", "Start Live Server"); }));
+    }
+    if (M.git_branch) bar.appendChild(item("", "⎇ " + M.git_branch + (M.git_head ? "@" + M.git_head : ""), "Open Git", function () { go("git"); }));
+    var lr = lastStageResults(M.evidence || []);
+    if (lr) {
+      bar.appendChild(item(lr.fails.length ? "bad" : "ok", lr.fails.length ? "✗ verify: " + lr.fails.join(", ") : "✓ verify",
+        "Latest verify run " + lr.run.folder + " — open the Cockpit", function () { go("cockpit/tests"); }));
+    }
+    var fails = (M.alerts || []).filter(function (a) { return a.level === "fail"; }).length;
+    var warns = (M.alerts || []).filter(function (a) { return a.level === "warn"; }).length;
+    bar.appendChild(item(fails ? "bad" : (warns ? "warn" : "ok"), "doctor " + (fails ? fails + " fail" : (warns ? warns + " warn" : "ok")),
+      "sdlc.py doctor findings — open the Cockpit", function () { go("cockpit/doctor"); }));
+    var waiting = (M.order || []).filter(function (id) { return ITEMS[id].column === "Blocked" || ITEMS[id].column === "Parked"; }).length;
+    if (waiting) bar.appendChild(item("warn", "⏸ " + waiting + " waiting", "Items blocked or parked — open Blockages", function () { go("waiting"); }));
+    if (TERMINAL_STATE.running) {
+      bar.appendChild(item("", " running " + clip(TERMINAL_STATE.cmd.replace(/^python3 \.ai-sdlc\/bin\/sdlc\.py /, ""), 40), TERMINAL_STATE.cmd, null, [el("span", { cls: "ab-spin" })]));
+    } else if (LAST_RUN) {
+      bar.appendChild(item(LAST_RUN.exit_code === 0 ? "ok" : "bad",
+        (LAST_RUN.exit_code === 0 ? "✓ " : "✗ ") + LAST_RUN.label + " · " + (LAST_RUN.seconds || 0) + "s",
+        "Last command run from this page — open its log", function () {
+          if (LAST_RUN.run_id) openLogDrawer({ kind: "run", id: LAST_RUN.run_id, title: LAST_RUN.label });
+          else go("cockpit/runs");
+        }));
+    }
+    bar.appendChild(el("span", { cls: "ab-spacer" }));
+    var un = unreadIds().length;
+    bar.appendChild(item("", un ? un + " unread" : "all read", "Items with activity you have not opened — open the Inbox feed",
+      function () { THREAD_STATE.mode = "feed"; THREAD_STATE.feedUnread = !!un; go("threads"); }, un ? [el("span", { cls: "unread-dot" })] : []));
+    var bellSvg = svgEl("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" });
+    bellSvg.appendChild(svgEl("path", { d: "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" }));
+    bellSvg.appendChild(svgEl("path", { d: "M10.3 21a1.94 1.94 0 0 0 3.4 0" }));
+    var bell = item("", "", "Notifications (n)", toggleNotes, [bellSvg]);
+    bell.setAttribute("aria-label", "Notifications, " + unseenNotes() + " new");
+    var cnt = unseenNotes();
+    if (cnt) bell.appendChild(el("span", { cls: "ab-badge", text: cnt > 99 ? "99+" : String(cnt) }));
+    bar.appendChild(bell);
+  }
+
+  // ---------------------------------------------------------------- logs
+  // Evidence stage logs and kept runs are read from the live server on demand; a static
+  // export has no server to ask, so it says how to get one.
+  var LOG_CACHE = {};
+  function logKey(log) { return log.kind + ":" + log.id + ":" + (log.stage || ""); }
+  function fetchLog(log, cb) {
+    var key = logKey(log);
+    if (LOG_CACHE[key] !== undefined) { cb(LOG_CACHE[key], true); return; }
+    if (!LIVE) { cb(null, false); return; }
+    var url = "api/log?kind=" + encodeURIComponent(log.kind) + "&id=" + encodeURIComponent(log.id) +
+      (log.stage ? "&stage=" + encodeURIComponent(log.stage) : "");
+    fetch(url, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error(r.status);
+      return r.text();
+    }).then(function (t) { LOG_CACHE[key] = t; cb(t, true); }).catch(function () { cb(null, true); });
+  }
+  function evidenceRun(id) {
+    return (M.evidence || []).filter(function (r) { return r.folder === id; })[0];
+  }
+  function savedRun(id) {
+    return (M.runs || []).filter(function (r) { return r.id === id; })[0];
+  }
+  function stageOk(result) { return /pass/i.test(result || ""); }
+  function stageBad(result) { return /fail/i.test(result || ""); }
+  function openLogDrawer(log) {
+    setInspect({ kind: "log", id: logKey(log), log: log });
+    var container = el("div", { style: "display: flex; flex-direction: column; height: 100%;" });
+    var title = log.title || (log.kind === "evidence" ? "Verify " + log.id : "Run " + log.id);
+    container.appendChild(el("div", { cls: "drawer-header" }, [
+      el("div", { style: "display: flex; align-items: baseline; gap: 8px; min-width: 0;" }, [
+        el("strong", { style: "font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;", text: title })
+      ]),
+      el("button", { cls: "drawer-close", "aria-label": "Close log", text: "✕", on: { click: closeDrawer } })
+    ]));
+    var body = el("div", { cls: "drawer-body" });
+    container.appendChild(body);
+    var pre = el("pre", { cls: "log-pre", text: "Loading…" });
+    if (log.kind === "evidence") {
+      var run = evidenceRun(log.id);
+      if (run) {
+        body.appendChild(el("div", { cls: "muted", style: "font-size: 12px; margin-bottom: 8px;",
+          text: (run.generated || "") + (run.git_head ? " · " + run.git_head : "") + (run.dirty ? " · uncommitted changes" : "") }));
+        var stages = el("div", { style: "display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px;" });
+        run.stages.forEach(function (st) {
+          if (!/^(Verified|Not run)/.test(st.result || "")) return;
+          var on = st.stage === log.stage;
+          stages.appendChild(el("button", {
+            cls: "chip", style: "cursor: pointer; border: 1px solid " + (on ? "var(--link)" : "transparent") + "; " +
+              (stageBad(st.result) ? "background: var(--badbg); color: var(--bad);" : (stageOk(st.result) ? "background: var(--okbg);" : "")),
+            title: st.result + (st.seconds !== undefined && st.seconds !== null ? " · " + fmtDur(st.seconds) : ""),
+            text: (stageBad(st.result) ? "✗ " : (stageOk(st.result) ? "✓ " : "· ")) + st.stage + (st.seconds ? " " + fmtDur(st.seconds) : ""),
+            on: { click: function () { INSPECT = null; openLogDrawer({ kind: "evidence", id: log.id, stage: st.stage, title: log.title }); } }
+          }));
+        });
+        body.appendChild(stages);
+      }
+    } else {
+      var sr = savedRun(log.id);
+      if (sr) {
+        body.appendChild(el("div", { style: "display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; font-size: 12px;" }, [
+          el("span", { cls: "stamp " + (sr.exit_code === 0 ? "ok" : "bad"), text: "exit " + sr.exit_code }),
+          el("span", { cls: "chip", text: fmtDur(sr.seconds || 0) }),
+          el("span", { cls: "chip", text: (sr.generated || "").replace("T", " ").replace("Z", "") }),
+          el("code", { style: "font-size: 11px;", text: "sdlc.py " + sr.sub + " " + (sr.args || []).join(" ") })
+        ]));
+      }
+    }
+    body.appendChild(pre);
+    openDrawer(container, { quiet: true });
+    if (log.kind === "evidence" && !log.stage) { pre.textContent = "Pick a stage above to read its log."; return; }
+    fetchLog(log, function (text, live) {
+      if (text === null) {
+        pre.textContent = live ? "No log kept for this " + (log.kind === "evidence" ? "stage" : "run") + "."
+          : "Logs are read from the live server. Run: python3 .ai-sdlc/bin/sdlc.py view --serve";
+        return;
+      }
+      pre.textContent = text || "(empty)";
+      pre.scrollTop = pre.scrollHeight;
+    });
+  }
+
+  // One doctor finding with its full advice, beside the list it came from.
+  function openFindingDrawer(a) {
+    setInspect({ kind: "finding", id: a.check + "|" + a.where + "|" + a.message.slice(0, 40), a: a });
+    var box = el("div", { style: "display: flex; flex-direction: column; height: 100%;" }, [
+      el("div", { cls: "drawer-header" }, [
+        el("div", { style: "display: flex; align-items: baseline; gap: 8px; min-width: 0;" }, [
+          el("span", { cls: "stamp " + (a.level === "fail" ? "bad" : (a.level === "warn" ? "warn" : "")), text: a.level }),
+          el("strong", { text: "Doctor · " + a.check })
+        ]),
+        el("button", { cls: "drawer-close", "aria-label": "Close finding", text: "✕", on: { click: closeDrawer } })
+      ]),
+      el("div", { cls: "drawer-body" }, [
+        a.where ? el("p", { style: "font-family: var(--mono); font-size: 12px; margin-top: 0;" }, [inline(a.where)]) : null,
+        el("div", { style: "font-size: 14px; line-height: 1.55; max-width: 65ch;" }, [inline(a.message)]),
+        el("p", { cls: "muted", style: "font-size: 12px; margin-top: 16px;" }, ["Re-check after fixing: ", el("code", { text: "python3 .ai-sdlc/bin/sdlc.py doctor" })])
+      ])
+    ]);
+    openDrawer(box, { quiet: true });
+  }
+
+  // ---------------------------------------------------------------- cockpit
+  function sparkline(values, opts) {
+    opts = opts || {};
+    var W = opts.w || 120, H = opts.h || 26;
+    var svg = svgEl("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img",
+      "aria-label": opts.label || (values && values.length > 1 ? "Trend over " + values.length + " points, from " + values[0] + " to " + values[values.length - 1] : "Not enough history for a trend") });
+    if (!values || values.length < 2) return svg;
+    var max = Math.max.apply(null, values.concat([opts.max || 0])), min = Math.min.apply(null, values.concat([opts.min === undefined ? max : opts.min]));
+    if (max === min) max = min + 1;
+    var pts = values.map(function (v, i) {
+      return (2 + (W - 4) * i / (values.length - 1)).toFixed(1) + "," + (H - 2 - (H - 4) * (v - min) / (max - min)).toFixed(1);
+    });
+    svg.appendChild(svgEl("polyline", { points: pts.join(" "), fill: "none", stroke: opts.color || "var(--link)", "stroke-width": "1.6", "stroke-linejoin": "round" }));
+    var last = pts[pts.length - 1].split(",");
+    svg.appendChild(svgEl("circle", { cx: last[0], cy: last[1], r: "2.2", fill: opts.color || "var(--link)" }));
+    return svg;
+  }
+  function metricValue(name) {
+    var m = (M.metrics || []).filter(function (x) { return x.name.toLowerCase().indexOf(name.toLowerCase()) >= 0; })[0];
+    return m || null;
+  }
+  function kpi(label, value, tone, spark, tip, route, sub) {
+    var k = el("div", { cls: "kpi " + (tone || "") + (route ? " link" : ""), title: tip || "" }, [
+      el("div", { cls: "k-label", text: label }),
+      el("div", { cls: "k-val", text: value }),
+      sub ? el("div", { cls: "k-sub", text: sub }) : null,
+      spark || null
+    ]);
+    if (route) makeInteractive(k, function () { go(route); }, label + ": " + value);
+    if (route) k.addEventListener("click", function () { go(route); });
+    return k;
+  }
+  function ckCard(id, title, sowhat, kids, extraCls, action) {
+    return el("section", { cls: "ck-card " + (extraCls || ""), id: "ck-" + id, "aria-labelledby": "ck-h-" + id }, [
+      el("h2", { id: "ck-h-" + id }, [el("span", { text: title }), action || null]),
+      sowhat ? el("p", { cls: "sowhat", text: sowhat }) : null
+    ].concat(kids));
+  }
+  function hbars(rows, max) {
+    var box = el("div");
+    max = max || Math.max.apply(null, rows.map(function (r) { return r[1]; }).concat([1]));
+    rows.forEach(function (r) {
+      box.appendChild(el("div", { cls: "hbar", title: r[0] + ": " + r[1] + (r[3] ? " — " + r[3] : "") }, [
+        el("span", { style: "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;", text: r[0] }),
+        el("div", { cls: "track" }, [el("div", { cls: "fill", style: "width: " + Math.round(100 * r[1] / max) + "%;" + (r[2] ? " background: " + r[2] + ";" : "") })]),
+        el("span", { cls: "muted", style: "text-align: right;", text: String(r[1]) })
+      ]));
+    });
+    return box;
+  }
+  function viewCockpit(section) {
+    tab("cockpit");
+    crumbs([[M.project || "Project", "threads"], ["Cockpit"]]);
+    var counts = {};
+    M.order.forEach(function (id) { var c = ITEMS[id].column; counts[c] = (counts[c] || 0) + 1; });
+    var ev = M.evidence || [], runs = M.runs || [];
+    var lr = lastStageResults(ev);
+    var fails = M.alerts.filter(function (a) { return a.level === "fail"; });
+    var warns = M.alerts.filter(function (a) { return a.level === "warn"; });
+
+    var waitingIds = M.order.filter(function (id) { return ITEMS[id].column === "Blocked" || ITEMS[id].column === "Parked"; });
+    main.appendChild(el("div", { cls: "view-header" }, [
+      el("div", null, [
+        el("h1", { text: "Cockpit" }),
+        el("p", { cls: "view-subtitle", text: "What needs a decision first, then how the project is moving." })
+      ]),
+      el("div", { cls: "view-header-actions" }, [
+        LIVE && M.action_token ? el("button", { cls: "btn", text: "Run verify", title: "python3 .ai-sdlc/bin/sdlc.py verify --parallel", on: { click: function () {
+          runKitCmd({ subcommand: "verify" }, "python3 .ai-sdlc/bin/sdlc.py verify --parallel", "verify");
+        } } }) : null,
+        LIVE && M.action_token ? el("button", { cls: "btn", text: "Run doctor", title: "python3 .ai-sdlc/bin/sdlc.py doctor", on: { click: function () {
+          runKitCmd({ subcommand: "doctor" }, "python3 .ai-sdlc/bin/sdlc.py doctor", "doctor");
+        } } }) : el("button", { cls: "btn", text: "Copy doctor command", on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py doctor", "doctor"); } } })
+      ])
+    ]));
+
+    var grid = el("div", { cls: "cockpit" });
+    main.appendChild(grid);
+
+    // 1. Needs you: every row is a decision or a fix, and opens what it names.
+    var needs = el("div", { cls: "needs", role: "list", "aria-label": "Needs you" });
+    function needRow(tone, kind, title, detail, onOpen, aside) {
+      var r = el("div", { cls: "needs-row " + tone, role: "listitem" }, [
+        el("span", { cls: "nr-kind", text: kind }),
+        el("div", { cls: "nr-what" }, [el("div", { text: title }), detail ? el("div", { text: detail }) : null]),
+        aside ? el("span", { cls: "muted", style: "font-size: 12px;", text: aside }) : null
+      ]);
+      r.addEventListener("click", onOpen);
+      makeInteractive(r, onOpen, kind + ": " + title);
+      needs.appendChild(r);
+    }
+    if (lr && lr.fails.length) {
+      needRow("bad", "Verify", "Latest verify run failed " + lr.fails.join(", "), "Run " + lr.run.folder + (lr.run.dirty ? " · uncommitted changes" : ""),
+        function () { openLogDrawer({ kind: "evidence", id: lr.run.folder, stage: lr.fails[0], title: "Verify " + lr.run.folder }); }, "read log");
+    }
+    fails.forEach(function (a) {
+      needRow("bad", "Doctor", a.message.split(/[.;]/)[0], a.check + (a.where ? " · " + a.where : ""), function () { openFindingDrawer(a); }, "fix");
+    });
+    waitingIds.forEach(function (id) {
+      var it = ITEMS[id], x = it.extra || {};
+      var who = x["Waiting on whom"] || x["Unblocked by"] || "";
+      needRow("warn", it.column, id + " " + clip(it.title || "", 80), (who ? "Waiting on " + who : "No one named to unblock it") + (x["Decision needed"] ? " · " + x["Decision needed"] : ""),
+        function () { markSeen(id); openItemDrawer(id); }, x.Since ? "since " + x.Since : "");
+    });
+    if (!needs.children.length) needs.appendChild(el("div", { cls: "needs-clear", text: "Nothing needs you. Verify passed, doctor has no failures, nothing is blocked." }));
+    var needsCount = needs.querySelectorAll(".needs-row").length;
+    grid.appendChild(ckCard("needs", "Needs you" + (needsCount ? " (" + needsCount + ")" : ""), null, [needs], "wide"));
+
+    // 2. Health: secondary, each number says what it covers.
+    var passSeries = ev.map(function (r) {
+      var rs = r.stages.filter(function (s) { return /^Verified/.test(s.result || ""); });
+      return rs.length ? Math.round(100 * rs.filter(function (s) { return stageOk(s.result); }).length / rs.length) : 0;
+    });
+    var cleanRuns = ev.filter(function (r) { return !r.stages.some(function (s) { return stageBad(s.result); }); }).length;
+    var flowS = (M.flow && M.flow.series) || {};
+    var lim = (M.kit && M.kit.constraints && +M.kit.constraints.wip_limit) || 0;
+    var findings = M.alerts.length;
+    var kpis = el("div", { cls: "kpis secondary" }, [
+      kpi("Last verify", lr ? (lr.fails.length ? "fail" : "pass") : "none", lr ? (lr.fails.length ? "bad" : "ok") : "",
+        sparkline(passSeries, { min: 0, max: 100, color: "var(--accent)", label: "Share of stages passing per run, last " + passSeries.length + " runs" }),
+        "Latest run's result; the line is the share of stages passing in each run", "cockpit/tests",
+        ev.length ? cleanRuns + " of " + ev.length + " runs clean" : ""),
+      kpi("Done", String(counts.Done || 0), "", sparkline(flowS.Done || [], { min: 0, label: "Done items over committed days" }),
+        "Items in Done; the line is Done over committed days", "board", "throughput over time"),
+      kpi("In flight", String(counts.Now || 0) + (lim ? "/" + lim : ""), lim && (counts.Now || 0) > lim ? "warn" : "",
+        sparkline(flowS.Now || [], { min: 0, label: "In-flight items over committed days" }), "Items In progress or In review", "board", lim ? "limit " + lim : "no WIP limit set"),
+      M.git && M.git.stats && M.git.stats.total ? kpi("Traceability", M.git.stats.rate + "%", M.git.stats.rate >= 80 ? "ok" : "warn", null,
+        "Commits that name a work item", "git", M.git.stats.linked + " of " + M.git.stats.total + " commits") : null,
+      kpi("Doctor", fails.length ? plural(fails.length, "fail") : (warns.length ? plural(warns.length, "warning") : "clean"), fails.length ? "bad" : (warns.length ? "warn" : "ok"),
+        null, "sdlc.py doctor findings, counted one per finding", "cockpit/doctor", plural(findings, "finding") + " in total")
+    ]);
+    grid.appendChild(ckCard("status", "Health", null, [kpis], "wide"));
+
+    // 2. Flow
+    var cycle = metricValue("cycle") || metricValue("lead");
+    grid.appendChild(ckCard("flow", "Flow",
+      "Items per column over committed days. A widening Now band with a flat Done band means work is starting faster than it finishes." +
+        (cycle ? " " + cycle.name + ": " + cycle.value + "." : ""),
+      [drawFlowChart(M.flow)], "wide", link("Board ↗", "board", "chip")));
+
+    // 3. Tests & verify
+    var testsKids = [];
+    if (ev.length) {
+      var gridSvg = drawVerifyGrid(ev);
+      gridSvg.style.cursor = "pointer";
+      gridSvg.title = "Click a run for its logs";
+      testsKids.push(gridSvg);
+      var durTable = el("table", { style: "margin-top: 10px; font-size: 12px;" }, [el("tr", null, ["Stage", "Last result", "Took", "Duration trend"].map(function (x) { return el("th", { text: x }); }))]);
+      var stageNames = [];
+      ev.forEach(function (r) { r.stages.forEach(function (s) { if (stageNames.indexOf(s.stage) < 0 && /^(Verified|Not run)/.test(s.result || "")) stageNames.push(s.stage); }); });
+      stageNames.forEach(function (st) {
+        var secs = ev.map(function (r) { var x = r.stages.filter(function (s) { return s.stage === st; })[0]; return x && x.seconds ? x.seconds : null; }).filter(function (v) { return v !== null; });
+        var lastRun = null, lastStage = null;
+        for (var i = ev.length - 1; i >= 0 && !lastStage; i--) {
+          lastStage = ev[i].stages.filter(function (s) { return s.stage === st && /^(Verified|Not run)/.test(s.result || ""); })[0] || null;
+          if (lastStage) lastRun = ev[i];
+        }
+        var row = el("tr", { style: "cursor: pointer;" }, [
+          el("td", null, [el("strong", { text: st })]),
+          el("td", null, [el("span", { cls: "stamp " + (stageBad(lastStage && lastStage.result) ? "bad" : (stageOk(lastStage && lastStage.result) ? "ok" : "warn")), text: (lastStage && lastStage.result || "").replace(/^Verified: /, "") })]),
+          el("td", { cls: "muted", text: secs.length ? fmtDur(secs[secs.length - 1]) : "—" }),
+          el("td", null, [sparkline(secs, { w: 90, h: 18, min: 0, label: st + " duration over " + secs.length + " runs, last " + fmtDur(secs[secs.length - 1]) })])
+        ]);
+        row.addEventListener("click", function () { if (lastRun) openLogDrawer({ kind: "evidence", id: lastRun.folder, stage: st, title: "Verify " + lastRun.folder }); });
+        durTable.appendChild(row);
+      });
+      testsKids.push(durTable);
+    } else {
+      testsKids.push(el("p", { cls: "muted", text: "No verify runs yet. Run python3 .ai-sdlc/bin/sdlc.py verify — results land in .ai-sdlc/evidence/." }));
+    }
+    grid.appendChild(ckCard("tests", "Tests & verify",
+      lr ? (lr.fails.length ? "The latest run failed " + lr.fails.join(", ") + ". Click a stage to read its log." : "The latest run passed every stage it ran.") : "",
+      testsKids));
+
+    // 4. Runs & logs
+    var allRuns = ev.map(function (r) {
+      var bad = r.stages.some(function (s) { return stageBad(s.result); });
+      var firstBad = r.stages.filter(function (s) { return stageBad(s.result); })[0];
+      return { when: r.generated || r.folder, ok: !bad, label: "verify", detail: (bad ? "failed " + r.stages.filter(function (s) { return stageBad(s.result); }).map(function (s) { return s.stage; }).join(", ") : plural(r.stages.filter(function (s) { return /^Verified/.test(s.result || ""); }).length, "stage") + " passed") + (r.dirty ? " · uncommitted changes" : ""),
+        log: { kind: "evidence", id: r.folder, stage: (firstBad || r.stages.filter(function (s) { return /^Verified/.test(s.result || ""); })[0] || {}).stage, title: "Verify " + r.folder } };
+    }).concat(runs.map(function (r) {
+      return { when: r.generated || r.id, ok: r.exit_code === 0, label: r.sub, detail: (r.args || []).join(" "), seconds: r.seconds,
+        log: { kind: "run", id: r.id, title: r.sub + " " + (r.args || []).join(" ") } };
+    }));
+    allRuns.sort(function (a, b) { return String(b.when).localeCompare(String(a.when)); });
+    var runList = el("div", { role: "list" });
+    allRuns.slice(0, 25).forEach(function (r) {
+      var row = el("div", { cls: "run-row" + (INSPECT && INSPECT.kind === "log" && INSPECT.log.id === r.log.id ? " sel" : ""), role: "listitem" }, [
+        el("span", { cls: "rr-dot " + (r.ok ? "ok" : "bad"), "aria-hidden": "true" }),
+        el("span", { style: "min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" }, [
+          el("span", { cls: "sr-only", text: r.ok ? "Passed: " : "Failed: " }),
+          el("strong", { text: r.label }), el("span", { cls: "muted", text: " " + r.detail })
+        ]),
+        el("span", { cls: "muted", text: r.seconds !== undefined && r.seconds !== null ? fmtDur(r.seconds) : "" }),
+        el("span", { cls: "muted", text: String(r.when).replace("T", " ").replace(/Z$/, "").slice(0, 16) })
+      ]);
+      row.addEventListener("click", function () { openLogDrawer(r.log); });
+      makeInteractive(row, function () { openLogDrawer(r.log); }, r.label + " run " + r.when);
+      runList.appendChild(row);
+    });
+    if (!allRuns.length) runList.appendChild(el("p", { cls: "muted", text: "No runs yet. Verify runs and commands started from this page are kept here." }));
+    grid.appendChild(ckCard("runs", "Runs & logs",
+      LIVE ? "Verify runs and the commands run from this page, newest first. Failed runs open on their failing stage." : "Logs are read from the live server; this static export lists runs only.",
+      [runList]));
+
+    // 5. Doctor: one line per finding, worst first; the full text opens in the inspector.
+    var docBox = el("div", { role: "list" });
+    M.alerts.slice().sort(function (a, b) {
+      var rank = { fail: 0, warn: 1 };
+      return (rank[a.level] === undefined ? 2 : rank[a.level]) - (rank[b.level] === undefined ? 2 : rank[b.level]) || a.check.localeCompare(b.check);
+    }).slice(0, 40).forEach(function (a) {
+      var line = el("div", { cls: "doc-line", role: "listitem", title: a.message }, [
+        el("span", { cls: "dl-lvl " + a.level, text: a.level }),
+        el("div", { style: "min-width: 0;" }, [
+          el("div", { cls: "dl-txt", text: a.message.split(/(?<=[.;])\s/)[0] }),
+          el("div", { cls: "dl-where dl-txt", text: a.check + (a.where ? " · " + a.where : "") })
+        ])
+      ]);
+      line.addEventListener("click", function () { openFindingDrawer(a); });
+      makeInteractive(line, function () { openFindingDrawer(a); }, a.level + " " + a.check + ": " + a.message);
+      docBox.appendChild(line);
+    });
+    if (M.alerts.length > 40) docBox.appendChild(el("p", { cls: "muted", style: "font-size: 12px;" }, [plural(M.alerts.length - 40, "more finding") + " on ", link("Kit & Control", "kit")]));
+    if (!M.alerts.length) docBox.appendChild(el("p", { cls: "muted", text: "Doctor found nothing to report." }));
+    grid.appendChild(ckCard("doctor", "Doctor",
+      fails.length ? plural(fails.length, "failing finding") + " block a clean ship; fix those first. " + plural(warns.length, "warning") + " don't block." : (warns.length ? plural(warns.length, "warning") + "; none block shipping." : "Every mechanical check passes."),
+      [docBox], "", link("Kit & Control ↗", "kit", "chip")));
+
+    // 6. Project stats
+    var colRows = ["Now", "Next", "Blocked", "Parked", "Later", "Done"].map(function (c) { return [c, counts[c] || 0, "var(--c-" + c + ")"]; });
+    var owners = {};
+    M.order.forEach(function (id) { var o = ownerOf(ITEMS[id]) || "No owner"; owners[o] = (owners[o] || 0) + 1; });
+    var ownerRows = Object.keys(owners).sort(function (a, b) { return owners[b] - owners[a]; }).slice(0, 8).map(function (o) { return [o, owners[o]]; });
+    var epicRows = (M.epics || []).map(function (ep) {
+      var ids = ep.items || [];
+      var done = ids.filter(function (id) { return ITEMS[id] && ITEMS[id].column === "Done"; }).length;
+      return [ep.name, done, "var(--accent)", done + " of " + ids.length + " done", ids.length];
+    });
+    var statsKids = [el("h3", { style: "margin-top: 4px;", text: "By column" }), hbars(colRows),
+      el("h3", { text: "By owner" }), hbars(ownerRows)];
+    if (epicRows.length) {
+      statsKids.push(el("h3", { text: "Epics (done of total)" }));
+      epicRows.forEach(function (r) { statsKids.push(hbars([[r[0], r[1], r[2], r[3]]], Math.max(1, r[4]))); });
+    }
+    if ((M.metrics || []).length) {
+      var mt = el("details", { cls: "banner" }, [el("summary", { text: "Process measures (" + M.metrics.length + ")" })]);
+      var tb = el("table", { style: "font-size: 12px;" }, [el("tr", null, ["Measure", "Kind", "Value", "From"].map(function (x) { return el("th", { text: x }); }))]);
+      M.metrics.forEach(function (m) {
+        tb.appendChild(el("tr", null, [el("td", { text: m.name }), el("td", { text: m.kind }), el("td", null, [inline(m.value)]), el("td", { cls: "muted", text: m.basis })]));
+      });
+      mt.appendChild(tb);
+      statsKids.push(mt);
+    }
+    if ((M.unread || []).length) {
+      var u = el("details", { cls: "banner" }, [el("summary", { text: plural(M.unread.length, "record") + " the view could not read" })]);
+      var ul = el("ul");
+      M.unread.forEach(function (x) { ul.appendChild(el("li", { text: x.path + " — " + x.reason })); });
+      u.appendChild(ul);
+      statsKids.push(u);
+    }
+    grid.appendChild(ckCard("stats", "Project stats", plural(M.order.length, "item") + ", " + plural(WL.length, "worklog entry", "worklog entries") + ", " + plural(((M.git && M.git.commits) || []).length, "commit") + ".", statsKids));
+
+    // 7. Since you looked
+    var since = el("div");
+    var recent = NOTES.slice(0, 8);
+    if (recent.length) {
+      recent.forEach(function (n) {
+        var row = el("div", { cls: "note-row" + (n.seen ? "" : " unseen"), style: "padding: 5px 4px;" }, [
+          el("span", { cls: "note-ic " + (n.level || "info") }),
+          el("div", { style: "flex: 1; min-width: 0;" }, [el("div", { text: n.title }), n.detail ? el("div", { cls: "muted", style: "font-weight: 400;", text: clip(n.detail, 90) }) : null]),
+          el("span", { cls: "muted", style: "font-size: 11px;", text: (n.t || "").slice(11, 16) })
+        ]);
+        row.addEventListener("click", function () { openNote(n); });
+        since.appendChild(row);
+      });
+    }
+    var un = unreadIds();
+    if (un.length) {
+      since.appendChild(el("p", { style: "font-size: 12px; margin: 8px 0 0;" }, [
+        el("strong", { text: plural(un.length, "item") + " with unread activity: " })
+      ].concat(un.slice(0, 10).map(function (id, i) { return el("span", null, [i ? ", " : "", itemLink(id)]); }))));
+    }
+    if (recent.length || un.length) grid.appendChild(ckCard("since", "Since you looked", null, [since]));
+
+    // 8. The radial map of epics, items and records keeps its own page.
+    grid.appendChild(ckCard("map", "Project map", "Epics, backlog stages, dependencies and records as one radial graph.",
+      [el("button", { cls: "btn", text: "Open the map ↗", on: { click: function () { go("map"); } } })]));
+
+    if (section) {
+      var target = document.getElementById("ck-" + section);
+      if (target) setTimeout(function () { target.scrollIntoView({ block: "start" }); target.style.outline = "2px solid var(--link)"; setTimeout(function () { target.style.outline = ""; }, 1200); }, 30);
+    }
+  }
+
   function paintMeta() {
     document.getElementById("pname").textContent = M.project || "Nuhut";
-    document.title = (M.project || "Project") + " — Nuhut view";
+    document.title = (M.project || "Project") + " — Nuhut Command Center";
+    var totalItems = (M.order && M.order.length) || 0;
+    var waitingCount = (M.order || []).filter(function (id) {
+      return ITEMS[id] && (ITEMS[id].column === "Blocked" || ITEMS[id].column === "Parked");
+    }).length;
+    var commitCount = (M.git && M.git.commits && M.git.commits.length) || 0;
+    var docCount = (DOCS && DOCS.length) || 0;
+    var wlCount = (WL && WL.length) || 0;
+
+    var tThreads = document.getElementById("tab-threads");
+    var unreadCount = unreadIds().length;
+    if (tThreads) tThreads.textContent = "Inbox" + (unreadCount ? " (" + unreadCount + ")" : "");
+    var tBoard = document.getElementById("tab-board");
+    if (tBoard) tBoard.textContent = "Board" + (totalItems ? " (" + totalItems + ")" : "");
+    var tWaiting = document.getElementById("tab-waiting");
+    if (tWaiting) tWaiting.textContent = "Blockages" + (waitingCount ? " (" + waitingCount + ")" : "");
+    var tCk = document.getElementById("tab-cockpit");
+    var ckFails = (M.alerts || []).filter(function (a) { return a.level === "fail"; }).length;
+    var ckVerify = lastStageResults(M.evidence || []);
+    var ckNeeds = ckFails + (ckVerify && ckVerify.fails.length ? 1 : 0) + waitingCount;
+    if (tCk) {
+      tCk.textContent = "Cockpit" + (ckNeeds ? " (" + ckNeeds + ")" : "");
+      tCk.title = ckNeeds ? plural(ckNeeds, "thing") + " waiting on you" : "Nothing waiting on you";
+    }
+    var tGit = document.getElementById("tab-git");
+    if (tGit) tGit.textContent = "Git" + (commitCount ? " (" + commitCount + ")" : "");
+    var tDocs = document.getElementById("tab-docs");
+    if (tDocs) tDocs.textContent = "Documents" + (docCount ? " (" + docCount + ")" : "");
     var kitTab = document.getElementById("tab-kit");
     if (kitTab && M.kit) {
       var fixCount = (M.kit.fixable && M.kit.fixable.filter(function (f) { return f.level !== "info"; }).length) || 0;
@@ -934,22 +1939,19 @@
     meta.textContent = "";
     var gitRef = M.git_head ? (M.git_branch ? M.git_branch + "@" : "") + M.git_head : "";
     if (!LIVE) {
-      meta.textContent = "generated " + M.generated + (gitRef ? " at " + gitRef : "") +
-        " · re-run sdlc.py view to refresh";
-    } else {
-      var dot = el("span", { cls: "dot " + liveState });
-      var when = liveAt.toTimeString().slice(0, 8);
-      meta.appendChild(dot);
-      meta.appendChild(document.createTextNode(liveState === "live"
-        ? "Live · updated " + when + (gitRef ? " at " + gitRef : "")
-        : "Disconnected · showing data from " + when + " · restart sdlc.py view --serve"));
+      meta.appendChild(el("button", {
+        text: "⚡ Start Live Server",
+        title: "Copy `python3 .ai-sdlc/bin/sdlc.py view --serve` to run live command center",
+        style: "margin-left: 6px; padding: 2px 8px; font-size: 11px;",
+        on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py view --serve", "Start Live Server"); } }
+      }));
     }
     var cur = document.documentElement.getAttribute("data-theme");
     var isDark = cur === "dark" || (!cur && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
     meta.appendChild(el("button", {
       text: isDark ? "Theme: Light" : "Theme: Dark",
       title: "Switch Light/Dark theme (T)",
-      style: "margin-left: 8px; padding: 2px 8px; font-size: 11px;",
+      style: "margin-left: 6px; padding: 2px 8px; font-size: 11px;",
       on: { click: toggleTheme }
     }));
     meta.appendChild(el("button", {
@@ -965,6 +1967,9 @@
       style: "margin-left: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600;",
       on: { click: function () { if (typeof openShortcutsModal === "function") openShortcutsModal(); } }
     }));
+    paintContextBar();
+    paintGlobalStagingBar();
+    paintActivityBar();
   }
   paintMeta();
   var q = document.getElementById("q");
@@ -1440,42 +2445,143 @@
     lastFocusedEl = null;
   }
 
+  // On wide screens the drawer docks: it sits beside the page as a non-modal inspector,
+  // so a list or board stays usable while it follows the selection. Narrow screens keep
+  // the modal slide-over.
+  var DOCK_MIN = 1100;
+  var INSPECT = null;          // what the inspector shows: {kind, id, ...}
+  var INSPECT_STACK = [];      // earlier inspector contents, for the back button
+  function wide() { return window.innerWidth >= DOCK_MIN; }
+  function isDocked() { return drawerEl && drawerEl.classList.contains("docked") && drawerEl.classList.contains("open"); }
+  (function () {
+    var w = 0;
+    try { w = +localStorage.getItem("nuhut-insp-w") || 0; } catch (e) {}
+    if (w >= 320) document.documentElement.style.setProperty("--insp-w", w + "px");
+  })();
+
   function closeDrawer() {
     var wasOpen = drawerEl && drawerEl.classList.contains("open");
+    var wasDocked = isDocked();
     if (drawerEl) drawerEl.className = "drawer";
     if (backdropEl) backdropEl.className = "drawer-backdrop";
-    if (wasOpen) restoreLastFocus();
+    document.body.classList.remove("docked");
+    INSPECT = null; INSPECT_STACK = [];
+    markSelected();
+    if (wasOpen && !wasDocked) restoreLastFocus();
   }
   if (backdropEl) backdropEl.addEventListener("click", closeDrawer);
 
-  function openDrawer(content) {
+  function openDrawer(content, opts) {
     if (!drawerEl || !backdropEl) return;
-    if (!drawerEl.classList.contains("open")) lastFocusedEl = document.activeElement;
+    opts = opts || {};
+    var docked = wide();
+    if (!drawerEl.classList.contains("open") && !docked) lastFocusedEl = document.activeElement;
     drawerEl.textContent = "";
+    var grip = el("div", { cls: "insp-grip", title: "Drag to resize the inspector" });
+    grip.addEventListener("mousedown", startInspectorResize);
+    drawerEl.appendChild(grip);
+    if (docked && INSPECT_STACK.length) {
+      var hdr0 = content.querySelector && content.querySelector(".drawer-header > div");
+      if (hdr0) hdr0.insertBefore(el("button", { cls: "insp-back", text: "←", title: "Back", "aria-label": "Back to the previous inspector view",
+        on: { click: inspectBack } }), hdr0.firstChild);
+    }
     drawerEl.appendChild(content);
-    drawerEl.className = "drawer open";
-    backdropEl.className = "drawer-backdrop open";
+    drawerEl.className = "drawer open" + (docked ? " docked" : "");
+    if (docked) {
+      drawerEl.setAttribute("role", "complementary");
+      drawerEl.removeAttribute("aria-modal");
+      drawerEl.setAttribute("aria-label", "Inspector");
+      backdropEl.className = "drawer-backdrop";
+      document.body.classList.add("docked");
+    } else {
+      drawerEl.setAttribute("role", "dialog");
+      drawerEl.setAttribute("aria-modal", "true");
+      drawerEl.setAttribute("aria-label", "Inspector drawer");
+      backdropEl.className = "drawer-backdrop open";
+      document.body.classList.remove("docked");
+    }
+    markSelected();
+    if (docked || opts.quiet) return;
     var closeBtn = drawerEl.querySelector(".drawer-close");
     if (closeBtn) setTimeout(function () { closeBtn.focus(); }, 30);
   }
 
-  function openItemDrawer(id) {
+  // Remember what is shown, so a live redraw can refresh it and links inside it can
+  // stack with a back button.
+  function setInspect(next) {
+    if (isDocked() && INSPECT && !(INSPECT.kind === next.kind && INSPECT.id === next.id)) {
+      if (next.kind !== "item" || INSPECT.kind !== "item") INSPECT_STACK.push(INSPECT);
+      else INSPECT_STACK = [];
+      if (INSPECT_STACK.length > 12) INSPECT_STACK.shift();
+    }
+    INSPECT = next;
+  }
+  function reopenInspect(target, quiet) {
+    if (!target) return;
+    var keep = INSPECT_STACK;
+    INSPECT = null;
+    if (target.kind === "item") openItemDrawer(target.id, quiet);
+    else if (target.kind === "doc") openDocDrawer(target.id, target.route);
+    else if (target.kind === "commit") openCommitDrawer(target.c);
+    else if (target.kind === "log") openLogDrawer(target.log);
+    else if (target.kind === "finding") openFindingDrawer(target.a);
+    INSPECT_STACK = keep;
+  }
+  function inspectBack() {
+    var prev = INSPECT_STACK.pop();
+    if (prev) reopenInspect(prev, true);
+  }
+  // Rows and cards carrying data-inspect="<id>" light up while their item is inspected.
+  function markSelected() {
+    var cur = INSPECT && INSPECT.kind === "item" && isDocked() ? INSPECT.id : null;
+    [].forEach.call(document.querySelectorAll("[data-inspect]"), function (n) {
+      var on = n.getAttribute("data-inspect") === cur;
+      n.classList.toggle("kbd-sel", on);
+      if (n.hasAttribute("aria-selected") || on) n.setAttribute("aria-selected", on ? "true" : "false");
+    });
+  }
+  function startInspectorResize(e) {
+    if (!isDocked()) return;
+    e.preventDefault();
+    var grip = e.currentTarget;
+    grip.classList.add("drag");
+    function move(ev) {
+      var w = Math.max(320, Math.min(window.innerWidth * 0.6, window.innerWidth - ev.clientX));
+      document.documentElement.style.setProperty("--insp-w", Math.round(w) + "px");
+    }
+    function up() {
+      grip.classList.remove("drag");
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      var w = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--insp-w"), 10);
+      try { if (w) localStorage.setItem("nuhut-insp-w", String(w)); } catch (err) {}
+    }
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
+  window.addEventListener("resize", function () {
+    if (!drawerEl || !drawerEl.classList.contains("open")) return;
+    if (wide() !== isDocked()) reopenInspect(INSPECT, true);
+  });
+
+  function openItemDrawer(id, quiet) {
     var it = ITEMS[id];
     if (!it) return;
+    setInspect({ kind: "item", id: id });
     var container = el("div", { style: "display: flex; flex-direction: column; height: 100%;" });
 
     var hdr = el("div", { cls: "drawer-header" }, [
       el("div", { style: "display: flex; align-items: baseline; gap: 8px; min-width: 0;" }, [
         el("strong", { style: "font-size: 15px;", text: id }),
-        link("Open thread ↗", "threads/" + id, "chip"),
-        link("Open page ↗", "item/" + id, "chip")
+        link("Thread ↗", "threads/" + id, "chip"),
+        link("Full page ↗", "item/" + id, "chip")
       ]),
       el("button", { cls: "drawer-close", "aria-label": "Close inspector drawer", text: "✕", on: { click: closeDrawer } })
     ]);
     container.appendChild(hdr);
 
     var body = el("div", { cls: "drawer-body" });
-    body.appendChild(el("h2", { style: "margin-top: 0; font-size: 16px; text-transform: none; color: var(--text); font-weight: 600;", text: it.title || "(untitled)" }));
+    body.appendChild(el("h2", { cls: "insp-title", title: it.title || "", text: it.title || "(untitled)" }));
 
     var chips = el("div", { style: "margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 4px;" });
     chips.appendChild(colChip(it.column));
@@ -1490,6 +2596,73 @@
       steps.appendChild(el("span", { cls: "step " + (st === "n/a" ? "na" : st), text: s + (st === "missing" ? " ?" : "") }));
     });
     body.appendChild(steps);
+
+    // The same diagnosis the Inbox's command dock leads with.
+    var nextDiag = diagnoseNextAction(it);
+    var drawerNext = {
+      tone: nextDiag.kind === "warn" ? "warn" : (nextDiag.kind === "ok" ? "ok" : ""),
+      badge: nextDiag.kind === "warn" ? "Needs attention" : (nextDiag.kind === "ok" ? "On track" : "Next step"),
+      title: nextDiag.label,
+      why: nextDiag.desc || "",
+      cmd: nextDiag.cmd,
+      runSub: nextDiag.runPayload
+    };
+    var drawerActionBox = el("div", {
+      style: "margin-bottom: 12px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;"
+    }, [
+      el("div", { style: "display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;" }, [
+        el("span", { style: "font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted);", text: "Recommended Next Action" }),
+        el("span", { cls: "stamp " + (drawerNext.tone === "warn" ? "warn" : "ok"), text: drawerNext.badge })
+      ]),
+      el("div", { style: "font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 3px;", text: drawerNext.title }),
+      el("div", { cls: "muted", style: "font-size: 12px; margin-bottom: 8px;", text: drawerNext.why }),
+      el("div", { style: "padding: 6px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--text); overflow-x: auto; white-space: nowrap; margin-bottom: 8px;" }, [
+        el("span", { style: "color: var(--accent); font-weight: 700; margin-right: 6px;", text: "$" }),
+        el("span", { text: drawerNext.cmd })
+      ]),
+      el("div", { style: "display: flex; align-items: center; gap: 6px; flex-wrap: wrap;" }, [
+        LIVE && M.action_token && drawerNext.runSub ? el("button", {
+          cls: "btn primary",
+          style: "font-size: 11px; padding: 4px 10px;",
+          text: "▶ Run in Project",
+          on: { click: function () {
+            closeDrawer();
+            THREAD_STATE.selectedId = id;
+            THREAD_STATE.cmdTab = "recommended";
+            go("threads/" + id);
+            setTimeout(function () {
+              runKitCmd(drawerNext.runSub, drawerNext.cmd, nextDiag.label);
+            }, 60);
+          } }
+        }) : null,
+        el("button", {
+          cls: "btn" + (!(LIVE && M.action_token && drawerNext.runSub) ? " primary" : ""),
+          style: "font-size: 11px; padding: 4px 10px;",
+          text: "⧉ Copy CLI Command",
+          on: { click: function (ev) {
+            var b = ev.currentTarget;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(drawerNext.cmd).then(function () {
+                b.textContent = "✓ Copied!";
+                showKitToast("Copied: " + drawerNext.cmd, false);
+                setTimeout(function () { b.textContent = "⧉ Copy CLI Command"; }, 1800);
+              });
+            }
+          } }
+        }),
+        el("button", {
+          cls: "btn",
+          style: "font-size: 11px; padding: 4px 10px;",
+          text: "Thread ↗",
+          on: { click: function () {
+            closeDrawer();
+            THREAD_STATE.selectedId = id;
+            go("threads/" + id);
+          } }
+        })
+      ])
+    ]);
+    body.appendChild(drawerActionBox);
 
     var proof = el("div", { cls: "proof", style: "margin-bottom: 12px;" });
     if (it.author) proof.appendChild(el("div", null, [el("span", { cls: "muted", text: "Author: " }), it.author]));
@@ -1659,12 +2832,13 @@
     renderTabContent();
 
     container.appendChild(body);
-    openDrawer(container);
+    openDrawer(container, { quiet: quiet });
   }
 
   function openDocDrawer(fullPath, route) {
     var n = DOC_BY_PATH[fullPath.split("#")[0]];
     if (n === undefined) { go(route); return; }
+    setInspect({ kind: "doc", id: fullPath, route: route });
     var d = DOCS[n];
     var container = el("div", { style: "display: flex; flex-direction: column; height: 100%;" });
     var hdr = el("div", { cls: "drawer-header" }, [
@@ -1720,8 +2894,7 @@
     if (!shortcutsEl || !paletteBackdropEl) return;
     if (!shortcutsEl.classList.contains("open")) lastFocusedEl = document.activeElement;
     if (paletteEl) paletteEl.className = "palette";
-    if (drawerEl) drawerEl.className = "drawer";
-    if (backdropEl) backdropEl.className = "drawer-backdrop";
+    if (drawerEl && !isDocked()) { drawerEl.className = "drawer"; if (backdropEl) backdropEl.className = "drawer-backdrop"; }
     shortcutsEl.textContent = "";
 
     var closeBtn = el("button", { cls: "drawer-close", "aria-label": "Close keyboard shortcuts", text: "✕", on: { click: closeShortcutsModal } });
@@ -1733,11 +2906,16 @@
 
     var rows = [
       ["Cmd/Ctrl + K  or  /", "Open command & search palette"],
-      ["1 … 8", "Jump to tabs (1: Threads, 2: Map, 3: Board, 4: Activity, 5: Waiting, 6: Git, 7: Docs, 8: Kit)"],
-      ["j / k  or  ↑ / ↓", "Navigate items in Action Threads or Document Explorer"],
+      ["1 … 7", "Jump to tabs (1: Inbox, 2: Board, 3: Cockpit, 4: Blockages, 5: Git, 6: Docs, 7: Kit)"],
+      ["j / k  or  ↑ / ↓", "Move through the Inbox, Board cards or Documents; the inspector follows"],
+      ["h / l  or  ← / →", "Board: move between columns"],
+      ["o  or  Enter", "Open the selected item's page"],
+      ["]", "Show or hide the inspector"],
+      ["r", "Inbox: run (or copy) the selected thread's recommended command"],
+      ["n", "Notifications"],
       ["t", "Toggle Dark / Light theme"],
       ["?", "Show this shortcuts help"],
-      ["Esc", "Close palette, modal, or drawer"]
+      ["Esc", "Close palette, modal, notifications or inspector"]
     ];
 
     rows.forEach(function (r) {
@@ -1756,8 +2934,7 @@
     if (!paletteEl || !paletteBackdropEl) return;
     if (!paletteEl.classList.contains("open")) lastFocusedEl = document.activeElement;
     if (shortcutsEl) shortcutsEl.className = "shortcuts-modal";
-    if (drawerEl) drawerEl.className = "drawer";
-    if (backdropEl) backdropEl.className = "drawer-backdrop";
+    if (drawerEl && !isDocked()) { drawerEl.className = "drawer"; if (backdropEl) backdropEl.className = "drawer-backdrop"; }
     paletteEl.textContent = "";
     paletteSelectedIndex = 0;
 
@@ -1795,15 +2972,17 @@
       var items = [];
 
       var navActions = [
-        { label: "Go to Action Threads (Chat Stream)", hint: "Tab 1", run: function () { go("threads"); } },
-        { label: "Go to Kit & Control Panel (Constraints, Token Saver, Repair)", hint: "Tab 8", run: function () { go("kit"); } },
+        { label: "Go to Inbox (Action Threads & Activity Feed)", hint: "Tab 1", run: function () { go("threads"); } },
+        { label: "Go to Activity Feed (all events, newest first)", hint: "Inbox", run: function () { THREAD_STATE.mode = "feed"; go("threads"); } },
+        { label: "Go to Cockpit (Flow, Tests, Runs & Logs, Doctor, Stats)", hint: "Tab 3", run: function () { go("cockpit"); } },
+        { label: "Show Notifications", hint: "Key: N", run: function () { toggleNotes(); } },
+        { label: "Go to Kit & Control Panel (Constraints, Token Saver, Repair)", hint: "Tab 7", run: function () { go("kit"); } },
         { label: "Toggle Token-Saving Mode (Lean + Single-Agent + Compact)", hint: "Kit Control", run: function () { go("kit"); } },
-        { label: "Go to Project Map", hint: "Tab 2", run: function () { go("map"); } },
-        { label: "Go to Kanban Board", hint: "Tab 3", run: function () { go("board"); } },
-        { label: "Go to Activity Log", hint: "Tab 4", run: function () { go("activity"); } },
-        { label: "Go to Dependencies & Blockages Flow", hint: "Tab 5", run: function () { go("waiting"); } },
-        { label: "Go to Git Traceability", hint: "Tab 6", run: function () { go("git"); } },
-        { label: "Go to Documents", hint: "Tab 7", run: function () { go("docs"); } },
+        { label: "Go to Project Map", hint: "Cockpit", run: function () { go("map"); } },
+        { label: "Go to Kanban Board", hint: "Tab 2", run: function () { go("board"); } },
+        { label: "Go to Dependencies & Blockages Flow", hint: "Tab 4", run: function () { go("waiting"); } },
+        { label: "Go to Git Traceability", hint: "Tab 5", run: function () { go("git"); } },
+        { label: "Go to Documents", hint: "Tab 6", run: function () { go("docs"); } },
         { label: "View Dependencies & Blockages Map", hint: "Map Focus", run: function () { go("map"); setTimeout(function () { var b = document.querySelector('[data-p="blockages"]'); if (b) b.click(); }, 60); } },
         { label: "Toggle Theme (Dark / Light)", hint: "Key: T", run: function () { toggleTheme(); } },
         { label: "Export Standalone HTML", hint: "Action", run: function () { exportHtml(); } },
@@ -1985,7 +3164,7 @@
     if (e.key === "Tab") {
       var activeModal = (paletteEl && paletteEl.classList.contains("open")) ? paletteEl :
                         ((shortcutsEl && shortcutsEl.classList.contains("open")) ? shortcutsEl :
-                        ((drawerEl && drawerEl.classList.contains("open")) ? drawerEl : null));
+                        ((drawerEl && drawerEl.classList.contains("open") && !isDocked()) ? drawerEl : null));
       if (activeModal) {
         var focusables = activeModal.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
         if (focusables.length) {
@@ -2009,6 +3188,7 @@
     if (e.key === "Escape") {
       closePalette();
       closeShortcutsModal();
+      if (notesEl && notesEl.classList.contains("open")) { closeNotes(); return; }
       closeDrawer();
       if (isInput) e.target.blur();
       return;
@@ -2022,6 +3202,36 @@
 
     if (isInput) return;
 
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && /^#\/board/.test(location.hash) && /^(j|k|h|l|o|Enter|Arrow(Up|Down|Left|Right))$/.test(e.key)
+        && !(paletteEl && paletteEl.classList.contains("open")) && (!drawerEl.classList.contains("open") || isDocked())
+        && !(e.target && e.target.closest && e.target.closest("#drawer, button, a"))) {
+      if (boardKey(e)) { e.preventDefault(); return; }
+    }
+
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && /^#\/threads/.test(location.hash || "#/threads") && !(paletteEl && paletteEl.classList.contains("open"))) {
+      if (/^(j|k|ArrowDown|ArrowUp)$/.test(e.key) && !(e.target && e.target.closest && e.target.closest(".thread-row, .feed-row, #drawer"))) {
+        var rows = [].slice.call(document.querySelectorAll("#main .thread-row[data-thread-id], #main .feed-row[data-thread-id]"));
+        if (rows.length) {
+          e.preventDefault();
+          var at = -1;
+          rows.forEach(function (r, i) { if (at < 0 && (r.classList.contains("active") || r.classList.contains("sel"))) at = i; });
+          var nx = rows[Math.max(0, Math.min(rows.length - 1, at + (/^(k|ArrowUp)$/.test(e.key) ? -1 : 1)))];
+          var nid = nx.getAttribute("data-thread-id"), idx = rows.indexOf(nx);
+          THREAD_STATE.selected = nid;
+          go("threads/" + encodeURIComponent(nid));
+          setTimeout(function () { var t = document.querySelectorAll("#main .thread-row[data-thread-id], #main .feed-row[data-thread-id]")[idx]; if (t) t.focus(); }, 20);
+          return;
+        }
+      }
+      if (e.key === "r" && THREAD_STATE.selected && ITEMS[THREAD_STATE.selected]) {
+        e.preventDefault();
+        var dx = diagnoseNextAction(ITEMS[THREAD_STATE.selected]);
+        if (LIVE && M.action_token && dx.runPayload) runKitCmd(dx.runPayload, dx.cmd, dx.label);
+        else copyCmd(dx.cmd, dx.label);
+        return;
+      }
+    }
+
     if (e.key === "/") {
       e.preventDefault();
       openPalette();
@@ -2031,21 +3241,27 @@
     } else if (e.key === "t" || e.key === "T") {
       e.preventDefault();
       toggleTheme();
+    } else if (e.key === "]") {
+      e.preventDefault();
+      if (drawerEl && drawerEl.classList.contains("open")) closeDrawer();
+      else if (BOARD_SEL && ITEMS[BOARD_SEL]) openItemDrawer(BOARD_SEL);
+      else if (THREAD_STATE.selected && ITEMS[THREAD_STATE.selected]) openItemDrawer(THREAD_STATE.selected);
+    } else if (e.key === "n" || e.key === "N") {
+      e.preventDefault();
+      toggleNotes();
     } else if (e.key === "1") {
       go("threads");
     } else if (e.key === "2") {
-      go("map");
-    } else if (e.key === "3") {
       go("board");
+    } else if (e.key === "3") {
+      go("cockpit");
     } else if (e.key === "4") {
-      go("activity");
-    } else if (e.key === "5") {
       go("waiting");
-    } else if (e.key === "6") {
+    } else if (e.key === "5") {
       go("git");
-    } else if (e.key === "7") {
+    } else if (e.key === "6") {
       go("docs");
-    } else if (e.key === "8") {
+    } else if (e.key === "7") {
       go("kit");
     }
   });
@@ -2406,9 +3622,17 @@
 
   function viewMap() {
     tab("map");
-    crumbs([[M.project || "Project"]]);
-    main.appendChild(h(1, "Project map"));
-    summary();
+    crumbs([[M.project || "Project", "cockpit"], ["Cockpit", "cockpit"], ["Map"]]);
+    main.appendChild(el("div", { cls: "view-header" }, [
+      el("div", null, [
+        el("h1", { text: "Project Architecture & Dependency Map" }),
+        el("p", { cls: "view-subtitle", text: "Interactive radial graph of epics, backlog stages, dependencies, and project documents. Click any node to inspect or open in Action Threads." })
+      ]),
+      el("div", { cls: "view-header-actions" }, [
+        el("button", { cls: "btn", text: "Open Cockpit ↗", on: { click: function () { go("cockpit"); } } }),
+        el("button", { cls: "btn", text: "Open Board ↗", on: { click: function () { go("board"); } } })
+      ])
+    ]));
 
     var slug = (M.project || "nuhut").toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
@@ -2556,88 +3780,6 @@
     drawMap(box);
   }
 
-  function summary() {
-    var counts = {};
-    M.order.forEach(function (id) { var c = ITEMS[id].column; counts[c] = (counts[c] || 0) + 1; });
-    var strip = el("div", { cls: "strip" });
-    ["Now", "Next", "Blocked", "Parked", "Later", "Done"].forEach(function (c) {
-      var s = el("a", { cls: "stat", href: "#/board", title: "View " + c + " tasks on Board" }, [
-        el("b", { text: String(counts[c] || 0) }),
-        el("span", { text: c })
-      ]);
-      strip.appendChild(s);
-    });
-
-    var waiting = (counts.Blocked || 0) + (counts.Parked || 0);
-    var sWait = el("a", { cls: "stat clickable", href: "#/waiting", title: "Open Dependencies & Blockages command center" }, [
-      el("b", { text: String(waiting) }),
-      el("span", { text: "waiting on human" })
-    ]);
-    strip.appendChild(sWait);
-
-    strip.appendChild(el("a", { cls: "stat", href: "#/activity", title: "View activity stream" }, [
-      el("b", { text: String(WL.length) }),
-      el("span", { text: "worklog entries" })
-    ]));
-
-    if (M.git && M.git.stats && M.git.stats.total) {
-      var gs = el("a", { cls: "stat clickable", href: "#/git", title: "Open Git Graph & commit history" }, [
-        el("b", { text: M.git.stats.rate + "%" }),
-        el("span", { text: "git traceability (" + M.git.stats.linked + "/" + M.git.stats.total + ")" })
-      ]);
-      strip.appendChild(gs);
-    }
-
-    var fails = M.alerts.filter(function (a) { return a.level === "fail"; });
-    var sDoc = el("div", { cls: "stat", title: "Doctor audit status" }, [
-      el("b", { text: fails.length ? "FAIL" : (M.alerts.length ? "WARN" : "OK"), style: "color: " + (fails.length ? "var(--bad)" : (M.alerts.length ? "var(--warn)" : "var(--accent)")) }),
-      el("span", { text: "doctor (" + M.alerts.length + " alerts)" })
-    ]);
-    strip.appendChild(sDoc);
-
-    main.appendChild(strip);
-
-    if ((M.metrics || []).length) {
-      var mt = el("details", { cls: "banner" }, [el("summary", { text: "Process measures (from the records and git)" })]);
-      var tb = el("table", null, [el("tr", null, ["Measure", "Kind", "Value", "From"].map(function (x) { return el("th", { text: x }); }))]);
-      M.metrics.forEach(function (m) {
-        tb.appendChild(el("tr", null, [el("td", { text: m.name }), el("td", { text: m.kind }),
-          el("td", null, [inline(m.value)]), el("td", { cls: "muted", text: m.basis })]));
-      });
-      mt.appendChild(tb);
-      main.appendChild(mt);
-    }
-    if ((M.evidence || []).length) {
-      var verifyOpen = false;
-      try { verifyOpen = sessionStorage.getItem("nuhut-verify-open") === "1"; } catch (e) {}
-      var ev = el("details", { cls: "banner", open: verifyOpen ? "open" : null }, [
-        el("summary", { text: "Verify runs (last " + M.evidence.length + ", from .ai-sdlc/evidence/)" })]);
-      ev.addEventListener("toggle", function () {
-        try { sessionStorage.setItem("nuhut-verify-open", ev.open ? "1" : "0"); } catch (e) {}
-      });
-      ev.appendChild(drawVerifyGrid(M.evidence));
-      main.appendChild(ev);
-    }
-    if (M.alerts.length) {
-      var det = el("details", { cls: "banner" + (fails.length ? " bad" : "") }, [
-        el("summary", { text: M.alerts.length + " finding(s) from sdlc.py doctor (" + fails.length + " fail)" })]);
-      var t = el("table");
-      M.alerts.forEach(function (a) {
-        t.appendChild(el("tr", null, [el("td", { text: a.level }), el("td", { text: a.check }),
-          el("td", { text: a.where }), el("td", null, [inline(a.message)])]));
-      });
-      det.appendChild(t);
-      main.appendChild(det);
-    }
-    if (M.unread.length) {
-      var u = el("details", { cls: "banner" }, [el("summary", { text: M.unread.length + " thing(s) the view could not read" })]);
-      var ul = el("ul");
-      M.unread.forEach(function (x) { ul.appendChild(el("li", { text: x.path + " — " + x.reason })); });
-      u.appendChild(ul);
-      main.appendChild(u);
-    }
-  }
-
   // ---------------------------------------------------------------- board
   var FILTER = { owner: "", tier: "", text: "", dropped: false, group: "none", sort: "default" };
   var COLLAPSED_COLS = { Dropped: true, Parked: false };
@@ -2674,22 +3816,43 @@
     return { node: wrap, stepsDone: stepsDone, missingList: missingList };
   }
 
+  // Days since the item entered its column, from the backlog's Since cell. Work that sits
+  // still is the first thing a board should make visible.
+  function cardAge(it) {
+    var since = ((it.extra || {}).Since || "").match(/[0-9]{4}-[0-9]{2}-[0-9]{2}/);
+    if (!since || it.column === "Done" || it.column === "Dropped" || it.column === "Later") return null;
+    var days = Math.floor((Date.now() - Date.parse(since[0])) / 86400000);
+    if (!(days >= 0)) return null;
+    return { text: days + "d", tone: days >= 7 ? "bad" : (days >= 3 ? "warn" : ""), title: "In " + it.column + " for " + days + " day(s), since " + since[0] };
+  }
+
   function card(id) {
     var it = ITEMS[id], open = unresolved(it);
     var pipData = buildPipsNode(it);
 
+    var age = cardAge(it);
+    var lastEv = (it.evidence || []).length ? it.evidence[it.evidence.length - 1] : null;
     var c = el("div", {
       id: "card-" + id,
       "data-id": id,
+      "data-inspect": id,
       cls: "card" + (open.length && it.column !== "Done" ? " blocked" : ""),
       style: "cursor: pointer;",
       on: { click: function (e) {
-        if (e.target.tagName !== "A") openItemDrawer(id);
+        if (e.target.tagName !== "A") { markSeen(id); openItemDrawer(id); }
       } }
     }, [
-      el("div", { style: "display: flex; justify-content: space-between; align-items: baseline; min-width: 0; gap: 6px;" }, [
-        el("span", { style: "overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 600;" }, [itemLink(id)]),
-        el("span", { cls: "muted", style: "font-size: 11px; flex-shrink: 0;", text: pipData.stepsDone + "/" + M.steps.length })
+      el("div", { style: "display: flex; justify-content: space-between; align-items: center; min-width: 0; gap: 6px;" }, [
+        el("span", { style: "display: inline-flex; align-items: center; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 600;" }, [
+          isUnread(id) ? el("span", { cls: "unread-dot", title: "New activity since you last opened it" }) : null,
+          itemLink(id)
+        ]),
+        el("span", { style: "display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;" }, [
+          lastEv ? el("span", { cls: "note-ic " + (stageBad(lastEv.result) ? "bad" : (stageOk(lastEv.result) ? "ok" : "warn")), style: "margin: 0;",
+            title: "Last verify: " + lastEv.stage + " " + lastEv.result }) : null,
+          age ? el("span", { cls: "age-badge " + age.tone, title: age.title, text: age.text }) : null,
+          el("span", { cls: "muted", style: "font-size: 11px;", text: pipData.stepsDone + "/" + M.steps.length })
+        ])
       ]),
       el("div", { cls: "t", text: clip(it.title, 110) }),
       el("div", { style: "display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;" }, [
@@ -2725,11 +3888,49 @@
     return copy;
   }
 
+  // The count in a column header; with a wip_limit in the charter constraints, Now shows
+  // count/limit and turns amber past it.
+  function wipCount(c, n) {
+    var lim = c === "Now" && M.kit && M.kit.constraints ? +M.kit.constraints.wip_limit || 0 : 0;
+    return el("span", { cls: "muted", style: "font-size: 11px; margin-left: 4px;" + (lim && n > lim ? " color: var(--warn); font-weight: 700;" : ""),
+      title: lim ? n + " in progress, limit " + lim : n + " item(s)", text: lim ? n + "/" + lim : String(n) });
+  }
+
+  // Board keyboard: j/k (↓/↑) within a column, h/l (←/→) across columns. On a wide screen
+  // the docked inspector follows; on a narrow one Enter opens it.
+  var BOARD_SEL = null;
+  function boardKey(e) {
+    var cols = [].filter.call(document.querySelectorAll("#main .colm:not(.collapsed)"), function (c) { return c.querySelector(".card[data-inspect]"); });
+    if (!cols.length) return false;
+    var grid = cols.map(function (c) { return [].map.call(c.querySelectorAll(".card[data-inspect]"), function (n) { return n.getAttribute("data-inspect"); }); });
+    var cur = (INSPECT && INSPECT.kind === "item" && isDocked()) ? INSPECT.id : BOARD_SEL;
+    var ci = -1, ri = -1;
+    grid.forEach(function (ids, i) { var r = ids.indexOf(cur); if (r >= 0) { ci = i; ri = r; } });
+    var k = e.key;
+    if (k === "Enter" || k === "o") {
+      if (!cur) return false;
+      if (k === "o") go("item/" + cur); else openItemDrawer(cur);
+      return true;
+    }
+    if (ci < 0) { ci = 0; ri = 0; }
+    else if (k === "j" || k === "ArrowDown") ri = Math.min(grid[ci].length - 1, ri + 1);
+    else if (k === "k" || k === "ArrowUp") ri = Math.max(0, ri - 1);
+    else if (k === "h" || k === "ArrowLeft") { ci = Math.max(0, ci - 1); ri = Math.min(ri, grid[ci].length - 1); }
+    else if (k === "l" || k === "ArrowRight") { ci = Math.min(grid.length - 1, ci + 1); ri = Math.min(ri, grid[ci].length - 1); }
+    else return false;
+    BOARD_SEL = grid[ci][ri];
+    [].forEach.call(document.querySelectorAll("#main .card.kbd-sel"), function (n) { n.classList.remove("kbd-sel"); });
+    var node = document.querySelector('#main .card[data-inspect="' + BOARD_SEL.replace(/"/g, "") + '"]');
+    if (node) { node.classList.add("kbd-sel"); node.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+    if (wide()) { markSeen(BOARD_SEL); openItemDrawer(BOARD_SEL, true); }
+    return true;
+  }
+
   function renderColumn(c, itemIds, onToggle) {
     var isCollapsed = !!COLLAPSED_COLS[c];
     var hd = el("h3", null, [
       el("span", { text: c }),
-      el("span", { cls: "muted", style: "font-size: 11px; margin-left: 4px;", text: String(itemIds.length) }),
+      wipCount(c, itemIds.length),
       el("button", {
         cls: "col-collapse-btn",
         text: isCollapsed ? "▸" : "◂",
@@ -2835,20 +4036,31 @@
 
   function viewBoard(focusId, stageFilter) {
     tab("board");
-    crumbs([[M.project || "Project", "map"], ["Board"]]);
-    main.appendChild(h(1, "Board"));
+    crumbs([[M.project || "Project", "cockpit"], ["Board"]]);
+    main.appendChild(el("div", { cls: "view-header" }, [
+      el("div", null, [
+        el("h1", { text: "Backlog & Lifecycle Board" }),
+        el("p", { cls: "view-subtitle", text: "Kanban and tabular tracking across all lifecycle columns, swimlanes, risk tiers, and verification pips." })
+      ]),
+      el("div", { cls: "view-header-actions" }, [
+        el("button", { cls: "btn", text: "Inbox ↗", on: { click: function () { go("threads"); } } })
+      ])
+    ]));
 
-    var flowDays = (M.flow && M.flow.dates && M.flow.dates.length > 1)
-      ? Math.round((new Date(M.flow.dates[M.flow.dates.length - 1]) - new Date(M.flow.dates[0])) / 86400000) : 0;
-    var flowOpen = false;
-    try { flowOpen = sessionStorage.getItem("nuhut-flow-open") === "1"; } catch (e) {}
-    var fl = el("details", { cls: "banner", open: flowOpen ? "open" : null }, [
-      el("summary", { text: "Flow" + (flowDays ? " — " + flowDays + " days" : "") + " (whole backlog, from its git history; filters below do not apply)" })]);
-    fl.addEventListener("toggle", function () {
-      try { sessionStorage.setItem("nuhut-flow-open", fl.open ? "1" : "0"); } catch (e) {}
-    });
-    fl.appendChild(drawFlowChart(M.flow));
-    main.appendChild(fl);
+    // Statuses the board has no column for land under Other; say which, instead of
+    // leaving a catch-all column to swallow them.
+    var unmapped = {};
+    M.order.forEach(function (id) { var it = ITEMS[id]; if (it.column === "Other") unmapped[it.status || "(blank)"] = (unmapped[it.status || "(blank)"] || 0) + 1; });
+    var unmappedKeys = Object.keys(unmapped).sort(function (a, b) { return unmapped[b] - unmapped[a]; });
+    if (unmappedKeys.length) {
+      var nOther = unmappedKeys.reduce(function (a, k) { return a + unmapped[k]; }, 0);
+      main.appendChild(el("div", { cls: "banner warn", role: "note" }, [
+        el("strong", { text: plural(nOther, "item") + " use statuses the board has no column for: " }),
+        document.createTextNode(unmappedKeys.slice(0, 6).map(function (k) { return k + " (" + unmapped[k] + ")"; }).join(", ") + (unmappedKeys.length > 6 ? ", …" : "") + ". "),
+        el("span", { cls: "muted", text: "They are under Other. Use the kit's statuses in backlog.md (Ready, In progress, In review, Blocked, Parked, Deferred, Done, Dropped) to place them." })
+      ]));
+    }
+    main.appendChild(el("h2", { cls: "sr-only", text: "Columns" }));
 
     FILTER.view = FILTER.view || "kanban";
 
@@ -3105,45 +4317,21 @@
     });
     return box;
   }
-  function viewActivity() {
-    tab("activity");
-    crumbs([[M.project || "Project", "map"], ["Agent activity"]]);
-    main.appendChild(h(1, "What the agents are doing"));
-    main.appendChild(h(2, "In flight"));
-    var now = M.order.filter(function (id) { return ITEMS[id].column === "Now"; });
-    if (!now.length) main.appendChild(el("p", { cls: "muted", text: "Nothing is In progress or In review." }));
-    else {
-      var grid = el("div", { cls: "in-flight-grid" });
-      now.forEach(function (id) { grid.appendChild(card(id)); });
-      main.appendChild(grid);
-    }
-    main.appendChild(h(2, "Latest worklog entries"));
-    var order = WL.map(function (_, n) { return n; });
-    order.sort(function (a, b) { return (WL[b].date || "").localeCompare(WL[a].date || "") || a - b; });
-    var shown = 0;
-    function more() {
-      order.slice(shown, shown + 20).forEach(function (n) { list.appendChild(entryBox(n, false)); });
-      shown += 20;
-      btn.style.display = shown < order.length ? "" : "none";
-    }
-    var list = el("div"), btn = el("button", { text: "Show more", on: { click: more } });
-    main.appendChild(list);
-    main.appendChild(btn);
-    if (!order.length) list.appendChild(el("p", { cls: "muted", text: "The worklog has no entries yet." }));
-    more();
-  }
-
   // ---------------------------------------------------------------- waiting & blockages
   var BLOCKAGE_STATE = { view: "flow", query: "", filter: "all", tier: "" };
 
   function viewWaiting() {
     tab("waiting");
-    crumbs([[M.project || "Project", "map"], ["Dependencies & Blockages"]]);
-    main.appendChild(h(1, "Dependencies & Blockages"));
-    main.appendChild(el("p", {
-      cls: "muted",
-      text: "Track critical root bottlenecks, technical task prerequisites, and parked items waiting on human decisions."
-    }));
+    crumbs([[M.project || "Project", "cockpit"], ["Dependencies & Blockages"]]);
+    main.appendChild(el("div", { cls: "view-header" }, [
+      el("div", null, [
+        el("h1", { text: "Dependencies & Blockages" }),
+        el("p", { cls: "view-subtitle", text: "Track critical root bottlenecks, technical task prerequisites, and parked items waiting on human decisions." })
+      ]),
+      el("div", { cls: "view-header-actions" }, [
+        el("button", { cls: "btn", text: "Inbox ↗", on: { click: function () { go("threads"); } } })
+      ])
+    ]));
 
     var depsData = computeDependencies();
     var blockers = depsData.blockers || [];
@@ -3653,6 +4841,7 @@
   }
 
   function openCommitDrawer(c) {
+    setInspect({ kind: "commit", id: c.sha, c: c });
     var container = el("div", { style: "display: flex; flex-direction: column; height: 100%;" });
     var remoteWeb = (M.git && M.git.remote_url) ? M.git.remote_url : "";
     var commitUrl = remoteWeb ? (remoteWeb + "/commit/" + c.sha) : "";
@@ -3954,8 +5143,16 @@
 
   function viewGit() {
     tab("git");
-    crumbs([[M.project || "Project", "map"], ["Git"]]);
-    main.appendChild(h(1, "Git & Traceability"));
+    crumbs([[M.project || "Project", "cockpit"], ["Git"]]);
+    main.appendChild(el("div", { cls: "view-header" }, [
+      el("div", null, [
+        el("h1", { text: "Git & Traceability" }),
+        el("p", { cls: "view-subtitle", text: "Commit graph, work-item trailer traceability, working tree status, and local branch lineage." })
+      ]),
+      el("div", { cls: "view-header-actions" }, [
+        el("button", { cls: "btn", text: "Inbox ↗", on: { click: function () { go("threads"); } } })
+      ])
+    ]));
 
     var git = M.git || { branch: "", clean: true, modified_count: 0, modified_files: [], branches: [], commits: [], stats: { total: 0, linked: 0, untracked: 0, rate: 0 } };
     var stats = git.stats || { total: 0, linked: 0, untracked: 0, rate: 0 };
@@ -4358,13 +5555,13 @@
     var it = ITEMS[id];
     tab("");
     if (!it) {
-      crumbs([[M.project || "Project", "map"], ["Board", "board"], [id]]);
+      crumbs([[M.project || "Project", "cockpit"], ["Board", "board"], [id]]);
       main.appendChild(el("p", { text: "No work item " + id + " in the records." }));
       return;
     }
     var stageName = it.column || it.status || "Backlog";
     crumbs([
-      [M.project || "Project", "map"],
+      [M.project || "Project", "cockpit"],
       ["Board", "board"],
       [stageName, "board/focus/" + encodeURIComponent(id)],
       [id]
@@ -4486,8 +5683,16 @@
 
   function viewDocs() {
     tab("docs");
-    crumbs([[M.project || "Project", "map"], ["Documents"]]);
-    main.appendChild(h(1, "Documents"));
+    crumbs([[M.project || "Project", "cockpit"], ["Documents"]]);
+    main.appendChild(el("div", { cls: "view-header" }, [
+      el("div", null, [
+        el("h1", { text: "Project Documents & Records" }),
+        el("p", { cls: "view-subtitle", text: "Browse charter, architecture decision records, plans, reviews, and process playbooks with freshness tracking." })
+      ]),
+      el("div", { cls: "view-header-actions" }, [
+        el("button", { cls: "btn", text: "Kit & Control ↗", on: { click: function () { go("kit"); } } })
+      ])
+    ]));
 
     // Sub-toolbar with view switchers and filters
     var tb = el("div", { cls: "sub-toolbar" });
@@ -4906,7 +6111,7 @@
   function viewDoc(path, line) {
     var n = DOC_BY_PATH[path];
     tab("docs");
-    crumbs([[M.project || "Project", "map"], ["Documents", "docs"], [path]]);
+    crumbs([[M.project || "Project", "cockpit"], ["Documents", "docs"], [path]]);
     if (n === undefined) { main.appendChild(el("p", { text: "No document at " + path + "." })); return; }
     var d = DOCS[n];
     var outline = el("div", { cls: "outline" });
@@ -4959,7 +6164,7 @@
   // ---------------------------------------------------------------- search
   function viewSearch(term) {
     tab("");
-    crumbs([[M.project || "Project", "map"], ["Search: " + term]]);
+    crumbs([[M.project || "Project", "cockpit"], ["Search: " + term]]);
     main.appendChild(h(1, "Search: " + term));
     var needle = term.toLowerCase(), hits = 0;
     var ids = M.order.filter(function (id) { return (id + " " + (ITEMS[id].title || "")).toLowerCase().indexOf(needle) >= 0; });
@@ -5093,7 +6298,7 @@
     });
     if (!stages.length) return box;
     var CELL = 14, GAP = 3, LBL = 90, TOP = 18, W = LBL + runs.length * (CELL + GAP) + 8, H = TOP + stages.length * (CELL + GAP) + 18;
-    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, "class": "chart-svg grid-svg", role: "img",
+    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H, "class": "chart-svg grid-svg", role: "img",
       "aria-label": "Verify runs, " + runs.length + " runs" });
     svg.style.maxWidth = W + "px";
     stages.forEach(function (st, r) {
@@ -5122,7 +6327,48 @@
   }
 
   // ---------------------------------------------------------------- threads (chat action stream)
-  var THREAD_STATE = { selected: "", query: "", filter: "all", role: "", reviewer: "" };
+  var THREAD_STATE = { selected: "", query: "", filter: "all", role: "", reviewer: "", reviewStage: "ship", cmdTab: "next",
+    mode: "items", feedKind: "all", feedUnread: false };
+
+  // The activity feed: every item's thread events plus worklog entries, newest day first,
+  // one row per item per day so a burst of commits reads as one line.
+  var FEED_KINDS = [["all", "All"], ["commit", "Commits"], ["verify", "Verify"], ["review", "Reviews"], ["gate", "Gates"], ["worklog", "Worklog"], ["record", "Records"]];
+  function feedKindOf(ev) {
+    if (ev.kind === "commit" || ev.kind === "verify" || ev.kind === "gate" || ev.kind === "worklog") return ev.kind;
+    if (ev.kind === "design_review" || ev.kind === "ship_review") return "review";
+    if (ev.kind === "frame") return "frame";
+    return "record";
+  }
+  function buildFeed() {
+    var rows = {}, out = [];
+    (M.order || []).forEach(function (id) {
+      var it = ITEMS[id];
+      if (!itemMatchesThreadFilter(it)) return;
+      if (THREAD_STATE.feedUnread && !isUnread(id)) return;
+      (it.thread || []).forEach(function (ev) {
+        var fk = feedKindOf(ev);
+        if (fk === "frame") return;
+        if (THREAD_STATE.feedKind !== "all" && THREAD_STATE.feedKind !== fk) return;
+        var day = (ev.time || ev.date || "").slice(0, 10);
+        if (!day) return;
+        var key = id + "|" + day;
+        var r = rows[key];
+        if (!r) { r = rows[key] = { id: id, day: day, latest: "", kinds: {}, events: [], bad: false }; out.push(r); }
+        r.kinds[fk] = (r.kinds[fk] || 0) + 1;
+        r.events.push(ev);
+        var stamp = ev.time || ev.date || "";
+        if (stamp > r.latest) r.latest = stamp;
+        if (ev.kind === "verify" && (ev.stages || []).some(function (st) { return stageBad(st.result); })) r.bad = true;
+      });
+    });
+    out.sort(function (a, b) { return b.latest.localeCompare(a.latest) || a.id.localeCompare(b.id); });
+    return out;
+  }
+  function feedSummary(r) {
+    var names = { commit: ["commit", "commits"], verify: ["verify run", "verify runs"], review: ["review", "reviews"], gate: ["gate", "gates"],
+      worklog: ["worklog entry", "worklog entries"], record: ["record", "records"] };
+    return Object.keys(r.kinds).map(function (k) { var n = r.kinds[k]; return n + " " + (names[k] ? names[k][n === 1 ? 0 : 1] : k); }).join(" · ");
+  }
 
   function pickDefaultThreadId() {
     var order = M.order || [];
@@ -5138,44 +6384,64 @@
   }
 
   function diagnoseNextAction(it) {
-    if (!it) return { label: "Select a work item", cmd: "" };
-    var id = it.id, steps = it.steps || {}, tier = it.tier || "2", col = it.column || "";
     var kit = M.kit || {}, c = kit.constraints || {};
     var revCli = THREAD_STATE.reviewer || c.preferred_reviewer || "codex";
+    if (!it) {
+      return {
+        label: "No work item selected — run project verification or doctor audit, or frame your first item",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py verify --parallel",
+        desc: "Runs all configured charter check stages in parallel and saves evidence to .ai-sdlc/evidence/",
+        runPayload: { subcommand: "verify", parallel: true },
+        kind: "info"
+      };
+    }
+    var id = it.id, steps = it.steps || {}, tier = it.tier || "2", col = it.column || "";
     var roleName = THREAD_STATE.role || it.owner || "qa";
     if (col === "Parked" || col === "Blocked") {
       var who = (it.extra && (it.extra["Waiting on whom"] || it.extra["Unblocked by"])) || "named human";
       return {
-        label: "Waiting on " + who + " — resolve gate or run verification",
+        label: "Waiting on " + who + " — resolve gate or run verification suite",
         cmd: "python3 .ai-sdlc/bin/sdlc.py verify --parallel",
+        desc: "Runs configured check commands in parallel and records pass/fail evidence for " + id,
+        runPayload: { subcommand: "verify", parallel: true },
         kind: "warn"
       };
     }
     if (tier === "1" && steps["Plan"] === "missing") {
       return {
-        label: "Tier 1 requires a plan file before building",
+        label: "Tier 1 requires a plan file (docs/project/plans/" + id + ".md) before building",
         cmd: "/sdlc-plan " + id,
+        desc: "Run in your coding agent to frame and write docs/project/plans/" + id + ".md",
+        runPayload: null,
         kind: "warn"
       };
     }
     if (tier === "1" && steps["Design review"] === "missing") {
       return {
-        label: "Tier 1 requires a Design Review before building",
+        label: "Tier 1 requires a Design Review before building (" + revCli + " · " + roleName + ")",
         cmd: "python3 .ai-sdlc/bin/sdlc.py review " + id + " --role " + roleName + " --by " + revCli + " --stage design",
+        desc: "Invokes " + revCli + " CLI as " + roleName + " to write a design review record for " + id,
+        runPayload: null,
+        usesReviewer: true,
         kind: "warn"
       };
     }
     if (steps["Build"] !== "done" && !(it.commits && it.commits.length)) {
       return {
-        label: "Ready to build — record Work-Item & Agent trailers on commit",
-        cmd: "python3 .ai-sdlc/bin/sdlc.py trailers " + id,
+        label: "Ready to build — generate Work-Item & Agent commit trailers for " + id,
+        cmd: "python3 .ai-sdlc/bin/sdlc.py trailers " + id + " --agent " + revCli,
+        desc: "Outputs standardized git commit trailers (Work-Item, Agent) to attach when committing " + id,
+        runPayload: { subcommand: "trailers", item_id: id, agent: revCli },
+        usesReviewer: true,
         kind: "info"
       };
     }
     if (steps["Verify"] !== "done") {
       return {
-        label: "Run verification suite to record evidence in the ledger",
+        label: "Run verification suite to record evidence in the ledger for " + id,
         cmd: "python3 .ai-sdlc/bin/sdlc.py verify --parallel",
+        desc: "Executes charter check stages in parallel and records evidence in .ai-sdlc/evidence/",
+        runPayload: { subcommand: "verify", parallel: true },
         kind: "info"
       };
     }
@@ -5184,23 +6450,306 @@
     var hasInd = (it.reviews || []).some(function (r) { return r.independent; });
     if (needInd && !hasInd) {
       return {
-        label: "Tier " + tier + " requires an independent cross-model review (" + revCli + ")",
+        label: "Tier " + tier + " requires an independent cross-model review (" + revCli + " · " + roleName + ")",
         cmd: "python3 .ai-sdlc/bin/sdlc.py review " + id + " --role " + roleName + " --by " + revCli,
+        desc: "Dispatches " + id + " diff and charter rules to " + revCli + " for independent ship review",
+        runPayload: null,
+        usesReviewer: true,
         kind: "warn"
       };
     }
     if (steps["Log"] === "missing" || !(it.worklog && it.worklog.length)) {
       return {
         label: "All checks green — draft compact worklog line from commits & verify runs",
-        cmd: "python3 .ai-sdlc/bin/sdlc.py log --since main --write",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py log --since main --id " + id + " --write",
+        desc: "Synthesizes a compact worklog entry for " + id + " from git commits and verification evidence",
+        runPayload: { subcommand: "log", since: "main", item_id: id, write: true },
         kind: "ok"
       };
     }
+    var gaps = Object.keys(steps).filter(function (k) { return steps[k] === "missing"; });
+    if (gaps.length) {
+      return {
+        label: plural(gaps.length, "lifecycle step") + " missing (" + gaps.join(", ") + ") — record " + (gaps.length === 1 ? "it" : "them") + " before closing " + id,
+        cmd: "python3 .ai-sdlc/bin/sdlc.py doctor --strict",
+        desc: "Strict doctor names each missing record and where it belongs",
+        runPayload: { subcommand: "doctor", strict: true },
+        kind: "warn"
+      };
+    }
     return {
-      label: col === "Done" ? "Completed & verified" : "Ready to close in backlog.md",
+      label: col === "Done" ? "Completed & verified — run strict doctor audit" : "Ready to close in backlog.md — run strict doctor check",
       cmd: "python3 .ai-sdlc/bin/sdlc.py doctor --strict",
+      desc: "Runs mechanical doctor checks across charter, backlog, worklog, and evidence records",
+      runPayload: { subcommand: "doctor", strict: true },
       kind: "ok"
     };
+  }
+
+  function buildCommandSpecs(activeItem) {
+    var kit = M.kit || {}, c = kit.constraints || {};
+    var activeId = activeItem ? activeItem.id : "";
+    var chosenReviewer = THREAD_STATE.reviewer || c.preferred_reviewer || "codex";
+    var roleList = ((kit.installed && kit.installed.roles) || []).filter(function (r) { return r.active; }).map(function (r) { return r.name; });
+    if (!roleList.length) roleList = ["qa", "security", "architect", "software-engineer"];
+    var curRole = THREAD_STATE.role || (activeItem && activeItem.owner) || roleList[0];
+    var curStage = THREAD_STATE.reviewStage || "ship";
+    var nextDiag = diagnoseNextAction(activeItem);
+
+    var specs = [
+      {
+        key: "next",
+        tabLabel: "★ Recommended Next",
+        title: "Recommended Next Step",
+        cmd: nextDiag.cmd,
+        desc: nextDiag.label + " — " + (nextDiag.desc || ""),
+        runPayload: nextDiag.runPayload,
+        usesReviewer: !!nextDiag.usesReviewer
+      },
+      {
+        key: "verify",
+        tabLabel: "Verify Suite",
+        title: "Run Verification Suite",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py verify --parallel",
+        desc: "Runs all configured charter check commands in parallel and writes signed logs to .ai-sdlc/evidence/",
+        runPayload: { subcommand: "verify", parallel: true }
+      }
+    ];
+    if (activeId) {
+      specs.push({
+        key: "plan_check",
+        tabLabel: "Plan-Check",
+        title: "Plan vs Diff Conformance (" + activeId + ")",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py plan-check " + activeId,
+        desc: "Compares touched files in git against docs/project/plans/" + activeId + ".md",
+        runPayload: { subcommand: "plan-check", item_id: activeId }
+      });
+      specs.push({
+        key: "review",
+        tabLabel: "2nd-Agent Review",
+        title: "Cross-Harness Review (" + chosenReviewer + " · " + curRole + ")",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py review " + activeId + " --role " + curRole + " --by " + chosenReviewer + (curStage === "design" ? " --stage design" : ""),
+        desc: "Invokes external `" + chosenReviewer + "` CLI as `" + curRole + "` (" + curStage + " stage) and writes docs/project/reviews/" + activeId + "-" + curStage + ".md",
+        runPayload: null,
+        usesReviewer: true
+      });
+      specs.push({
+        key: "trailers",
+        tabLabel: "Commit Trailers",
+        title: "Git Commit Trailers (" + activeId + ")",
+        cmd: "python3 .ai-sdlc/bin/sdlc.py trailers " + activeId + " --agent " + chosenReviewer,
+        desc: "Prints Work-Item and Agent git trailers for " + activeId + " (using agent `" + chosenReviewer + "`)",
+        runPayload: { subcommand: "trailers", item_id: activeId, agent: chosenReviewer },
+        usesReviewer: true
+      });
+    }
+    specs.push({
+      key: "worklog",
+      tabLabel: "Draft Worklog",
+      title: "Draft Compact Worklog Entry",
+      cmd: "python3 .ai-sdlc/bin/sdlc.py log --since main" + (activeId ? " --id " + activeId : "") + " --write",
+      desc: "Appends a 1-line verified worklog entry to docs/project/worklog.md from git commits & evidence",
+      runPayload: { subcommand: "log", since: "main", item_id: activeId || "", write: true }
+    });
+    specs.push({
+      key: "doctor",
+      tabLabel: "Doctor Audit",
+      title: "Mechanical Doctor Check",
+      cmd: "python3 .ai-sdlc/bin/sdlc.py doctor --strict",
+      desc: "Audits charter, backlog, worklog, contract pointers, and secrets across all project records",
+      runPayload: { subcommand: "doctor", strict: true }
+    });
+    return { specs: specs, nextDiag: nextDiag, chosenReviewer: chosenReviewer, curRole: curRole, curStage: curStage, roleList: roleList };
+  }
+
+  function renderCommandDock(activeItem) {
+    var activeId = activeItem ? activeItem.id : "";
+    var data = buildCommandSpecs(activeItem);
+    var specs = data.specs;
+    var nextDiag = data.nextDiag;
+    var chosenReviewer = data.chosenReviewer;
+    var curRole = data.curRole;
+    var curStage = data.curStage;
+    var roleList = data.roleList;
+    if (roleList.indexOf(curRole) < 0) roleList.unshift(curRole);
+
+    var activeSpec = specs.filter(function (s) { return s.key === THREAD_STATE.cmdTab; })[0] || specs[0];
+    THREAD_STATE.cmdTab = activeSpec.key;
+
+    var composer = el("div", { cls: "thread-composer" });
+
+    // Row 1: Next Action Diagnosis + Execution Mode Explanation
+    var statusStampCls = nextDiag.kind === "ok" ? "ok" : (nextDiag.kind === "warn" ? "warn" : "");
+    composer.appendChild(el("div", { cls: "composer-top" }, [
+      el("div", { style: "display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" }, [
+        el("span", { cls: "stamp " + statusStampCls, text: "Next" }),
+        el("strong", { text: nextDiag.label })
+      ]),
+      el("span", { cls: "muted", style: "font-size: 12px;", text: LIVE ? "r runs it" : "Static page: commands copy to the clipboard" })
+    ]));
+
+    // Row 2: Action Preset Tabs + Reviewer/Role/Stage Controls
+    var tabsWrap = el("div", { cls: "composer-tabs", role: "tablist", "aria-label": "Command presets" });
+    // The recommended command leads; the others wait in one menu.
+    var shownSpecs = specs.filter(function (sp) { return sp.key === "next" || sp.key === activeSpec.key; });
+    var otherSpecs = specs.filter(function (sp) { return shownSpecs.indexOf(sp) < 0; });
+    shownSpecs.forEach(function (sp) {
+      var isSel = sp.key === activeSpec.key;
+      tabsWrap.appendChild(el("button", {
+        cls: "composer-tab" + (isSel ? " active" : ""),
+        role: "tab",
+        "aria-selected": isSel ? "true" : "false",
+        text: sp.tabLabel,
+        on: { click: function () {
+          THREAD_STATE.cmdTab = sp.key;
+          viewThreads(activeId);
+        } }
+      }));
+    });
+
+    if (otherSpecs.length) {
+      var moreSel = el("select", { cls: "filter-select", "aria-label": "More commands", style: "padding: 3px 7px; font-size: 12px;",
+        on: { change: function () { if (moreSel.value) { THREAD_STATE.cmdTab = moreSel.value; viewThreads(activeId); } } } },
+        [el("option", { value: "", text: "More commands…" })].concat(otherSpecs.map(function (sp) { return el("option", { value: sp.key, text: sp.tabLabel.replace(/^[^A-Za-z]+/, "") }); })));
+      tabsWrap.appendChild(moreSel);
+    }
+
+    var paramsWrap = el("div", { cls: "composer-params" });
+    var needsParams = !!(activeSpec.usesReviewer || activeSpec.key === "review");
+
+    // Reviewer segmented buttons (changing immediately updates command box & switches to review if needed)
+    var revGroup = el("div", { cls: "context-ctrl", role: "group", "aria-label": "Reviewer CLI" }, [
+      el("span", { cls: "context-ctrl-lbl", text: "Agent/Reviewer" })
+    ]);
+    ["codex", "claude", "gemini"].forEach(function (hName) {
+      var isAct = chosenReviewer === hName;
+      revGroup.appendChild(el("button", {
+        cls: "seg-btn" + (isAct ? " active" : ""),
+        "aria-pressed": isAct ? "true" : "false",
+        style: "padding: 2px 7px; font-size: 11px;",
+        text: hName,
+        title: "Use `" + hName + "` in Review & Trailers commands",
+        on: { click: function () {
+          THREAD_STATE.reviewer = hName;
+          if (!activeSpec.usesReviewer && activeId) {
+            THREAD_STATE.cmdTab = "review";
+          }
+          viewThreads(activeId);
+        } }
+      }));
+    });
+    paramsWrap.appendChild(revGroup);
+
+    if (activeId) {
+      var roleSelect = el("select", {
+        cls: "filter-select",
+        "aria-label": "Review role",
+        style: "padding: 3px 7px; font-size: 11.5px;",
+        on: { change: function () {
+          THREAD_STATE.role = roleSelect.value;
+          if (THREAD_STATE.cmdTab !== "review" && !(THREAD_STATE.cmdTab === "next" && nextDiag.usesReviewer)) {
+            THREAD_STATE.cmdTab = "review";
+          }
+          viewThreads(activeId);
+        } }
+      }, roleList.map(function (rName) {
+        var opt = el("option", { value: rName, text: "Role: " + rName });
+        if (curRole === rName) opt.selected = true;
+        return opt;
+      }));
+      paramsWrap.appendChild(roleSelect);
+
+      var stageGroup = el("div", { cls: "context-ctrl", role: "group", "aria-label": "Review stage" }, [
+        el("span", { cls: "context-ctrl-lbl", text: "Stage" })
+      ]);
+      [["ship", "Ship"], ["design", "Design"]].forEach(function (stOpt) {
+        var isSt = curStage === stOpt[0];
+        stageGroup.appendChild(el("button", {
+          cls: "seg-btn" + (isSt ? " active" : ""),
+          "aria-pressed": isSt ? "true" : "false",
+          style: "padding: 2px 6px; font-size: 11px;",
+          text: stOpt[1],
+          on: { click: function () {
+            THREAD_STATE.reviewStage = stOpt[0];
+            THREAD_STATE.cmdTab = "review";
+            viewThreads(activeId);
+          } }
+        }));
+      });
+      paramsWrap.appendChild(stageGroup);
+    }
+
+    composer.appendChild(el("div", { style: "display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;" }, [
+      tabsWrap,
+      needsParams ? paramsWrap : null
+    ]));
+
+    // Row 3: Live Monospace Command Preview Box + Explicit Run / Copy Buttons
+    var actionBtns = [];
+    if (LIVE && M.action_token && activeSpec.runPayload) {
+      actionBtns.push(el("button", {
+        cls: "cmd-btn run-btn",
+        disabled: TERMINAL_STATE.running ? "disabled" : null,
+        text: TERMINAL_STATE.running ? "⏳ Running…" : "▶ Run in Project",
+        title: "Execute `" + activeSpec.cmd + "` directly on local server and view output below",
+        on: { click: function () {
+          runKitCmd(activeSpec.runPayload, activeSpec.cmd, activeSpec.title);
+        } }
+      }));
+    }
+    actionBtns.push(el("button", {
+      cls: "cmd-btn " + (LIVE && M.action_token && activeSpec.runPayload ? "" : "primary"),
+      text: "⧉ Copy CLI Command",
+      title: "Copy `" + activeSpec.cmd + "` to clipboard",
+      on: { click: function (e) {
+        copyText(activeSpec.cmd);
+        var btn = e.currentTarget || e.target;
+        btn.textContent = "✓ Copied to Clipboard!";
+        setTimeout(function () { btn.textContent = "⧉ Copy CLI Command"; }, 1800);
+        showToast("Copied CLI Command", activeSpec.desc, activeSpec.cmd);
+      } }
+    }));
+
+    composer.appendChild(el("div", { cls: "composer-cmd-box" }, [
+      el("div", { style: "flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 3px;" }, [
+        el("div", { cls: "composer-cmd-code" }, [
+          el("span", { cls: "prompt-sigil", text: "$" }),
+          el("span", { text: activeSpec.cmd })
+        ]),
+        el("div", { cls: "muted", style: "font-size: 11px;", text: activeSpec.desc })
+      ]),
+      el("div", { style: "display: flex; align-items: center; gap: 6px; flex-wrap: wrap;" }, actionBtns)
+    ]));
+
+    // Row 4: Inline Terminal Output Console (when a command was executed in Live mode)
+    if (TERMINAL_STATE.visible) {
+      var exitOk = TERMINAL_STATE.exitCode === 0;
+      var statusBadgeText = TERMINAL_STATE.running
+        ? "RUNNING…"
+        : ("EXIT " + TERMINAL_STATE.exitCode + (exitOk ? " · PASS" : " · FAIL") + (TERMINAL_STATE.seconds !== null ? " (" + TERMINAL_STATE.seconds + "s)" : ""));
+      composer.appendChild(el("div", { cls: "composer-terminal" }, [
+        el("div", { cls: "composer-terminal-hdr" }, [
+          el("div", { style: "display: flex; align-items: center; gap: 8px;" }, [
+            el("span", {
+              cls: "stamp " + (TERMINAL_STATE.running ? "warn" : (exitOk ? "ok" : "bad")),
+              text: statusBadgeText
+            }),
+            el("code", { text: TERMINAL_STATE.cmd })
+          ]),
+          el("button", {
+            cls: "codeblock-copy",
+            text: "Hide Output ✕",
+            on: { click: function () {
+              TERMINAL_STATE.visible = false;
+              viewThreads(activeId);
+            } }
+          })
+        ]),
+        el("pre", { text: TERMINAL_STATE.output || "" })
+      ]));
+    }
+
+    return composer;
   }
 
   function renderThreadBubble(it, ev) {
@@ -5369,25 +6918,21 @@
     }
     var activeId = THREAD_STATE.selected;
     var activeItem = activeId ? ITEMS[activeId] : null;
+    if (activeId && isUnread(activeId)) { markSeen(activeId); paintMeta(); }
 
-    crumbs([[M.project || "Project", "threads"], ["Action Threads"], activeId ? [activeId] : null].filter(Boolean));
+    crumbs([[M.project || "Project", "threads"], ["Inbox", "threads"], activeId ? [activeId] : null].filter(Boolean));
 
-    var kit = M.kit || {}, c = kit.constraints || {};
-    var topBar = el("div", { cls: "sub-toolbar" }, [
-      el("div", { cls: "sub-toolbar-left" }, [
-        el("span", { cls: "stamp", text: "EFFORT: " + (c.effort_mode || "Normal").toUpperCase() }),
-        el("span", { cls: "stamp", text: "2ND REVIEWER: " + (c.independent_review || "none").toUpperCase() }),
-        kit.token_saving ? el("span", { cls: "stamp ok", text: "TOKEN-SAVING: ON" }) : null
+    var kit = M.kit || {};
+    main.appendChild(el("div", { cls: "view-header" }, [
+      el("div", null, [
+        h(1, "Inbox"),
+        el("p", { cls: "view-subtitle", text: "Work item threads and the project-wide activity feed. Pick a thread to read its lifecycle stream and run its next command." })
       ]),
-      el("div", { cls: "sub-toolbar-right" }, [
-        el("button", {
-          cls: "cmd-btn",
-          text: "Configure Kit & Token Saver ↗",
-          on: { click: function () { go("kit"); } }
-        })
+      el("div", { style: "display: flex; gap: 6px; align-items: center;" }, [
+        el("button", { cls: "cmd-btn", text: "Kanban Board ↗", on: { click: function () { go("board"); } } }),
+        el("button", { cls: "cmd-btn", text: "Kit & Repair ↗", on: { click: function () { go("kit"); } } })
       ])
-    ]);
-    main.appendChild(topBar);
+    ]));
 
     var layout = el("div", { cls: "threads-layout" });
 
@@ -5417,16 +6962,77 @@
         } }
       }));
     });
-    inbox.appendChild(el("div", { cls: "threads-inbox-top" }, [searchIn, filterBar]));
+    var modeBar = el("div", { style: "display: flex; gap: 4px; align-items: center; flex-wrap: wrap;" });
+    [["items", "Threads"], ["feed", "Activity feed"]].forEach(function (m) {
+      var on = THREAD_STATE.mode === m[0];
+      modeBar.appendChild(el("button", { cls: "seg-btn" + (on ? " active" : ""), "aria-pressed": on ? "true" : "false", text: m[1],
+        on: { click: function () { THREAD_STATE.mode = m[0]; viewThreads(activeId); } } }));
+    });
+    var unreadNow = unreadIds().length;
+    modeBar.appendChild(el("span", { style: "flex: 1;" }));
+    modeBar.appendChild(el("button", { cls: "seg-btn", disabled: unreadNow ? null : "disabled", title: "Mark every item's activity as read",
+      text: unreadNow ? "Mark " + unreadNow + " read" : "All read", on: { click: function () { markAllSeen(); paintMeta(); viewThreads(activeId); } } }));
+    var feedBar = null;
+    if (THREAD_STATE.mode === "feed") {
+      feedBar = el("div", { style: "display: flex; gap: 6px; align-items: center;" });
+      var kindSel = el("select", { cls: "filter-select", "aria-label": "Show events of kind", style: "padding: 3px 7px; font-size: 12px;",
+        on: { change: function () { THREAD_STATE.feedKind = kindSel.value; viewThreads(activeId); } } },
+        FEED_KINDS.map(function (fk) { var o = el("option", { value: fk[0], text: fk[0] === "all" ? "All events" : fk[1] }); if (THREAD_STATE.feedKind === fk[0]) o.selected = true; return o; }));
+      feedBar.appendChild(kindSel);
+      feedBar.appendChild(el("button", { cls: "seg-btn" + (THREAD_STATE.feedUnread ? " active" : ""), "aria-pressed": THREAD_STATE.feedUnread ? "true" : "false",
+        text: "Unread only", on: { click: function () { THREAD_STATE.feedUnread = !THREAD_STATE.feedUnread; viewThreads(activeId); } } }));
+    }
+    inbox.appendChild(el("div", { cls: "threads-inbox-top" }, [modeBar, searchIn, THREAD_STATE.mode === "feed" ? feedBar : filterBar]));
 
     var inboxList = el("div", { cls: "threads-inbox-list", role: "listbox", "aria-label": "Work item threads" });
     inbox.appendChild(inboxList);
 
+    function renderFeedList() {
+      inboxList.textContent = "";
+      var rows = buildFeed(), lastDay = "";
+      if (!rows.length) {
+        inboxList.appendChild(el("p", { cls: "muted", style: "padding: 12px; text-align: center;", text: THREAD_STATE.feedUnread ? "No unread activity." : "No activity matches the current filter." }));
+        return;
+      }
+      rows.slice(0, 300).forEach(function (r) {
+        if (r.day !== lastDay) { inboxList.appendChild(el("div", { cls: "feed-day", text: r.day })); lastDay = r.day; }
+        var it = ITEMS[r.id], unread = isUnread(r.id) && r.latest > (loadSeen()[r.id] || "");
+        var open = function () { THREAD_STATE.selected = r.id; go("threads/" + encodeURIComponent(r.id)); };
+        var row = el("div", { cls: "feed-row" + (unread ? " unread" : "") + (r.id === activeId ? " sel" : ""), "data-thread-id": r.id, role: "option",
+          "aria-selected": r.id === activeId ? "true" : "false", on: { click: open } }, [
+          el("span", { cls: "fr-dot" }),
+          el("div", { style: "min-width: 0;" }, [
+            el("div", { cls: "fr-title", style: "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" }, [
+              el("strong", { text: r.id + " " }), document.createTextNode(clip(it.title || "", 60))
+            ]),
+            el("div", { cls: "fr-kinds", style: r.bad ? "color: var(--bad);" : "", text: (r.bad ? "✗ verify failed · " : "") + feedSummary(r) })
+          ]),
+          it.column && it.column !== "Other" ? colChip(it.column) : el("span")
+        ]);
+        makeInteractive(row, open, r.id + " activity on " + r.day);
+        row.addEventListener("keydown", function (e) {
+          var all = Array.prototype.slice.call(inboxList.querySelectorAll(".feed-row"));
+          var i = all.indexOf(row), next = null;
+          if ((e.key === "ArrowDown" || e.key === "j") && i + 1 < all.length) next = all[i + 1];
+          else if ((e.key === "ArrowUp" || e.key === "k") && i > 0) next = all[i - 1];
+          if (!next) return;
+          e.preventDefault();
+          var nid = next.getAttribute("data-thread-id");
+          THREAD_STATE.selected = nid;
+          var idx = all.indexOf(next);
+          go("threads/" + encodeURIComponent(nid));
+          setTimeout(function () { var t = inboxList.querySelectorAll(".feed-row")[idx]; if (t) t.focus(); }, 20);
+        });
+        inboxList.appendChild(row);
+      });
+    }
+
     function renderInboxList() {
+      if (THREAD_STATE.mode === "feed") { renderFeedList(); return; }
       inboxList.textContent = "";
       var groups = [
+        { title: "Needs you / Blocked", cols: ["Blocked", "Parked"] },
         { title: "Active / In Flight", cols: ["Now"] },
-        { title: "Needs Human / Blocked", cols: ["Blocked", "Parked"] },
         { title: "Ready / Queue", cols: ["Next", "Later"] },
         { title: "Completed", cols: ["Done", "Other"] }
       ];
@@ -5466,6 +7072,7 @@
           }, [
             el("div", { cls: "thread-row-top" }, [
               el("div", { style: "display: flex; align-items: center; gap: 6px;" }, [
+                isUnread(id) ? el("span", { cls: "unread-dot", title: "New activity since you last opened it" }) : null,
                 el("strong", { style: "font-size: 12px;", text: id }),
                 it.tier ? el("span", { cls: "chip", text: "T" + it.tier }) : null,
                 missingSteps.length ? el("span", { cls: "stamp bad", title: "Missing: " + missingSteps.join(", "), text: "!" + missingSteps.length }) : null
@@ -5474,7 +7081,7 @@
             ]),
             el("div", { cls: "thread-row-title", text: clip(it.title || "(untitled)", 68) }),
             el("div", { cls: "thread-row-meta" }, [
-              el("span", { text: it.author ? "agent: " + it.author : (it.owner || "unassigned") }),
+              el("span", { text: it.author ? "agent: " + it.author : (ownerOf(it) || "No owner") }),
               pips
             ])
           ]);
@@ -5516,26 +7123,30 @@
     renderInboxList();
     layout.appendChild(inbox);
 
-    // Right Pane: Chronological Action Stream
+    // Right Pane: Chronological Action Stream + Command & Terminal Dock
     var stream = el("div", { cls: "threads-stream" });
     if (!activeItem) {
       var hasAnyItems = (M.order || []).length > 0;
-      stream.appendChild(el("div", { style: "padding: 40px; text-align: center;" }, [
-        el("h2", { text: hasAnyItems ? "No threads match this filter" : "No work item threads yet" }),
-        el("p", { cls: "muted", text: hasAnyItems
-          ? "No work items currently match the '" + THREAD_STATE.filter + "' filter."
-          : "Frame your first item with /sdlc-intake or add a row to docs/project/backlog.md." }),
-        hasAnyItems && THREAD_STATE.filter !== "all" ? el("button", {
-          cls: "cmd-btn primary",
-          style: "margin-top: 12px;",
-          text: "Show All Threads",
-          on: { click: function () {
-            THREAD_STATE.filter = "all";
-            THREAD_STATE.selected = pickDefaultThreadId();
-            viewThreads(THREAD_STATE.selected);
-          } }
-        }) : null
-      ]));
+      var emptyFeed = el("div", { cls: "thread-feed", style: "justify-content: center; align-items: center;" }, [
+        el("div", { style: "padding: 28px; text-align: center; max-width: 520px;" }, [
+          el("h2", { style: "font-size: 15px; color: var(--text);", text: hasAnyItems ? "No threads match this filter" : "No work item threads recorded yet" }),
+          el("p", { cls: "muted", text: hasAnyItems
+            ? "No work items currently match the '" + THREAD_STATE.filter + "' filter."
+            : "Frame your first item with `/sdlc-intake` or add a row to `docs/project/backlog.md`. You can still run project-wide verification and doctor checks from the Command Dock below." }),
+          hasAnyItems && THREAD_STATE.filter !== "all" ? el("button", {
+            cls: "cmd-btn primary",
+            style: "margin-top: 12px;",
+            text: "Show All Threads",
+            on: { click: function () {
+              THREAD_STATE.filter = "all";
+              THREAD_STATE.selected = pickDefaultThreadId();
+              viewThreads(THREAD_STATE.selected);
+            } }
+          }) : null
+        ])
+      ]);
+      stream.appendChild(emptyFeed);
+      stream.appendChild(renderCommandDock(null));
       layout.appendChild(stream);
       main.appendChild(layout);
       return;
@@ -5557,7 +7168,8 @@
           activeItem.author ? el("span", { cls: "chip", text: "agent: " + activeItem.author }) : null
         ]),
         el("div", { style: "display: flex; gap: 6px; flex-wrap: wrap;" }, [
-          link("Full Item Record ↗", "item/" + encodeURIComponent(activeId), "chip"),
+          el("button", { cls: "cmd-btn", style: "padding: 3px 8px; font-size: 11px;", text: "Inspector", on: { click: function () { openItemDrawer(activeId); } } }),
+          link("Full page ↗", "item/" + encodeURIComponent(activeId), "chip"),
           link("Focus on Board ↗", "board/focus/" + encodeURIComponent(activeId), "chip")
         ])
       ]),
@@ -5595,79 +7207,7 @@
       ]));
     }
     stream.appendChild(feed);
-
-    // Bottom Next-Action & Command Composer Bar
-    var nextDiag = diagnoseNextAction(activeItem);
-    var revSelect = el("select", {
-      cls: "filter-select",
-      "aria-label": "Reviewer harness",
-      on: { change: function () { THREAD_STATE.reviewer = revSelect.value; viewThreads(activeId); } }
-    }, ["codex", "claude", "gemini"].map(function (hName) {
-      var opt = el("option", { value: hName, text: "Reviewer: " + hName });
-      if ((THREAD_STATE.reviewer || c.preferred_reviewer || "codex") === hName) opt.selected = true;
-      return opt;
-    }));
-
-    var roleList = ((kit.installed && kit.installed.roles) || []).filter(function (r) { return r.active; }).map(function (r) { return r.name; });
-    if (!roleList.length) roleList = ["qa", "security", "architect", "software-engineer"];
-    var curRole = THREAD_STATE.role || activeItem.owner || roleList[0];
-    if (roleList.indexOf(curRole) < 0) roleList.unshift(curRole);
-    var roleSelect = el("select", {
-      cls: "filter-select",
-      "aria-label": "Review role",
-      on: { change: function () { THREAD_STATE.role = roleSelect.value; viewThreads(activeId); } }
-    }, roleList.map(function (rName) {
-      var opt = el("option", { value: rName, text: "Role: " + rName });
-      if (curRole === rName) opt.selected = true;
-      return opt;
-    }));
-
-    var chosenReviewer = THREAD_STATE.reviewer || c.preferred_reviewer || "codex";
-    var composer = el("div", { cls: "thread-composer" }, [
-      el("div", { cls: "composer-next" }, [
-        el("div", null, [
-          el("strong", { text: "Next Action: " }),
-          el("span", { text: nextDiag.label })
-        ]),
-        nextDiag.cmd ? el("button", {
-          cls: "cmd-btn primary",
-          text: "Copy Next Step: " + clip(nextDiag.cmd, 44),
-          on: { click: function () { copyCmd(nextDiag.cmd, "Next Step"); } }
-        }) : null
-      ]),
-      el("div", { cls: "composer-actions" }, [
-        el("button", {
-          cls: "cmd-btn",
-          text: "Verify Suite",
-          title: "Copy sdlc.py verify --parallel command",
-          on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py verify --parallel", "Verify"); } }
-        }),
-        el("button", {
-          cls: "cmd-btn",
-          text: "Plan-Check",
-          title: "Copy sdlc.py plan-check command",
-          on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py plan-check " + activeId, "Plan-Check"); } }
-        }),
-        revSelect,
-        roleSelect,
-        el("button", {
-          cls: "cmd-btn",
-          text: "Second-Agent Review",
-          title: "Copy cross-harness sdlc.py review command",
-          on: { click: function () {
-            var cmd = "python3 .ai-sdlc/bin/sdlc.py review " + activeId + " --role " + curRole + " --by " + chosenReviewer;
-            copyCmd(cmd, "Independent Review");
-          } }
-        }),
-        el("button", {
-          cls: "cmd-btn",
-          text: "Draft Worklog",
-          title: "Copy sdlc.py log --since main --write command",
-          on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py log --since main --write", "Worklog"); } }
-        })
-      ])
-    ]);
-    stream.appendChild(composer);
+    stream.appendChild(renderCommandDock(activeItem));
     layout.appendChild(stream);
     main.appendChild(layout);
   }
@@ -5683,16 +7223,25 @@
     var inst = kit.installed || {};
     var fixable = kit.fixable || [];
 
-    var hdrRow = el("div", { style: "display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;" }, [
+    var hdrRow = el("div", { cls: "view-header" }, [
       el("div", null, [
         h(1, "Kit Constraints, Status & Auto-Repair"),
-        el("p", { cls: "muted", style: "margin-top: 2px;", text: "Adjust effort level, second-reviewer requirements, and Token-Saving Mode, inspect what is installed, and fix broken kit setup." })
+        el("p", { cls: "view-subtitle", text: "Adjust effort level, second-reviewer requirements, and Token-Saving Mode, inspect what is installed, and fix broken kit setup." })
       ]),
-      el("span", {
-        cls: "stamp " + (LIVE ? "ok" : "warn"),
-        style: "padding: 5px 10px; font-size: 11px;",
-        text: LIVE ? "LIVE SERVER (--SERVE) · 1-CLICK SAVE ACTIVE" : "STATIC SNAPSHOT · STAGES CLI COMMAND"
-      })
+      el("div", { style: "display: flex; gap: 6px; align-items: center;" }, [
+        LIVE && M.action_token ? el("button", {
+          cls: "cmd-btn run-btn",
+          text: "▶ Run Doctor Audit",
+          on: { click: function () {
+            runKitCmd({ subcommand: "doctor", strict: false }, "python3 .ai-sdlc/bin/sdlc.py doctor", "Doctor Audit");
+          } }
+        }) : null,
+        el("span", {
+          cls: "stamp " + (LIVE ? "ok" : "warn"),
+          style: "padding: 5px 10px; font-size: 11px;",
+          text: LIVE ? "LIVE SERVER (--SERVE) · 1-CLICK SAVE ACTIVE" : "STATIC PREVIEW · COPIES CLI COMMAND"
+        })
+      ])
     ]);
     main.appendChild(hdrRow);
 
@@ -5705,28 +7254,6 @@
       el("div", { cls: "stat" }, [el("b", { text: String(fixable.length) }), el("span", { text: fixable.length ? "Fixable Setup Issues" : "Setup Health: Clean" })])
     ]);
     main.appendChild(strip);
-
-    // Static-mode Staged CLI Command Builder Bar
-    var stagedCmd = !LIVE ? buildStagedKitCommand() : "";
-    if (stagedCmd) {
-      main.appendChild(el("div", { cls: "cli-staging-bar" }, [
-        el("span", { cls: "stamp warn", text: "STAGED FOR CLI" }),
-        el("code", { text: stagedCmd }),
-        el("button", {
-          cls: "cmd-btn primary",
-          text: "Copy Combined Command",
-          on: { click: function () { copyCmd(stagedCmd, "Combined Kit Update"); } }
-        }),
-        el("button", {
-          cls: "cmd-btn",
-          text: "Reset",
-          on: { click: function () {
-            STAGED_KIT = { config: {}, fixes: [] };
-            render();
-          } }
-        })
-      ]));
-    }
 
     if (kit.reviewer_warning) {
       main.appendChild(el("div", {
@@ -6061,6 +7588,7 @@
     if (route === "threads") viewThreads(decodeURIComponent(parts[1] || ""));
     else if (route === "kit") viewKit();
     else if (route === "map") viewMap();
+    else if (route === "cockpit") viewCockpit(parts[1] || "");
     else if (route === "board") {
       var focusId = null, stageFilter = null;
       if (parts[1] === "focus") {
@@ -6073,15 +7601,16 @@
       }
       viewBoard(focusId, stageFilter);
     }
-    else if (route === "activity") viewActivity();
+    else if (route === "activity") { THREAD_STATE.mode = "feed"; location.replace("#/threads"); return; }
     else if (route === "waiting" || route === "blockages") viewWaiting();
     else if (route === "git") viewGit();
     else if (route === "docs") viewDocs();
     else if (route === "item") viewItem(decodeURIComponent(parts[1] || ""));
     else if (route === "doc") viewDoc(decodeURIComponent(parts[1] || ""), parts[2] !== undefined ? +parts[2] : undefined);
     else if (route === "search") viewSearch(decodeURIComponent(parts.slice(1).join("/")));
-    else viewMap();
+    else viewThreads("");
     if (render.same) window.scrollTo(0, y);
+    markSelected();
     render.same = false;
   }
   var lastHash = location.hash;
@@ -6110,13 +7639,17 @@
       var open = [].map.call(document.querySelectorAll("details[open] > summary"), function (x) {
         return x.textContent.replace(/[0-9]+/g, "#");
       });
+      var prevModel = M;
       load(model);
+      diffModels(prevModel, model);
       liveAt = new Date();
       paintMeta();
       render();
       [].forEach.call(document.querySelectorAll("details > summary"), function (x) {
         if (open.indexOf(x.textContent.replace(/[0-9]+/g, "#")) >= 0) x.parentNode.open = true;
       });
+      // A docked inspector follows the new model without taking focus.
+      if (isDocked() && INSPECT && INSPECT.kind === "item" && !(drawerEl.contains(document.activeElement))) reopenInspect(INSPECT, true);
     }
     document.addEventListener("focusout", function () { if (pending) setTimeout(function () { if (pending) apply(pending); }, 0); });
     function poll() {
@@ -6133,6 +7666,7 @@
           }).then(apply);
         }
         if (was !== "live") paintMeta();
+        else paintActivityBar();
       }).catch(function () {
         if (liveState !== "down") { liveState = "down"; paintMeta(); }
       }).then(function () {

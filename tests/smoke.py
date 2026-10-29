@@ -1148,6 +1148,7 @@ def test_view():
             "stages": [{"stage": "lint", "result": lint, "exit_code": 0, "seconds": 1.5},
                        {"stage": "unit", "result": "Verified: pass", "exit_code": 0, "seconds": 2.0},
                        {"stage": "perf", "result": "Absent (declared)"}]}))
+        write(d, ".ai-sdlc/evidence/%s/lint.log" % folder, "lint output for %s\n" % folder)
     script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
     p = subprocess.Popen([sys.executable, script, "view", "--json"], cwd=d,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -1217,6 +1218,9 @@ def test_view():
     check("threads and kit tabs present in page",
           'data-r="threads"' in page and 'data-r="kit"' in page and "viewThreads" in page and "viewKit" in page)
     check("the flow chart and verify grid are in the page", "drawFlowChart" in page and "drawVerifyGrid" in page)
+    check("the page has the cockpit, inspector, activity bar and inbox feed",
+          'data-r="cockpit"' in page and "viewCockpit" in page and 'id="activity-bar"' in page
+          and "openLogDrawer" in page and "buildFeed" in page and 'data-r="activity"' not in page)
     svg_map = read(d, ".ai-sdlc/view/map.svg")
     check("formatted SVG map is written", "<svg" in svg_map and "</svg>" in svg_map and "viewBox" in svg_map)
     check("the page is git-ignored", read(d, ".ai-sdlc/view/.gitignore").strip() == "*")
@@ -1292,6 +1296,31 @@ def test_view():
         code_fix, out_fix = post("/api/fix", {"action": "wire-pointer"})
         check("POST /api/fix repairs missing CLAUDE.md pointer",
               code_fix == 200 and "AGENTS.md" in read(d, "CLAUDE.md"), out_fix)
+        code_run, out_run = post("/api/run", {"subcommand": "trailers", "args": ["VWX-2", "--model", "gpt-5"]})
+        run_res = json.loads(out_run) if code_run == 200 else {}
+        check("POST /api/run executes whitelisted sdlc subcommand and returns output",
+              code_run == 200 and run_res.get("ok") is True and "Work-Item: VWX-2" in run_res.get("output", ""),
+              out_run)
+        code_disallow, _ = post("/api/run", {"subcommand": "view", "args": ["--serve"]})
+        check("POST /api/run refuses non-whitelisted subcommands", code_disallow == 400, str(code_disallow))
+        run_id = run_res.get("run_id", "")
+        _, body_runs, _ = get("/model.json")
+        runs = json.loads(body_runs).get("runs", [])
+        check("a run from the page is kept and listed in the model without its output",
+              run_id and any(r["id"] == run_id and r["sub"] == "trailers" for r in runs)
+              and all("output" not in r for r in runs), str(runs)[:300])
+        check("kept runs are git-ignored", os.path.exists(os.path.join(d, ".ai-sdlc", "runs", ".gitignore")))
+        code_log, text_log, _ = get("/api/log?kind=run&id=%s" % run_id)
+        check("/api/log returns a kept run's output", code_log == 200 and "Work-Item: VWX-2" in text_log,
+              text_log[:200])
+        code_log, text_log, _ = get("/api/log?kind=evidence&id=20260102T000000Z&stage=lint")
+        check("/api/log returns an evidence stage log", code_log == 200 and "20260102T000000Z" in text_log,
+              text_log[:200])
+        bad = [get(q)[0] for q in ("/api/log?kind=evidence&id=20260102T000000Z&stage=../summary",
+                                   "/api/log?kind=evidence&id=..%2F..&stage=lint",
+                                   "/api/log?kind=run&id=../../AGENTS",
+                                   "/api/log?kind=other&id=20260102T000000Z")]
+        check("/api/log refuses anything but a known stage log or kept run", bad == [404] * 4, str(bad))
     finally:
         server.terminate()
         server.wait(timeout=10)
@@ -2934,6 +2963,51 @@ def test_arrow_keys():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_semver():
+    print("semver: the next kit version from Conventional Commits")
+    d = tempfile.mkdtemp()
+    tool = os.path.join(ROOT, "tools", "semver.py")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q"], cwd=d)
+    write(d, "VERSION", "4.0.0\n")
+    write(d, ".claude-plugin/plugin.json", '{\n  "name": "x",\n  "version": "4.0.0"\n}\n')
+    write(d, "CHANGELOG.md", "# Changelog\n\n## Unreleased\n\n## 4.0.0 — 2026-10-19\n\n- first\n")
+    subprocess.call(["git", "add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "docs(release): 4.0.0"], cwd=d)
+
+    def commit(msg, name):
+        write(d, name, msg)
+        subprocess.call(["git", "add", "-A"], cwd=d)
+        subprocess.call(git + ["commit", "-qm", msg], cwd=d)
+
+    def nxt(*extra):
+        p = subprocess.run([sys.executable, tool, "next", "--root", d] + list(extra), stdout=subprocess.PIPE,
+                           universal_newlines=True)
+        return p.stdout.strip()
+
+    check("no commits since VERSION changed is no bump", nxt() == "4.0.0", nxt())
+    commit("fix(view): a typo", "a.txt")
+    check("a fix is a patch", nxt() == "4.0.1", nxt())
+    commit("docs,feat(kit): a feature", "b.txt")
+    check("a feat among several types is a minor", nxt() == "4.1.0", nxt())
+    check("a branch build gets a dev prerelease", re.match(r"^4\.1\.0-dev\.2\+[0-9a-f]+$", nxt("--prerelease")) is not None,
+          nxt("--prerelease"))
+    commit("refactor(api)!: drop the old flag", "c.txt")
+    check("a ! after the type is a major", nxt() == "5.0.0", nxt())
+    out = subprocess.run([sys.executable, tool, "bump", "--root", d], stdout=subprocess.PIPE,
+                         universal_newlines=True).stdout.strip()
+    changelog = read(d, "CHANGELOG.md")
+    check("bump writes VERSION, plugin.json and the changelog section",
+          out == "5.0.0" and read(d, "VERSION").strip() == "5.0.0"
+          and '"version": "5.0.0"' in read(d, ".claude-plugin/plugin.json")
+          and "## Unreleased\n\n## 5.0.0 — " in changelog and "- refactor(api)!: drop the old flag" in changelog
+          and "## 4.0.0 — 2026-10-19" in changelog, changelog[:300])
+    subprocess.call(["git", "add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "chore(release): v5.0.0 [skip ci]"], cwd=d)
+    check("the release commit itself starts no new release", nxt() == "5.0.0", nxt())
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -2950,7 +3024,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack):
+                 test_epics, test_decision_and_stack, test_semver):
         test()
     print("")
     if failures:
