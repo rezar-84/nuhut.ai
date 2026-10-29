@@ -1905,7 +1905,7 @@
     });
     f.waitingIds.forEach(function (id) {
       var it = ITEMS[id], x = it.extra || {};
-      var who = x["Waiting on whom"] || x["Unblocked by"] || "";
+      var who = x["Waiting on whom"] || x["Who can unblock"] || x["Unblocked by"] || "";
       needRow("warn", it.column, id + " " + clip(it.title || "", 80), (who ? "Waiting on " + who : "No one is named to unblock it") + (x["Decision needed"] ? " · " + x["Decision needed"] : ""),
         function () { markSeen(id); openItemDrawer(id); }, x.Since ? "since " + x.Since : "");
     });
@@ -6738,7 +6738,7 @@
             return el("span", { cls: "stamp " + (p.kind === "REMOVED" ? "neutral" : "warn"), title: "Pending in " + p.item, text: p.kind.toLowerCase() + " by " + p.item });
           }))),
           r.body ? el("p", { cls: "req-body", text: r.body }) : null,
-          el("ul", { cls: "req-scen" }, r.scenarios.map(function (sc) { return el("li", null, [el("strong", { text: sc.name + ": " }), sc.body.replace(/\*\*/g, "").replace(/\n+/g, " ")]); }))
+          el("ul", { cls: "req-scen" }, r.scenarios.map(function (sc) { return el("li", null, [el("strong", { text: sc.name + ": " }), sc.body.replace(/\*\*/g, "").replace(/^\s*[-*]\s*/gm, "").replace(/\n+/g, " · ")]); }))
         ]));
       });
     }
@@ -7000,7 +7000,7 @@
     // A blocked item's next step is whatever unblocks it; no command run here can.
     if (col === "Parked" || col === "Blocked") {
       var x = it.extra || {};
-      var who = x["Waiting on whom"] || x["Unblocked by"] || "";
+      var who = x["Waiting on whom"] || x["Who can unblock"] || x["Unblocked by"] || "";
       var openDeps = (it.depends || []).filter(function (d) { return !ITEMS[d] || ITEMS[d].column !== "Done"; });
       var decision = x["Decision needed"] || x["Blocked on"] || "";
       return {

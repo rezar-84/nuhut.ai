@@ -72,6 +72,10 @@ def drive(args, rules, timeout=60, mode="--full", plain=True, env=None):
         # before that would answer the next question instead.
         if not plain and not re.search(r"(└  |^'  |› \[|> \[)", text, re.M):
             continue
+        # A typed prompt waits on its own line; output that ends in a newline is still
+        # being printed (a slow detection step), so answering now would answer too early.
+        if plain and (not text or text.endswith("\n")):
+            continue
         buf = b""
         answer = ""
         for i, (needle, reply) in enumerate(rules):
@@ -3204,6 +3208,92 @@ def test_specs():
           model.get("specs", {}).get("enabled") is True and any(e["kind"] == "spec_change" for e in model.get("items", {}).get("SPX-2", {}).get("thread", [])),
           str(model.get("specs", {}).get("error", ""))[:200])
     shutil.rmtree(d, ignore_errors=True)
+    d = tempfile.mkdtemp(prefix="sdlc-specs-on-")
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "SPY", "-y", "--specs", "on"])
+    check("--specs on writes the charter row and installs the sdlc-spec skill",
+          code == 0 and "| **Specs** | `on` |" in read(d, "docs/project/charter.md")
+          and os.path.isdir(os.path.join(d, ".claude", "skills", "sdlc-spec")), out[-300:])
+    shutil.rmtree(d, ignore_errors=True)
+    d = fixture("next")
+    code, log = drive([d, "SPZ"], [("Keep living specs of what the system does?", "y")])
+    check("the guided setup asks about living specs and applies the answer",
+          code == 0 and "| **Specs** | `on` |" in read(d, "docs/project/charter.md"), log[-400:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_upgrade_to_41():
+    """A 4.0.x install from before the Project lens (80c6748) upgrades: the new runtime
+    modules, templates and process doc arrive, the records stay, and the new commands run."""
+    print("upgrade from a 4.0 install to the lens, claims and specs")
+    ref = subprocess.run(["git", "rev-parse", "--verify", "--quiet", "80c6748^{commit}"], cwd=ROOT,
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if ref.returncode != 0:
+        print("  skip  80c6748 is not in this clone (CI fetches full history)")
+        return
+    scratch = tempfile.mkdtemp(prefix="sdlc-40-")
+    old = os.path.join(scratch, "kit-40")
+    subprocess.check_call(["git", "worktree", "add", "--detach", "--quiet", old, "80c6748"], cwd=ROOT)
+    try:
+        d = os.path.join(scratch, "project")
+        os.makedirs(d)
+        subprocess.call(["git", "init", "-q", d])
+        p = subprocess.run([sys.executable, os.path.join(old, "install.py"), d, "UPG", "-y"], cwd=old,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        check("4.0 installs", p.returncode == 0, p.stdout.decode("utf-8", "replace")[-300:])
+        check("the fixture has no lens yet", not os.path.exists(os.path.join(d, ".ai-sdlc", "bin", "lens.py")))
+        write(d, "docs/project/worklog.md", read(d, "docs/project/worklog.md") + "\n## UPG-001 — first item\n\n**Date:** 2026-10-01\n**Status:** Done\n")
+        charter_before = read(d, "docs/project/charter.md")
+        worklog_before = read(d, "docs/project/worklog.md")
+        code, out = run([d, "UPG", "--upgrade"])
+        check("the upgrade succeeds", code == 0, out[-400:])
+        bin_dir = os.path.join(d, ".ai-sdlc", "bin")
+        check("the new runtime modules arrive",
+              all(os.path.isfile(os.path.join(bin_dir, f)) for f in ("detect.py", "lens.py", "claims.py", "specs.py")), str(os.listdir(bin_dir)))
+        check("the new templates and process doc arrive",
+              all(os.path.isfile(os.path.join(d, "docs", rel)) for rel in ("templates/spec.md", "templates/spec-change.md", "process/15-specs.md")))
+        after = read(d, "docs/project/charter.md").splitlines()
+        added = [l for l in after if l not in charter_before.splitlines()]
+        check("project records keep every line; the charter only gains the new Specs row",
+              all(l in after for l in charter_before.splitlines()) and len(added) == 1 and added[0].startswith("| **Specs** |")
+              and read(d, "docs/project/worklog.md") == worklog_before, str(added)[:300])
+        script = os.path.join(bin_dir, "sdlc.py")
+        for args in (("lens", "--area", "stack"), ("claims",), ("spec", "list"), ("parallel",)):
+            p = subprocess.run([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            check("after the upgrade, sdlc.py %s runs" % " ".join(args), p.returncode == 0, p.stdout.decode("utf-8", "replace")[-300:])
+    finally:
+        subprocess.call(["git", "worktree", "remove", "--force", old], cwd=ROOT)
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_demo_project():
+    print("demo project and runtime help")
+    d = os.path.join(tempfile.mkdtemp(prefix="sdlc-demo-"), "acme")
+    p = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "demo_project.py"), d],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out = p.stdout.decode("utf-8", "replace")
+    check("the demo builds", p.returncode == 0 and "view --serve" in out, out[-400:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    p = subprocess.run([sys.executable, script, "view", "--json"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    model = json.loads(p.stdout.decode("utf-8", "replace")) if p.returncode == 0 else {}
+    cols = set(it["column"] for it in model.get("items", {}).values())
+    check("every board column is populated", set(["Now", "Next", "Blocked", "Parked", "Later", "Done"]) <= cols, str(cols))
+    check("the demo has claims, a pending spec change and two verify runs",
+          len(model.get("claims", [])) == 2 and model.get("specs", {}).get("changes")
+          and len(model.get("evidence", [])) == 2, str([len(model.get("claims", [])), len(model.get("evidence", []))]))
+    p = subprocess.run([sys.executable, script, "lens", "--json"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    lens = json.loads(p.stdout.decode("utf-8", "replace")) if p.returncode == 0 else {}
+    check("the demo's lens shows a failing build and a vulnerable package",
+          lens.get("summary", {}).get("build", {}).get("failing") == ["typecheck"]
+          and lens.get("summary", {}).get("security", {}).get("critical_high", 0) >= 1, str(lens.get("summary", {}))[:300])
+    p = subprocess.run([sys.executable, script, "--help"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    helptext = p.stdout.decode("utf-8", "replace")
+    check("sdlc.py --help is grouped, with an example per command",
+          p.returncode == 0 and "Records and checks" in helptext and "Work items and agents" in helptext
+          and "claim ACME-12" in helptext, helptext[:300])
+    p = subprocess.run([sys.executable, script, "claim", "-h"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    check("a command's own -h shows examples", "examples:" in p.stdout.decode("utf-8", "replace"))
+    shutil.rmtree(os.path.dirname(d), ignore_errors=True)
 
 
 def test_semver():
@@ -3267,7 +3357,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs):
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_upgrade_to_41, test_demo_project):
         test()
     print("")
     if failures:

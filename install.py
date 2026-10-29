@@ -171,6 +171,8 @@ EN = {
     "h.effort": "Lean minimizes optional work, Normal is balanced, Beast maximizes investigation and verification. Risk-tier requirements never change.",
     "q.acquisition": "Acquisition profile",
     "q.devmethod": "Development method",
+    "q.specs": "Keep living specs of what the system does?",
+    "h.specs": "Living specs describe current behaviour as requirements with WHEN/THEN scenarios (docs/project/specs/). Tier 1-2 items that change behaviour then carry a spec change, applied when the item closes. Off by default; turn on later with sdlc.py config --specs on.",
     "h.devmethod": "Item runs one work item at a time and stops at each one's approvals. Epic plans several items together, gets one approval for the plan, and stops at the checkpoints it chooses. Checks, reviews and tier approvals never change.",
     "q.decision": "Decision style -- how much the agent decides for you",
     "h.decision": "How much the agent decides for you. Ask puts every material choice to you with options and trade-offs. Guide recommends in plain language and asks. Autopilot takes the recommended option and logs it for review. Tier 1 surfaces and gated commands always stop for a named human, in every style.",
@@ -213,6 +215,7 @@ EN = {
     "l.effort": "Default effort mode",
     "l.acquisition": "Acquisition profile",
     "l.devmethod": "Development method",
+    "l.specs": "Living specs",
     "l.decision": "Decision style",
     "l.approval": "Human approval for",
     "l.forbidden": "Forbidden here",
@@ -378,6 +381,7 @@ EN = {
     "x.preset": "one choice that sets the next four; you can still change each of them",
     "x.effort": "how much investigation and review beyond the required minimum",
     "x.devmethod": "Epic suits a feature made of several related changes",
+    "x.specs": "Worth it when behaviour outlives the people who wrote it, or when you used Spec Kit or OpenSpec",
     "x.decision": "for choices with trade-offs; risky changes always stop for you",
     "x.tier": "every change is sorted into a risk tier; this sets how much record each needs",
     "x.acquisition": "only matters for scrapers and crawlers",
@@ -585,6 +589,7 @@ How the agent works  (all project defaults, changeable later in the charter)
   --dev-method <name>    item | epic             -- one work item, or a planned group
   --tier-rules <name>    standard | strict       -- how heavy each risk tier is
   --independent-review   none | tier1 | tier1-2  -- when a second model family is required
+  --specs on|off         living specs of what the system does (default: off)
 
 Which AI tools read it
   --harness <list>       claude, cursor, copilot, gemini, windsurf, cline, roo, amp,
@@ -599,10 +604,8 @@ What gets installed
   --deploy <list>        platform checklists, e.g. vercel,cloudflare-edge (or none)
   --profile <name>       full (default) | compact -- shorter docs for small models
   --no-skills            no skills in .claude/skills/
-  --scaffold-tests       a starter test plan from the detected tooling
-  --scaffold-ci <p>      a starter CI workflow: github | gitlab
-  --gitignore-tools      keep .ai-sdlc/ out of git via .gitignore
-  --git-exclude          ... or via .git/info/exclude (local only)
+  --scaffold-tests, --scaffold-ci github|gitlab   a starter test plan, a starter CI
+  --gitignore-tools | --git-exclude    keep .ai-sdlc/ out of git (shared | local only)
   --acquisition-profile  standard | advanced -- for scrapers and crawlers
 
 Running it
@@ -690,6 +693,9 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --effort-mode <name>
                      project default: lean, normal (default), or beast. This changes
                      solution and review depth, never the risk-tier safety floor.
+  --specs on|off
+                     living specs of what the system does (docs/project/specs/), with a
+                     spec change per Tier 1-2 behaviour change. Default: off.
   --dev-method <name>
                      project default: item (default) or epic. Epic plans several
                      work items together and stops at chosen checkpoints; every
@@ -762,6 +768,7 @@ class Options(object):
         self.effort_given = False
         self.dev_method = "item"
         self.dev_method_given = False
+        self.specs = ""
         self.decision_style = "guide"
         self.decision_given = False
         self.acquisition_given = False
@@ -911,6 +918,11 @@ def parse_args(argv):
             if i + 1 >= len(argv) or argv[i + 1] not in ("lean", "normal", "beast"):
                 bad_value("--effort-mode requires lean, normal, or beast")
             o.effort_mode, o.effort_given = argv[i + 1], True
+            i += 1
+        elif arg == "--specs":
+            if i + 1 >= len(argv) or argv[i + 1] not in ("on", "off"):
+                bad_value("--specs requires on or off")
+            o.specs = argv[i + 1]
             i += 1
         elif arg == "--dev-method":
             if i + 1 >= len(argv) or argv[i + 1] not in ("item", "epic"):
@@ -1279,6 +1291,12 @@ class Wizard(object):
                       charter.read_text(encoding="utf-8", errors="replace"), re.M)
         return m.group(1) if m else ""
 
+    def specs_on(self):
+        flag = getattr(self.o, "specs", "")
+        if flag:
+            return flag == "on"
+        return bool(self.a.get("specs"))
+
     def skills(self, rules_only=False):
         """(name, on, why) for every skill this kit ships, judged by the answers.
         rules_only ignores a pick made at the skills question."""
@@ -1289,7 +1307,7 @@ class Wizard(object):
             if rule == "always":
                 on = True
             elif rule == "opt_in":
-                on = False
+                on = name == "sdlc-spec" and self.specs_on()
             elif rule == "pii_or_deploy":
                 on = bool(self.fact("pii") or self.fact("deploy"))
             elif rule == "multilingual":
@@ -2662,6 +2680,8 @@ def build_steps(w):
         Step("devmethod", "sec.process", "choice", "q.devmethod", help="h.devmethod",
              options=DEV_METHOD_OPTIONS, default=lambda w: {"item": "i", "epic": "e"}[
                  preset_field(w, "dev_method")], label="l.devmethod"),
+        Step("specs", "sec.process", "yesno", "q.specs", help="h.specs", label="l.specs",
+             default=lambda w: getattr(w.o, "specs", "") == "on", when=lambda w: not getattr(w.o, "specs", "")),
         Step("decision", "sec.process", "choice", "q.decision", help="h.decision",
              options=DECISION_OPTIONS, default=lambda w: {"ask": "a", "guide": "g", "autopilot": "p"}[
                  preset_field(w, "decision_style")], label="l.decision"),
@@ -4042,6 +4062,8 @@ class Installer(object):
             text = fill_row(text, "**Acquisition profile**", selected_acquisition(self.w))
         if self.o.dev_method_given:
             text = fill_row(text, "**Development method**", selected_dev_method(self.w))
+        if getattr(self.o, "specs", ""):
+            text = fill_row(text, "**Specs**", "`%s`" % self.o.specs)
         if self.o.decision_given:
             text = fill_row(text, "**Decision style**", selected_decision(self.w))
         if self.o.tier_rules_given:
@@ -4093,6 +4115,7 @@ class Installer(object):
         text = fill_row(text, "**Default effort mode**", selected_effort(w))
         text = fill_row(text, "**Acquisition profile**", selected_acquisition(w))
         text = fill_row(text, "**Development method**", selected_dev_method(w))
+        text = fill_row(text, "**Specs**", "`on`" if w.specs_on() else "`off`")
         if self.o.tier_rules_given or a.get("tier"):
             text = fill_row(text, "**Tier rules**", selected_tier_rules(w))
         if self.o.independent_review_given:

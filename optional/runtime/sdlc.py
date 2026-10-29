@@ -2745,14 +2745,84 @@ def print_lens(data, area=None):
             print("  %s  %s  %s" % (i["level"], i["title"], i["detail"]))
 
 
+MAIN_HELP = """usage: python3 .ai-sdlc/bin/sdlc.py <command> [options]     (every command: <command> -h)
+
+The mechanical half of the Nuhut process: checks, evidence, the viewer, claims and specs.
+
+Records and checks
+  doctor              audit the records: stale rows, unproven Verified claims, gaps   doctor --strict
+  verify              run the charter's checks in order and keep the evidence        verify --parallel
+  bite <test cmd>     do the tests fail without the change and pass with it?          bite npm test
+  plan-check <ID>     does the branch's diff match the plan's Files that change?     plan-check ACME-12
+
+Viewer and reports
+  view                the project as an interactive page; --serve keeps it live      view --serve
+  lens                stack, deps, build errors, security, deploy, env, agents       lens --area security
+  audit               run the dependency scanner and keep the vulnerable packages    audit
+  metrics             process measures from the records and git                       metrics
+
+Work items and agents
+  claim <ID>          take an item: atomic claim, its branch and its own worktree     claim ACME-12
+  release <ID>        free it (--remove-worktree to clean up)                         release ACME-12
+  claims / parallel   who holds what / which Ready items can run side by side        parallel
+  trailers <ID>       the Work-Item, Agent and Model commit trailers                   trailers ACME-12
+  review <ID>         one role's review of the diff, by another model family          review ACME-12 --role security --by codex
+  log                 draft worklog lines from commits and verify runs                log --since main --write
+
+Specs (when the charter's Specs row is on)
+  spec                list, show, validate, apply <ID> [--write]                       spec apply ACME-12 --write
+
+Setup
+  config              see or change the charter's constraints                          config --specs on
+  fix                 repair setup drift without touching kit files                    fix all
+
+Options: --root <dir> runs against another project; --selftest checks the runtime itself.
+Guides: docs/cli.md, docs/viewer.md, docs/multi-agent.md and docs/specs.md in the kit repository.
+"""
+
+EXAMPLES = {
+    "doctor": ["doctor", "doctor --strict          # exit 1 on a fail-level finding (CI)", "doctor --json"],
+    "verify": ["verify --parallel", "verify --stage lint,unit", "verify --timeout 900"],
+    "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict"],
+    "view": ["view                     # write .ai-sdlc/view/index.html and open it",
+             "view --serve             # live page on 127.0.0.1",
+             "view --serve --github    # also open GitHub issues and PRs", "view --export-html report.html"],
+    "metrics": ["metrics", "metrics --json"],
+    "log": ["log --since main", "log --since main --id ACME-12 --write"],
+    "trailers": ["trailers ACME-12 --agent claude"],
+    "review": ["review ACME-12 --role security --by codex",
+               "review ACME-12 --role architect --by gemini --stage design"],
+    "bite": ["bite npm test", "bite --restore"],
+    "config": ["config                   # show the constraints", "config --effort Lean --independent-review tier1",
+               "config --specs on", "config --set-check unit='npm test'"],
+    "fix": ["fix all", "fix wire-pointer"],
+    "lens": ["lens", "lens --area build", "lens --user --json"],
+    "audit": ["audit", "audit --strict           # exit 1 on a critical or high vulnerability"],
+    "spec": ["spec list", "spec validate --strict", "spec apply ACME-12          # dry run",
+             "spec apply ACME-12 --write"],
+    "claim": ["claim ACME-12", "claim ACME-12 --no-worktree --mark",
+              "claim ACME-12 --agent codex --worktree ../acme-12"],
+    "release": ["release ACME-12", "release ACME-12 --remove-worktree"],
+    "claims": ["claims", "claims --json"],
+    "parallel": ["parallel", "parallel --json"],
+}
+
+
+class _Main(argparse.ArgumentParser):
+    """The top-level help, grouped by what you are doing, with an example per command."""
+
+    def format_help(self):
+        return MAIN_HELP
+
+
 def main(argv):
     if argv == ["--selftest"]:
         selftest()
         return 0
-    parser = argparse.ArgumentParser(prog="sdlc.py", description=__doc__.split("\n\n")[0])
+    parser = _Main(prog="sdlc.py", description=__doc__.split("\n\n")[0])
     parser.add_argument("--root", help="project root (default: the project this file is "
                         "installed in)")
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="command", parser_class=argparse.ArgumentParser)
     doc = sub.add_parser("doctor", help="mechanical checks of the SDLC records")
     doc.add_argument("--json", action="store_true", help="print findings as JSON")
     doc.add_argument("--strict", action="store_true",
@@ -2888,6 +2958,10 @@ def main(argv):
     au.add_argument("--timeout", type=int, default=600, help="seconds before the scanner is stopped")
     au.add_argument("--strict", action="store_true", help="exit 1 on a critical or high vulnerability")
     au.add_argument("--json", action="store_true", help="print the stored result as JSON")
+    for name, sp_ in sub.choices.items():
+        if name in EXAMPLES:
+            sp_.formatter_class = argparse.RawDescriptionHelpFormatter
+            sp_.epilog = "examples:\n" + "\n".join("  python3 .ai-sdlc/bin/sdlc.py " + e for e in EXAMPLES[name])
     opts = parser.parse_args(argv)
     if not opts.command:
         parser.print_help()

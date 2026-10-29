@@ -228,6 +228,55 @@ def card_fidelity(errors):
             errors.append("AGENTS.md no longer names %s as escalation" % rel)
 
 
+NUMBER_WORDS = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+                "fifteen sixteen seventeen eighteen nineteen twenty").split()
+
+
+def number_word(n):
+    if n <= 20:
+        return NUMBER_WORDS[n]
+    tens = {2: "twenty", 3: "thirty"}[n // 10]
+    return tens + ("-" + NUMBER_WORDS[n % 10] if n % 10 else "")
+
+
+def docs_stay_true(errors):
+    """The user-facing docs describe what ships: every runtime command is documented, every
+    viewer tab is described, every skill is listed and counted, and every image exists."""
+    sdlc_src = (ROOT / "optional" / "runtime" / "sdlc.py").read_text(encoding="utf-8")
+    commands = re.findall(r'sub\.add_parser\("([a-z-]+)"', sdlc_src)
+    cli = (ROOT / "docs" / "cli.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for cmd in commands:
+        if "`%s" % cmd not in cli:
+            errors.append("docs/cli.md does not document `sdlc.py %s`" % cmd)
+        if not re.search(r"`%s\b" % re.escape(cmd), readme):
+            errors.append("README.md's command list is missing `%s`" % cmd)
+    shell = (ROOT / "optional" / "runtime" / "view" / "02-shell.html").read_text(encoding="utf-8")
+    viewer_doc = (ROOT / "docs" / "viewer.md").read_text(encoding="utf-8")
+    for label in re.findall(r'data-r="[a-z]+"[^>]*>([^<]+)</a>', shell):
+        if "**%s**" % label.strip() not in viewer_doc:
+            errors.append("docs/viewer.md does not describe the %s tab" % label.strip())
+    skills_doc = (ROOT / "docs" / "skills.md").read_text(encoding="utf-8")
+    skill_dirs = sorted(p.name for p in (ROOT / "optional" / "skills").iterdir() if p.is_dir())
+    for name in skill_dirs:
+        if "`%s`" % name not in skills_doc:
+            errors.append("docs/skills.md does not list the %s skill" % name)
+    count = number_word(len(skill_dirs))
+    for doc in (ROOT / "docs" / "skills.md", ROOT / "docs" / "design.md"):
+        text = doc.read_text(encoding="utf-8")
+        for said in re.findall(r"\b([a-z]+(?:-[a-z]+)?) (?:model-invoked )?skills\b", text):
+            if said in NUMBER_WORDS[2:] or said.startswith(("twenty", "thirty")):
+                if said != count:
+                    errors.append("%s says %s skills; optional/skills/ has %s" % (doc.relative_to(ROOT), said, count))
+    for doc in [ROOT / "README.md"] + sorted((ROOT / "docs").glob("*.md")):
+        text = doc.read_text(encoding="utf-8")
+        for ref in re.findall(r'(?:src="|\]\()([^")#]+\.(?:png|jpe?g|svg|gif))', text):
+            if ref.startswith("http"):
+                continue
+            if not (doc.parent / ref).resolve().exists():
+                errors.append("%s shows %s, which does not exist" % (doc.relative_to(ROOT), ref))
+
+
 def single_viewer(errors):
     """4.0 has one viewer. The retired static page must not come back, and the viewer's
     export must stay self-contained (no external scripts, nothing that edits records)."""
@@ -479,6 +528,7 @@ def main():
     cross_references(errors)
     card_fidelity(errors)
     single_viewer(errors)
+    docs_stay_true(errors)
     reading_budget(errors)
 
     if errors:

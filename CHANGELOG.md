@@ -4,6 +4,14 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Documentation, help and a demo.**
+  - The README is now a landing page: a quick start, a one-minute demo, a feature tour with screenshots, a command overview, and a FAQ.
+  - New guides: [getting started](docs/getting-started.md), [the viewer](docs/viewer.md), [multi-agent work](docs/multi-agent.md), [living specs](docs/specs.md), [command reference](docs/cli.md), [troubleshooting](docs/troubleshooting.md), and a [docs index](docs/README.md).
+  - `python3 tools/demo_project.py <dir>` builds a fictional project with the kit installed and every view populated. The README screenshots come from it.
+  - `sdlc.py --help` is grouped by task, with an example per command, and every command's `-h` ends with examples.
+  - The installer asks about living specs (`--specs on|off`), and its short help fits the 59-line limit again.
+  - `validate.py` now fails when a runtime command, viewer tab, skill or image is missing from the docs.
+  - The viewer reads a Blocked row's **Who can unblock** column.
 - **Living specs, opt-in (`sdlc.py spec`, `config --specs on`, `process/15-specs.md`).**
   - What the system does now lives in `docs/project/specs/<capability>.md`, as requirements with WHEN/THEN scenarios.
   - Tier 1–2 items that change behaviour carry a spec change (ADDED/MODIFIED/REMOVED). `/sdlc-log` applies it on close and archives it. `/sdlc-plan` drafts it.

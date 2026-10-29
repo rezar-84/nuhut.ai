@@ -552,7 +552,7 @@
             return el("span", { cls: "stamp " + (p.kind === "REMOVED" ? "neutral" : "warn"), title: "Pending in " + p.item, text: p.kind.toLowerCase() + " by " + p.item });
           }))),
           r.body ? el("p", { cls: "req-body", text: r.body }) : null,
-          el("ul", { cls: "req-scen" }, r.scenarios.map(function (sc) { return el("li", null, [el("strong", { text: sc.name + ": " }), sc.body.replace(/\*\*/g, "").replace(/\n+/g, " ")]); }))
+          el("ul", { cls: "req-scen" }, r.scenarios.map(function (sc) { return el("li", null, [el("strong", { text: sc.name + ": " }), sc.body.replace(/\*\*/g, "").replace(/^\s*[-*]\s*/gm, "").replace(/\n+/g, " · ")]); }))
         ]));
       });
     }

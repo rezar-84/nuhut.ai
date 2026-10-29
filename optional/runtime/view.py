@@ -678,7 +678,7 @@ def build_item_thread(it, model):
             "order": 55,
             "date": extra.get("Since") or "",
             "column": it.get("column"),
-            "waiting_on": extra.get("Waiting on whom") or extra.get("Unblocked by") or "",
+            "waiting_on": extra.get("Waiting on whom") or extra.get("Who can unblock") or extra.get("Unblocked by") or "",
             "decision": extra.get("Decision needed") or extra.get("Blocked on") or "",
         })
     # 6. Worklog entries

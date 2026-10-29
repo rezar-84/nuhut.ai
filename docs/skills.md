@@ -3,7 +3,7 @@
 The model-invoked skills, and when each is installed.
 
 
-`optional/skills/` is a catalogue of twenty-one skills that make the process fire on its own.
+`optional/skills/` is a catalogue of twenty-two skills that make the process fire on its own.
 The slash commands wait to be typed; skills are model-invoked — the agent loads one when the
 situation its description names actually appears.
 
@@ -13,6 +13,7 @@ situation its description names actually appears.
 | `sdlc-evidence-check` | about to claim "done", "passing", "verified" | always |
 | `sdlc-charter-audit` | before relying on the charter, or when it looks stale | always |
 | `sdlc-adr` | a decision would be expensive to reverse | always |
+| `sdlc-spec` | a Tier 1–2 item changes observable behaviour, or a brownfield capability needs a spec | opt-in: when the charter's Specs row is on (`--specs on`, or picked at the skills question) |
 | `sdlc-accessibility-audit` | UI is added or changed | there is an interface |
 | `sdlc-design-review` | screens, components, or tokens change | there is a visual interface |
 | `sdlc-content-seo` | public pages, copy, routes, or metadata change | content is public |

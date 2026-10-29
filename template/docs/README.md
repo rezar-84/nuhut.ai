@@ -44,16 +44,18 @@ python3 .ai-sdlc/bin/sdlc.py view            # build the page and open it
 python3 .ai-sdlc/bin/sdlc.py view --serve    # live: the page follows the records
 python3 .ai-sdlc/bin/sdlc.py view --export-html dist/dashboard.html # export self-contained report
 python3 .ai-sdlc/bin/sdlc.py metrics         # process numbers in the terminal
+python3 .ai-sdlc/bin/sdlc.py --help          # every command, grouped, with an example each
 ```
 
 | Tab | Answers |
 | --- | --- |
-| **Map** | What is in this project? A mind map of work by status, open work by owner role, and documents. Click a dot to fold, a blue label to open. Includes health metrics, a grid of the last verify runs (one column per run, one row per stage: pass, fail, timed out, not run), `doctor` findings, and a quick-jump to blockages. |
-| **Board** | Where is every item? Now, Next, Blocked, Parked, Later, Done, filtered by owner, tier or title. A red edge or warning chip indicates dependency blockages. Opens with a cumulative-flow chart: column counts at each committed day the backlog changed, from its git history, so work piling up in Parked or Blocked is visible without reading the table. |
-| **Activity** | What are the agents doing? Items in flight, the latest worklog entries, and a summary of uncommitted working tree changes. |
-| **Blockages & Flow** | Where is work stuck? 3-column triage (Root Blockers ➔ Blocked Tasks ➔ Waiting on Human), bottleneck blast radius matrix, and human decision stall log. |
-| **Git Graph** | How did the code evolve? Interactive commit graph with branch/merge lanes, commit badges, author avatars, uncommitted delta banner, and commit inspector drawer. |
-| **Documents** | Every record with its status, owner and age. Open one to read it with an outline; IDs and links are clickable. |
+| **Inbox** | What happened to each item, and what is next? Threads by item (plan, commits, verify runs, reviews, worklog) with the next command and why; an activity feed across all items, with unread marks. |
+| **Board** | Where is every item? Now, Next, Blocked, Parked, Later, Done, with age, claims, last verify result and dependency blockers on each card. |
+| **Dashboard** | What needs a person now? Failing checks, security problems and items waiting on someone, then health, flow, and full pages for tests and verify runs, runs and logs, doctor findings, and parallel work. |
+| **Blockages** | Where is work stuck? Root blockers, blocked items, decisions waiting on people, blast radius. |
+| **Git** | How did the code evolve? The commit graph with each commit's work item and agent. |
+| **Documents** | Every record with its status, owner and age; **Specs** shows living specs when the charter turns them on. |
+| **Project** | What is the project made of? Stack and dependencies, build errors from the verify logs, security findings, deploy and CI, containers, environment variable names, the agents' skills and MCP servers, and the kit settings. |
 
 Click any ID to open that item: its row, plan, reviews, worklog entries, commits and
 every record that mentions it, with a lifecycle stepper from Frame to Close. An amber
@@ -63,7 +65,7 @@ titles, documents and headings; press `?` for keyboard shortcuts; the browser's 
 
 - **A snapshot or live.** Without `--serve` the page is a snapshot: run the command again
   to refresh it. With `--serve` it redraws within a couple of seconds of any record or
-  commit changing, and keeps your place. The header says Live, or Disconnected if you
+  commit changing, and keeps your place. The bar at the bottom says Live, or Disconnected if you
   stopped the server.
 - **Headless export.** `--export-html <file>` bundles an offline single-file report with
   all data embedded, suitable for CI/CD artifacts and PR reviews without a local server.

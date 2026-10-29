@@ -78,7 +78,7 @@
     // A blocked item's next step is whatever unblocks it; no command run here can.
     if (col === "Parked" || col === "Blocked") {
       var x = it.extra || {};
-      var who = x["Waiting on whom"] || x["Unblocked by"] || "";
+      var who = x["Waiting on whom"] || x["Who can unblock"] || x["Unblocked by"] || "";
       var openDeps = (it.depends || []).filter(function (d) { return !ITEMS[d] || ITEMS[d].column !== "Done"; });
       var decision = x["Decision needed"] || x["Blocked on"] || "";
       return {

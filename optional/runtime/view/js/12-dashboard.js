@@ -38,7 +38,7 @@
     });
     f.waitingIds.forEach(function (id) {
       var it = ITEMS[id], x = it.extra || {};
-      var who = x["Waiting on whom"] || x["Unblocked by"] || "";
+      var who = x["Waiting on whom"] || x["Who can unblock"] || x["Unblocked by"] || "";
       needRow("warn", it.column, id + " " + clip(it.title || "", 80), (who ? "Waiting on " + who : "No one is named to unblock it") + (x["Decision needed"] ? " · " + x["Decision needed"] : ""),
         function () { markSeen(id); openItemDrawer(id); }, x.Since ? "since " + x.Since : "");
     });

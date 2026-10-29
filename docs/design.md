@@ -25,7 +25,7 @@ Why the kit is shaped the way it is. The [README](../README.md) is the short ver
 ## What it covers
 
 Setup asks what the project is, and the answers decide which of the sixteen roles review
-your work and which of the twenty-one skills get installed. Nothing below is on by
+your work and which of the twenty-two skills get installed. Nothing below is on by
 default. The portable `docs/` tree is copied whole either way — that is what makes
 `--upgrade` work — but an inactive role's playbook is not on any reading list, so a
 marketing site's agent reads what it read in 2.5.0.

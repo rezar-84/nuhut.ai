@@ -163,10 +163,18 @@ enforcement) and the flag that changes each. The target directory is required
 in this mode — without a terminal there is nobody to ask. Other flags: `--docs-dir <name>`
 to install the docs under a different directory, `--harness <list>`, `--profile
 <full|compact>`, `--effort-mode <lean|normal|beast>`, `--dev-method <item|epic>`,
-`--decision-style <ask|guide|autopilot>`, `--acquisition-profile <standard|advanced>`,
+`--decision-style <ask|guide|autopilot>`, `--specs <on|off>`, `--acquisition-profile <standard|advanced>`,
 `--hooks`, `--git-hooks [all|secrets]`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
 `--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`,
 `--plain`, `--sections <list>`, and `--upgrade`.
+
+**Living specs.** The Process section asks *Keep living specs of what the system does?*
+(default no; `--specs on|off` answers it). Yes sets the charter's **Specs** row to `on` and
+installs the `sdlc-spec` skill; see [living specs](specs.md). It can be turned on later
+with `sdlc.py config --specs on`.
+
+**Just looking?** `python3 tools/demo_project.py <dir>` builds a fictional project with the
+kit installed and every view populated, without touching your own work.
 
 ### Ignoring runtime tools in Git
 
