@@ -4,6 +4,15 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **The dashboard's Needs you list stays short.** It shows six rows, then "Show 10 more" or
+  "Show all", and scrolls inside its own box once expanded. Three or more doctor failures
+  of one rule fold into a single row that opens that rule. A filter switches between
+  failures and waiting items. Project lens failures are no longer cut off silently after
+  five.
+- **Other dashboard cards:** Project stats spans the full width in three columns, so it no
+  longer stretches the cards beside it. Long owner, epic and "can start together" lists
+  say how many more there are. The Flow caption no longer shows the "Done with a
+  lifecycle gap" item list, which it picked up because "cycle" matched "lifecycle".
 - **Finishing an item is one command: `sdlc.py finish <ID>` and `/sdlc-finish`.** The steps
   agents skipped most were the ones after the build: review, worklog, evidence.
   - `finish` checks what the item's tier owes and nothing more: a verify run (not at

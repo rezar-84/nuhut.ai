@@ -16,7 +16,9 @@
     return svg;
   }
   function metricValue(name) {
-    var m = (M.metrics || []).filter(function (x) { return x.name.toLowerCase().indexOf(name.toLowerCase()) >= 0; })[0];
+    // Whole words only: "cycle" must not match "Done with a lifecycle gap".
+    var re = new RegExp("\\b" + name + "\\b", "i");
+    var m = (M.metrics || []).filter(function (x) { return re.test(x.name); })[0];
     return m || null;
   }
   function kpi(label, value, tone, spark, tip, route, sub) {
