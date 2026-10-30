@@ -245,7 +245,7 @@ def test_custom_docs_dir():
     d = tempfile.mkdtemp(prefix="sdlc-custom-")
     code, out = run([d, "ACME", "-y", "--docs-dir", "handbook"])
     installed = [read(d, "AGENTS.md")]
-    for name in ("sdlc-build.md", "sdlc-doctor.md", "sdlc-log.md", "sdlc-plan.md", "sdlc-review.md", "sdlc-verify.md"):
+    for name in ("sdlc-build.md", "sdlc-doctor.md", "sdlc-finish.md", "sdlc-log.md", "sdlc-plan.md", "sdlc-review.md", "sdlc-verify.md"):
         installed.append(read(d, ".claude/commands/%s" % name))
     check("exit 0", code == 0)
     check("contract and commands use custom path",
@@ -470,7 +470,7 @@ def test_harness_wiring():
     # The loop's commands as skills, for tools whose / menu lists skills (Antigravity).
     d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-harness-loop-"))
     code, out = run([d, "HRN", "-y", "--harness", "antigravity"])
-    loop = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-log")
+    loop = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-finish", "sdlc-log")
     check("an AGENTS.md-native tool gets the loop commands as skills",
           all(os.path.isfile(os.path.join(d, ".agents", "skills", n, "SKILL.md")) for n in loop), out[-300:])
     plan = read(d, ".agents/skills/sdlc-plan/SKILL.md")
@@ -2782,7 +2782,7 @@ def test_guided_setup():
     check("full: local ignore goes to .git/info/exclude",
           ".ai-sdlc/" in read(d, ".git/info/exclude"))
     check("full: starter CI written", os.path.exists(os.path.join(d, ".github", "workflows", "quality.yml")))
-    check("full: slash command count is not hardcoded", "Install the 6 /sdlc-* slash commands" in log)
+    check("full: slash command count is not hardcoded", "Install the 7 /sdlc-* slash commands" in log)
     shutil.rmtree(d, ignore_errors=True)
 
     # Help: short by default, everything on request, values listable.
@@ -3254,8 +3254,10 @@ def test_upgrade_to_41():
               all(os.path.isfile(os.path.join(d, "docs", rel)) for rel in ("templates/spec.md", "templates/spec-change.md", "process/15-specs.md")))
         after = read(d, "docs/project/charter.md").splitlines()
         added = [l for l in after if l not in charter_before.splitlines()]
-        check("project records keep every line; the charter only gains the new Specs row",
-              all(l in after for l in charter_before.splitlines()) and len(added) == 1 and added[0].startswith("| **Specs** |")
+        new_rows = ("| **Specs** |", "| **Finish guard** |", "| **Allowed in records** |")
+        check("project records keep every line; the charter only gains the new rows",
+              all(l in after for l in charter_before.splitlines()) and len(added) == len(new_rows)
+              and all(any(l.startswith(r) for l in added) for r in new_rows)
               and read(d, "docs/project/worklog.md") == worklog_before, str(added)[:300])
         script = os.path.join(bin_dir, "sdlc.py")
         for args in (("lens", "--area", "stack"), ("claims",), ("spec", "list"), ("parallel",)):
@@ -3439,12 +3441,137 @@ def test_lifecycle_gaps():
           rt.required_steps("3", "Strict", True, True)["Log"] and not rt.required_steps("3", "Standard", True, True)["Log"])
 
 
+def test_finish():
+    print("finish: evidence, waivers, drafted entry, Tier 1 parks; guard; baseline; record repairs")
+    d = tempfile.mkdtemp(prefix="sdlc-finish-")
+    subprocess.call(["git", "init", "-q", d])
+    run([d, "FIN", "-y"])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=tester"]
+
+    def sdlc(*args, **kw):
+        p = subprocess.Popen([sys.executable, script] + list(args), cwd=d, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        o, e = p.communicate((kw.get("stdin") or "").encode("utf-8"))
+        return p.returncode, o.decode("utf-8", "replace"), e.decode("utf-8", "replace")
+
+    def commit(message):
+        subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+        subprocess.call(git + ["commit", "-qm", message], cwd=d, stdout=subprocess.DEVNULL)
+
+    settings = json.loads(read(d, ".claude/settings.json") or "{}")
+    check("a Claude Code install registers the finish guard on SessionStart and Stop",
+          all(any("guard " in h.get("command", "") for e in settings.get("hooks", {}).get(ev, [])
+                  for h in e.get("hooks", [])) for ev in ("SessionStart", "Stop")), str(settings)[:300])
+    sdlc("config", "--set-check", "unit=true")
+    backlog = read(d, "docs/project/backlog.md")
+    i = backlog.index("## Now")
+    j = backlog.index("\n", backlog.index("| --- ", i)) + 1
+    rows = ["| FIN-%d | %s | %s | qa | | In progress |" % row for row in (
+        (1, "Normal change", "2"), (2, "Typo", "3"), (3, "Risky change", "1"), (4, "No runner", "2"))]
+    write(d, "docs/project/backlog.md", (backlog[:j] + "\n".join(rows) + "\n" + backlog[j:])
+          )
+    commit("chore: records")
+    code, out, err = sdlc("guard", "start", stdin='{"session_id": "t1"}')
+    for n in (1, 2, 3, 4):
+        write(d, "src/f%d.txt" % n, str(n))
+        commit("feat(FIN-%d): change" % n)
+
+    code, out, err = sdlc("guard", "stop", stdin='{"session_id": "t1"}')
+    check("the guard names open Tier 1 and 2 items this session committed, not Tier 3",
+          code == 2 and "FIN-1" in err and "FIN-3" in err and "FIN-2" not in err, err)
+    code, out, err = sdlc("guard", "stop", stdin='{"session_id": "t1"}')
+    check("the guard reminds once per item", code == 0, err)
+
+    code, out, err = sdlc("finish", "FIN-1")
+    check("finish refuses without a verify run and names the command",
+          code == 1 and "OWED verify" in out and "verify --item FIN-1" in out, out)
+    sdlc("verify", "--item", "FIN-1")
+    code, out, err = sdlc("finish", "FIN-1")
+    entry = read(d, "docs/project/worklog.md")
+    check("finish drafts the worklog entry and refuses while TODO(finish) parts are left",
+          code == 1 and "## FIN-1 — Normal change" in entry and "TODO(finish)" in entry
+          and "Verified: pass" in entry, out)
+    write(d, "docs/project/worklog.md", re.sub(r"(?m)^TODO\(finish\): .*$", "none.", entry))
+    code, out, err = sdlc("finish", "FIN-1")
+    backlog = read(d, "docs/project/backlog.md")
+    check("finish sets Done and moves the row with its completion date",
+          code == 0 and re.search(r"\| FIN-1 \|[^\n]*\| Done \| [0-9]{4}-", backlog[backlog.index("## Done"):]),
+          out)
+
+    code, out, err = sdlc("finish", "FIN-2")
+    check("a Tier 3 item finishes on its commit alone", code == 0 and "set Done" in out, out)
+
+    code, out, err = sdlc("finish", "FIN-3", "--waive", "verify", "--by", "Sam", "--reason", "x")
+    check("a Tier 1 item cannot waive verify and owes a ship review",
+          code == 1 and "cannot be waived" in out and "ship review" in out, out)
+    sdlc("verify", "--item", "FIN-3")
+    write(d, "docs/project/reviews/FIN-3-ship-qa.md", "# Ship review\n\nPass.\n")
+    sdlc("finish", "FIN-3")
+    write(d, "docs/project/worklog.md",
+          re.sub(r"(?m)^TODO\(finish\): .*$", "none.", read(d, "docs/project/worklog.md")))
+    code, out, err = sdlc("finish", "FIN-3")
+    backlog = read(d, "docs/project/backlog.md")
+    check("a finished Tier 1 item is Parked for the human approval, not Done",
+          code == 0 and re.search(r"\| FIN-3 \|[^\n]*\| Parked \|", backlog[backlog.index("## Parked"):]), out)
+
+    code, out, err = sdlc("finish", "FIN-4", "--waive", "verify", "--by", "Sam", "--reason", "no runner here")
+    ledger = read(d, "docs/project/evidence-ledger.jsonl")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import sdlc as rt
+    check("a waiver is recorded as Not run with who and why, and is never evidence",
+          '"waived_by": "Sam"' in ledger and not rt.evidence_matches(rt.Project(d), "FIN-4"), out)
+    code, out, err = sdlc("view", "--json")
+    item = json.loads(out)["items"].get("FIN-4", {}) if code == 0 else {}
+    check("the viewer shows a waived Verify as skipped", item.get("steps", {}).get("Verify") == "skipped",
+          str(item.get("steps")))
+
+    code, out, err = sdlc("doctor", "--json")
+    before = [f for f in json.loads(out) if not f.get("accepted")]
+    sdlc("doctor", "--baseline")
+    code, out, err = sdlc("doctor")
+    check("doctor --baseline hides today's findings and says how many",
+          (not before) or ("accepted on" in out and "no mechanical findings" in out), out)
+    backlog = read(d, "docs/project/backlog.md")
+    k = backlog.index("\n", backlog.index("| --- ", backlog.index("## Done"))) + 1
+    write(d, "docs/project/backlog.md", backlog[:k] + "| FIN-9 | Never logged | 2 | qa | | Done | 2026-01-02 |\n"
+          + backlog[k:])
+    code, out, err = sdlc("doctor", "--strict")
+    check("a finding new since the baseline still shows and still fails --strict",
+          code == 1 and "FIN-9" in out, out[-400:])
+    sdlc("doctor", "--baseline")
+    baseline = json.loads(read(d, "docs/project/doctor-baseline.json"))
+    check("rewriting the baseline never adds a new finding",
+          not any("FIN-9" in k for k in baseline.get("accepted", {})), str(baseline)[:300])
+
+    backlog = read(d, "docs/project/backlog.md")
+    write(d, "docs/project/backlog.md", backlog.replace("| FIN-9 | Never logged | 2 | qa | | Done |",
+                                                        "| FIN-9 | Never logged | 2 | qa | | Completed (merged abc1234) |"))
+    code, out, err = sdlc("fix", "normalise-status")
+    unchanged = "Completed (merged abc1234)" in read(d, "docs/project/backlog.md")
+    sdlc("fix", "normalise-status", "--apply")
+    check("normalise-status previews, then writes Done and keeps the note",
+          unchanged and "preview" in out and "| FIN-9 | Never logged (merged abc1234) | 2 | qa | | Done |"
+          in read(d, "docs/project/backlog.md"), out)
+    write(d, "docs/project/worklog.md", read(d, "docs/project/worklog.md") +
+          "".join("\n## FIN-%d — old\n\n%s" % (n, "line\n" * 30) for n in range(100, 140)))
+    code, out, err = sdlc("fix", "rotate-worklog", "--apply")
+    archive = os.path.join(d, "docs", "project", "worklog-archive")
+    check("rotate-worklog moves the oldest entries to worklog-archive/",
+          os.path.isdir(archive) and os.listdir(archive) and
+          len(read(d, "docs/project/worklog.md").splitlines()) <= 1000, out)
+    write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
+        "| **Finish guard** | `on` · `off`", "| **Finish guard** | `off`"))
+    code, out, err = sdlc("guard", "stop", stdin='{"session_id": "t2"}')
+    check("the charter's Finish guard row turns the guard off", code == 0 and not err, err)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_git_hooks,
-                 test_runtime, test_view, test_lifecycle_gaps, test_kit_value_benchmark, test_kit_value_checks,
+                 test_runtime, test_view, test_lifecycle_gaps, test_finish, test_kit_value_benchmark, test_kit_value_checks,
                  test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
                  test_domain_detection,

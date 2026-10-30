@@ -146,13 +146,13 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 
 | | |
 | --- | --- |
-| **Records and checks** | `doctor` audit the records · `verify` run the checks, keep the evidence · `bite` prove a test catches the change · `plan-check` diff vs plan |
+| **Records and checks** | `doctor` audit the records · `verify` run the checks, keep the evidence · `bite` prove a test catches the change · `plan-check` diff vs plan · `finish` close an item: evidence, review, worklog draft, status |
 | **Viewer and reports** | `view` the project as one page (`--serve` live) · `lens` stack, build, security, deploy, env, agents · `audit` vulnerable packages · `metrics` process measures |
-| **Work items and agents** | `claim` / `release` / `claims` · `parallel` · `trailers` commit trailers · `review` independent review · `log` worklog lines from commits |
+| **Work items and agents** | `claim` / `release` / `claims` · `parallel` · `trailers` commit trailers · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |
 | **Specs** | `spec list \| show \| validate \| apply` |
 | **Setup** | `config` see or change the charter's constraints · `fix` safe repairs |
 
-In Claude Code: `/sdlc-plan`, `/sdlc-build`, `/sdlc-verify`, `/sdlc-review`, `/sdlc-log`,
+In Claude Code: `/sdlc-plan`, `/sdlc-build`, `/sdlc-verify`, `/sdlc-review`, `/sdlc-finish`, `/sdlc-log`,
 `/sdlc-doctor`. Every flag: [command reference](docs/cli.md).
 
 ## Works with

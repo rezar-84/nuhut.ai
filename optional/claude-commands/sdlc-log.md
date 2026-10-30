@@ -8,6 +8,10 @@ work just completed.
 
 $ARGUMENTS
 
+**For a built item, `/sdlc-finish <ID>` does this in one step:** it checks the evidence and
+reviews, drafts the entry and sets the status. Use this command for the parts it leaves to
+you, or where the runtime is not installed.
+
 1. **Check the Definition of Done** in `{{DOCS_DIR}}/process/03-ready-and-done.md`. Anything
    unmet is either fixed now or becomes a tracked follow-up named in the entry — never
    an unstated gap.

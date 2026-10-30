@@ -2175,7 +2175,7 @@
     var focus = decodeURIComponent(parts[2] || "");
     crumbs([["Dashboard", "dashboard"], ["Doctor"]]);
     var f = dashFacts(), groups = groupFindings();
-    dashHeader("Doctor", plural(M.alerts.length, "finding") + " from sdlc.py doctor in " + plural(groups.length, "rule") + (f.fails.length ? "; " + plural(f.fails.length, "failure") + " block a clean ship." : "; none block shipping."), [runDoctorBtn()]);
+    dashHeader("Doctor", plural(M.alerts.length, "finding") + " from sdlc.py doctor in " + plural(groups.length, "rule") + (f.fails.length ? "; " + plural(f.fails.length, "failure") + " block a clean ship." : "; none block shipping.") + (M.accepted && M.accepted.count ? " " + plural(M.accepted.count, "older finding") + " accepted on " + M.accepted.date + " (doctor --baseline; doctor --all lists them)." : ""), [runDoctorBtn()]);
     if (focus) DOCTOR_STATE.open[focus] = true;
     var lvl = el("select", { cls: "filter-select", "aria-label": "Level", on: { change: function () { DOCTOR_STATE.level = lvl.value; fill(); } } },
       [["", "All levels"], ["fail", "Failures"], ["warn", "Warnings"]].map(function (o) { var x = el("option", { value: o[0], text: o[1] }); if (DOCTOR_STATE.level === o[0]) x.selected = true; return x; }));

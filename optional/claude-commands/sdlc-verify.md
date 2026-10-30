@@ -12,7 +12,7 @@ $ARGUMENTS
 **Run the script, not the commands by hand:**
 
 ```sh
-python3 .ai-sdlc/bin/sdlc.py verify            # every stage
+python3 .ai-sdlc/bin/sdlc.py verify --item <ID>   # every stage; the ledger names the item
 python3 .ai-sdlc/bin/sdlc.py verify --stage unit,lint
 ```
 

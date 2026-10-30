@@ -66,6 +66,10 @@ def column_of(status):
             return name
     if key in STATUS_SYNONYMS:
         return STATUS_SYNONYMS[key]
+    # "Completed (merged 8acbc4a)", "Shipped — v2.1": a synonym with a note.
+    head = re.split(r"\s*[(\[—–:]", key, 1)[0].strip()
+    if head != key and head in STATUS_SYNONYMS:
+        return STATUS_SYNONYMS[head]
     # "Done on epic branch", "Done (owner sign-off pending)": done, with a note.
     if re.match(r"^done\b", key):
         return "Done"
@@ -502,6 +506,10 @@ def _build_inner(rt, project):
                     c_obj["tokens"] = ctags["Tokens"]
                 if ctags.get("Minutes"):
                     c_obj["minutes"] = ctags["Minutes"]
+        waived = [r for r in ledger_rows if r.get("waived_by") and r.get("item") == item_id]
+        if waived:
+            it["waived"] = {"by": waived[-1]["waived_by"], "reason": waived[-1].get("reason", ""),
+                            "time": waived[-1].get("time", "")}
         if commits and ledger_rows:
             rows = rt.evidence_matches(project, item_id, ledger_rows, commits)
             if rows:
@@ -582,7 +590,13 @@ def _build_inner(rt, project):
 
     # The mechanical doctor findings are the home page's alerts.
     try:
-        model["alerts"] = rt.doctor(project)
+        found = rt.doctor(project)
+        # Findings accepted by `doctor --baseline` leave the alerts; their count stays
+        # on the page so the history is never hidden.
+        model["alerts"] = [f for f in found if not f.get("accepted")]
+        accepted = [f for f in found if f.get("accepted")]
+        model["accepted"] = {"count": len(accepted),
+                             "date": accepted[0]["accepted"] if accepted else ""}
     except Exception as exc:  # the view must open even when a check breaks
         model["alerts"] = [{"level": "warn", "check": "view", "where": "",
                             "message": "doctor could not run: %s" % exc}]
@@ -729,7 +743,8 @@ def lifecycle(it, model, rt, rules="Standard"):
     reports = [body.strip() for e in entries for name, body in e["sections"].items()
                if re.search(r"(?i)verif|quality gate", name)]
     summaries = [e["sections"].get("Summary", "") for e in entries]
-    not_run = any(re.match(r"(?i)[-*\s]*not run\b", r) for r in reports) or \
+    not_run = bool(it.get("waived")) or \
+        any(re.match(r"(?i)[-*\s]*not run\b", r) for r in reports) or \
         any(re.search(r"(?i)\bverified:\s*not run", s) for s in summaries)
     # Results reported with no verify run behind them: recorded, not proven. doctor's
     # evidence check names each one; the step is not a gap.
@@ -1039,6 +1054,11 @@ def metrics(rt, project, model, today=None):
     if unproven:
         add("Verified by word only", "lagging", "%d of %d Done items" % (len(unproven), len(done)),
             "worklog reports check results with no sdlc.py verify run on the item's commits")
+    waived = [it["id"] for it in done if it.get("waived")]
+    if waived:
+        add("Verify waived", "lagging", "%d of %d Done items: %s" % (len(waived), len(done),
+                                                                     ", ".join(waived[:8])),
+            "finish --waive verify: the checks did not run, a named person said why")
 
     plan_dates = {}
     plans_dir = os.path.join(project.docs, "project", "plans")
@@ -1471,7 +1491,7 @@ def serve(rt, project, template, opts):
                           "git_head": live.project.git("rev-parse", "HEAD").strip()}
                 if sub == "doctor":
                     try:
-                        found = rt.doctor(live.project)
+                        found = [f for f in rt.doctor(live.project) if not f.get("accepted")]
                         record["doctor"] = dict((lvl, sum(1 for f in found
                                                           if f.get("level") == lvl))
                                                 for lvl in ("fail", "warn", "ok"))

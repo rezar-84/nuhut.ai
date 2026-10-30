@@ -346,8 +346,8 @@ FIX_HINTS = (
      "changed, and set last-reviewed to today"),
     ("traceability", r"no work item prefix", "owner", "Set the work item prefix in the charter"),
     ("traceability", r"Done with no worklog entry", "agent", "Record the work: " + SDLC +
-     " log --since <commit before {item}> --write drafts the entry from its commits; add Why "
-     "and Not done. If nothing was built, set the row to Dropped"),
+     " finish {item} drafts the entry from its commits and the ledger; fill its TODO(finish) "
+     "parts. If nothing was built, set the row to Dropped"),
     ("traceability", r"Parked with no one", "owner", "Name the person {item} waits on in "
      "'Waiting on whom'"),
     ("traceability", r"in the worklog but not in the backlog", "agent", "Add a backlog row for "
@@ -363,7 +363,7 @@ FIX_HINTS = (
      "deleting it alone does not undo the leak"),
     ("sensitive", r"", "agent", "Replace the personal detail with a role (\"the owner\", "
      "\"a client\")"),
-    ("worklog", r"", "agent", "Move closed entries into worklog-archive/<year>-part<N>.md"),
+    ("worklog", r"", "tool", SDLC + " fix rotate-worklog --apply (preview without --apply)"),
     ("profile", r"kit_version", "tool", "Finish the upgrade: install.sh <this project> --upgrade"),
     ("profile", r"", "tool", SDLC + " fix sync-profile"),
     ("epics", r"an epic with no", "agent", "Create the epic file from templates/epic.md"),
@@ -372,8 +372,10 @@ FIX_HINTS = (
     ("hooks", r"", "owner", "Install jq, or remove the hooks"),
     ("bite", r"", "tool", SDLC + " bite --restore"),
     ("independence", r"", "tool", SDLC + " review {item} --role <role> --by <other harness>"),
-    ("evidence", r"", "agent", "Run " + SDLC + " verify and cite the run. For past work that "
-     "cannot be re-run, change the worklog's Verified line to 'Not run: <reason>'"),
+    ("evidence", r"", "agent", "Run " + SDLC + " verify --item {item} and cite the run. Runs "
+     "kept on disk but missing from the ledger: " + SDLC + " fix link-evidence. For past work "
+     "that cannot be re-run, change the worklog's Verified line to 'Not run: <reason>', or "
+     "accept the history once with doctor --baseline"),
     ("claims", r"still claimed", "tool", SDLC + " release {item}"),
     ("claims", r"", "owner", "Decide which agent keeps {item}; the other releases it"),
     ("specs", r"not applied", "tool", SDLC + " spec apply {item} --write"),
@@ -803,6 +805,10 @@ def check_sensitive(project, out):
     it yet (process/12-sensitive-data-in-records.md). Reports kind and place, never the
     value: a finding that quoted it would be a second copy."""
     top = project.path(os.path.join(project.docs, "project"))
+    # Values the owner marked safe in the charter (their own work address, a company
+    # phone) are not personal-data findings. Credentials are never allowlisted.
+    allowed = re.findall(r"`([^`]+)`", UNFILLED.sub("", labelled(project.charter,
+                                                                 "Allowed in records") or ""))
     for folder, dirs, names in os.walk(top):
         dirs[:] = [d for d in dirs if d not in ("node_modules", ".git")]
         for name in sorted(names):
@@ -812,6 +818,10 @@ def check_sensitive(project, out):
             rel = os.path.relpath(path, project.root)
             for number, line in enumerate(read(path).splitlines(), 1):
                 secrets, personal = sensitive_kinds(line)
+                if personal and allowed:
+                    for value in allowed:
+                        line = line.replace(value, "")
+                    personal = sensitive_kinds(line)[1]
                 if secrets:
                     out.add("fail", "sensitive", "%s:%d" % (rel, number),
                             "looks like a credential (%s). Deleting the line does not undo "
@@ -988,10 +998,66 @@ def doctor(project, today=None):
         check_sensitive(project, out)
         check_claims(project, out, today)
         check_specs(project, out, today)
-        return out.items
+        return apply_baseline(project, out.items)
     finally:
         if own_cache:
             project._build_cache = None
+
+
+BASELINE = os.path.join("project", "doctor-baseline.json")
+
+
+def finding_key(item):
+    """A finding's identity across runs: line numbers and counts in it change as the
+    records grow, the finding does not."""
+    where = re.sub(r":[0-9]+$", "", item["where"])
+    return "|".join((item["check"], where, re.sub(r"[0-9]+", "#", item["message"])))
+
+
+def acceptable(item):
+    """A leaked credential is never accepted: it is rotated."""
+    return not (item["check"] == "sensitive" and item["level"] == "fail")
+
+
+def apply_baseline(project, items):
+    """Mark the findings `doctor --baseline` accepted with "accepted": <date>. Each key is
+    accepted as many times as it was recorded, so a second copy of an old problem shows."""
+    data = project.json(os.path.join(project.docs, BASELINE))
+    left = dict(data.get("accepted") or {})
+    for item in items:
+        key = finding_key(item)
+        if left.get(key, 0) > 0 and acceptable(item):
+            left[key] -= 1
+            item["accepted"] = data.get("date", "")
+    return items
+
+
+def write_baseline(project, items, today=None):
+    """Record today's findings as accepted. It is a ratchet: once the file exists, a
+    rewrite only drops what is fixed and never adds a new finding. Returns (kept, dropped,
+    refused): refused are findings that are new since the baseline."""
+    rel = os.path.join(project.docs, BASELINE)
+    old = project.json(rel)
+    current = {}
+    for item in items:
+        if acceptable(item):
+            current[finding_key(item)] = current.get(finding_key(item), 0) + 1
+    if old.get("accepted") is None:
+        accepted, date = current, (today or datetime.date.today()).isoformat()
+    else:
+        accepted = dict((k, min(v, current.get(k, 0))) for k, v in old["accepted"].items()
+                        if current.get(k))
+        date = old.get("date", "")
+    refused = sum(max(0, v - accepted.get(k, 0)) for k, v in current.items())
+    dropped = sum((old.get("accepted") or {}).values()) - sum(accepted.values()) \
+        if old.get("accepted") is not None else 0
+    with open(project.path(rel), "w", encoding="utf-8") as handle:
+        json.dump({"date": date, "note": "Findings accepted by `sdlc.py doctor --baseline`. "
+                   "doctor hides them and shows how many; a rewrite only removes fixed ones. "
+                   "Delete this file to start again.", "accepted": accepted},
+                  handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    return sum(accepted.values()), dropped, refused
 
 
 def runtime_module(name):
@@ -1025,7 +1091,13 @@ def check_specs(project, out, today):
     specs_mod.check(project, out, labelled, done, today)
 
 
-def print_findings(items):
+def print_findings(items, show_accepted=False):
+    accepted = [item for item in items if item.get("accepted")]
+    if not show_accepted:
+        items = [item for item in items if not item.get("accepted")]
+    if accepted and not show_accepted:
+        print("doctor: %d finding(s) accepted on %s (doctor-baseline.json); "
+              "doctor --all shows them" % (len(accepted), accepted[0]["accepted"]))
     if not items:
         print("doctor: no mechanical findings. The judgment checks in /sdlc-doctor still "
               "apply.")
@@ -1059,7 +1131,7 @@ def evidence_dir(project, suffix=""):
     return path
 
 
-def verify(project, selected, timeout, parallel=False):
+def verify(project, selected, timeout, parallel=False, item=None):
     charter = charter_commands(project.charter)
     recorded = project.profile.get("commands") or {}
     drift = []
@@ -1132,12 +1204,15 @@ def verify(project, selected, timeout, parallel=False):
         "root": project.root, "git_head": head, "dirty": dirty,
         "charter": project.charter_path, "drift": drift, "stages": results,
     }
+    if item:
+        summary["item"] = item
     with open(os.path.join(folder, "summary.json"), "w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)
     ledger_append(project, [{
         "time": summary["generated"], "commit": head, "dirty": dirty, "stage": e["stage"],
         "command": e["command"], "exit_code": e.get("exit_code"), "result": e["result"],
-        "output_sha256": e.get("log_sha256", ""), "run": os.path.basename(folder)}
+        "output_sha256": e.get("log_sha256", ""), "run": os.path.basename(folder),
+        **({"item": item} if item else {})}
         for e in results if "exit_code" in e])
     text = summary_markdown(summary, os.path.relpath(folder, project.root))
     with open(os.path.join(folder, "summary.md"), "w", encoding="utf-8") as handle:
@@ -1315,11 +1390,14 @@ def evidence_matches(project, item, rows=None, commits=None):
     commits = item_commits(project, item) if commits is None else commits
     heads = set(sha for sha, _, _ in commits)
     parents = set(parent for _, parent, _ in commits if parent)
-    # A clean run on one of the item's commits, or a run on the parent of one with the
-    # change still uncommitted. A dirty run on the item's own commit verified whatever
-    # came next, not the item.
-    return [row for row in rows if (row.get("commit") in heads and not row.get("dirty"))
-            or (row.get("dirty") and row.get("commit") in parents)]
+    # A run tagged with the item (verify --item), a clean run on one of the item's
+    # commits, or a run on the parent of one with the change still uncommitted. A dirty
+    # run on the item's own commit verified whatever came next, not the item. A waiver
+    # (finish --waive) is a recorded Not run, never evidence.
+    return [row for row in rows if not row.get("waived_by") and (
+        (row.get("item") == item and str(row.get("result", "")).startswith("Verified"))
+        or (row.get("commit") in heads and not row.get("dirty"))
+        or (row.get("dirty") and row.get("commit") in parents))]
 
 
 # ---------------------------------------------------------------- review
@@ -2895,7 +2973,8 @@ The mechanical half of the Nuhut process: checks, evidence, the viewer, claims a
 
 Records and checks
   doctor              audit the records: stale rows, unproven Verified claims, gaps   doctor --strict
-  verify              run the charter's checks in order and keep the evidence        verify --parallel
+  verify              run the charter's checks in order and keep the evidence        verify --item ACME-12
+  finish <ID>         close an item: evidence, review, worklog draft, status          finish ACME-12
   bite <test cmd>     do the tests fail without the change and pass with it?          bite npm test
   plan-check <ID>     does the branch's diff match the plan's Files that change?     plan-check ACME-12
 
@@ -2918,15 +2997,22 @@ Specs (when the charter's Specs row is on)
 
 Setup
   config              see or change the charter's constraints                          config --specs on
-  fix                 repair setup drift without touching kit files                    fix all
+  fix                 repair setup drift; preview record repairs (--apply writes)      fix rotate-worklog
 
 Options: --root <dir> runs against another project; --selftest checks the runtime itself.
 Guides: docs/cli.md, docs/viewer.md, docs/multi-agent.md and docs/specs.md in the kit repository.
 """
 
 EXAMPLES = {
-    "doctor": ["doctor", "doctor --strict          # exit 1 on a fail-level finding (CI)", "doctor --json"],
-    "verify": ["verify --parallel", "verify --stage lint,unit", "verify --timeout 900"],
+    "doctor": ["doctor", "doctor --strict          # exit 1 on a fail-level finding (CI)", "doctor --json",
+               "doctor --baseline        # accept today's findings once; only new ones show",
+               "doctor --all             # include the accepted ones"],
+    "verify": ["verify --item ACME-12     # the ledger rows name the item", "verify --parallel",
+               "verify --stage lint,unit", "verify --timeout 900"],
+    "finish": ["finish ACME-12", "finish ACME-12 --dry-run",
+               "finish ACME-12 --waive verify --by Sam --reason \"no staging DB here\""],
+    "guard": ["guard start              # SessionStart hook (reads the hook JSON on stdin)",
+              "guard stop               # Stop hook"],
     "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict"],
     "view": ["view                     # write .ai-sdlc/view/index.html and open it",
              "view --serve             # live page on 127.0.0.1",
@@ -2939,7 +3025,8 @@ EXAMPLES = {
     "bite": ["bite npm test", "bite --restore"],
     "config": ["config                   # show the constraints", "config --effort Lean --independent-review tier1",
                "config --specs on", "config --set-check unit='npm test'"],
-    "fix": ["fix all", "fix wire-pointer"],
+    "fix": ["fix all", "fix wire-pointer", "fix rotate-worklog          # preview",
+            "fix normalise-status --apply", "fix link-evidence --apply"],
     "lens": ["lens", "lens --area build", "lens --user --json"],
     "audit": ["audit", "audit --strict           # exit 1 on a critical or high vulnerability"],
     "spec": ["spec list", "spec validate --strict", "spec apply ACME-12          # dry run",
@@ -2970,13 +3057,29 @@ def main(argv):
     doc = sub.add_parser("doctor", help="mechanical checks of the SDLC records")
     doc.add_argument("--json", action="store_true", help="print findings as JSON")
     doc.add_argument("--strict", action="store_true",
-                     help="exit 1 if any finding is at level fail (for CI)")
+                     help="exit 1 if any finding is at level fail (for CI); accepted ones "
+                     "do not count")
+    doc.add_argument("--baseline", action="store_true",
+                     help="accept the current findings in docs/project/doctor-baseline.json; "
+                     "once it exists a rewrite only removes fixed ones")
+    doc.add_argument("--all", action="store_true", help="also show accepted findings")
     ver = sub.add_parser("verify", help="run the charter's check commands and record "
                          "the evidence")
     ver.add_argument("--stage", help="comma-separated stages to run, e.g. unit,lint")
     ver.add_argument("--timeout", type=int, default=1800, help="seconds per stage")
     ver.add_argument("--parallel", "-j", action="store_true",
                      help="run independent verification stages concurrently")
+    ver.add_argument("--item", help="the work item this run verifies; the ledger rows name it")
+    fin = sub.add_parser("finish", help="close a work item: check its evidence and reviews, "
+                         "draft the worklog entry, set Done (Tier 1: Parked)")
+    fin.add_argument("item", help="work item ID")
+    fin.add_argument("--waive", choices=("verify",), help="record that the checks could not "
+                     "run (not at Tier 1); needs --by and --reason")
+    fin.add_argument("--by", help="who decided the waiver")
+    fin.add_argument("--reason", help="why the checks cannot run")
+    fin.add_argument("--dry-run", action="store_true", help="say what it would do; write nothing")
+    gd = sub.add_parser("guard", help="the finish guard, run by the agent tool's session hooks")
+    gd.add_argument("event", choices=("start", "stop"))
     chk = sub.add_parser("plan-check", help="compare a Tier 1 plan's file list with the "
                          "branch's diff")
     chk.add_argument("item", help="work item ID, e.g. ACME-12")
@@ -3063,8 +3166,11 @@ def main(argv):
     cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
     fx = sub.add_parser("fix", help="run safe mechanical repairs on kit setup")
     fx.add_argument("action", nargs="?", default="all",
-                    choices=("all", "sync-profile", "wire-pointer", "restore-bite", "unlock-tests"),
-                    help="repair action to run (default: all)")
+                    choices=("all", "sync-profile", "wire-pointer", "restore-bite", "unlock-tests",
+                             "rotate-worklog", "normalise-status", "link-evidence"),
+                    help="repair action to run (default: all, the setup repairs). The three "
+                    "record repairs preview unless --apply")
+    fx.add_argument("--apply", action="store_true", help="record repairs: write the change")
     fx.add_argument("--unlock-tests", action="store_true",
                     help="also unlock tests in .ai-sdlc/test-lock.txt when running 'all'")
     fx.add_argument("--json", action="store_true", help="print repair result as JSON")
@@ -3115,11 +3221,38 @@ def main(argv):
     project = Project(opts.root or default_root())
     if opts.command == "doctor":
         items = doctor(project)
+        if opts.baseline:
+            kept, dropped, refused = write_baseline(project, items)
+            print("doctor-baseline.json: %d finding(s) accepted%s%s" % (
+                kept, ", %d fixed one(s) removed" % dropped if dropped else "",
+                ". %d finding(s) are new since the baseline and stay visible" % refused
+                if refused else ""))
+            items = apply_baseline(project, [dict(i, accepted="") for i in items])
         if opts.json:
             print(json.dumps(items, indent=2))
         else:
-            print_findings(items)
-        return 1 if opts.strict and any(i["level"] == "fail" for i in items) else 0
+            print_findings(items, opts.all)
+        return 1 if opts.strict and any(i["level"] == "fail" and not i.get("accepted")
+                                        for i in items) else 0
+    if opts.command in ("finish", "guard"):
+        finish_mod = runtime_module("finish")
+        if opts.command == "guard":
+            try:
+                payload = json.loads(sys.stdin.read() or "{}")
+            except ValueError:
+                payload = {}
+            code, message = finish_mod.guard(sys.modules[__name__], project, opts.event,
+                                             payload if isinstance(payload, dict) else {})
+            if message:
+                sys.stderr.write(message + "\n")
+            return code
+        if opts.waive and not (opts.by and opts.reason):
+            parser.error("--waive verify needs --by <name> and --reason \"...\"")
+        lines, code = finish_mod.finish(sys.modules[__name__], project, opts.item,
+                                        opts.by if opts.waive else None, opts.reason,
+                                        opts.dry_run)
+        print("\n".join(lines))
+        return code
     if opts.command == "spec":
         specs_mod = runtime_module("specs")
         if opts.action == "apply":
@@ -3362,6 +3495,15 @@ def main(argv):
             print("  tier rules: %s · decision style: %s · dev method: %s" % (
                 c["tier_rules"], c["decision_style"], c["dev_method"]))
         return 0
+    if opts.command == "fix" and opts.action in ("rotate-worklog", "normalise-status",
+                                                  "link-evidence"):
+        finish_mod = runtime_module("finish")
+        report = getattr(finish_mod, opts.action.replace("-", "_"))(
+            sys.modules[__name__], project, opts.apply)
+        print("\n".join(report))
+        if not opts.apply and not report[0].startswith(("worklog.md is", "every")):
+            print("(preview: add --apply to write it)")
+        return 0
     if opts.command == "fix":
         res = fix_kit(project, opts.action, {"unlock_tests": opts.unlock_tests})
         if opts.json:
@@ -3384,7 +3526,8 @@ def main(argv):
         sys.stderr.write("no charter at %s: nothing says which commands to run\n"
                          % project.charter_path)
         return 2
-    summary, text = verify(project, selected, opts.timeout, parallel=getattr(opts, "parallel", False))
+    summary, text = verify(project, selected, opts.timeout, parallel=getattr(opts, "parallel", False),
+                           item=opts.item)
     print(text)
     failed = [e for e in summary["stages"] if e["result"].startswith("Verified: fail")]
     return 1 if failed else 0

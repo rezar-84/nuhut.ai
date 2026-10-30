@@ -39,7 +39,8 @@ RETIRED_STATE = "dashboard-state.js"
 # The mechanical half of /sdlc-doctor and /sdlc-verify. Kit-managed: --upgrade refreshes it.
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
-RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py")
+RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
+                 "finish.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -417,7 +418,7 @@ EN = {
     "h.approval": "Actions the agent must stop and get a named human's approval for, whatever the tier. Mirrored into AGENTS.md under Project overrides.",
     "h.a11y": "The accessibility standard the accessibility reviewer holds every interface to. WCAG 2.2 AA is the common legal and practical baseline.",
     "h.docsdir": "The folder the process documents, roles, templates and project records go into. Use another name when docs/ already holds something else.",
-    "h.commands": "Claude Code slash commands for each loop step: /sdlc-plan, /sdlc-build, /sdlc-verify, /sdlc-review, /sdlc-log and /sdlc-doctor. Other tools get the same steps as skills when you pick them above.",
+    "h.commands": "Claude Code slash commands for each loop step: /sdlc-plan, /sdlc-build, /sdlc-verify, /sdlc-review, /sdlc-finish, /sdlc-log and /sdlc-doctor. Other tools get the same steps as skills when you pick them above.",
     "h.skills_pick": "A skill is a short instruction file an agent loads only when its situation arises, for example a privacy review when personal data is touched. Ticked skills match your answers; tick or untick any. They install to .claude/skills/ and, for other tools, .agents/skills/.",
     "h.git_tools": "The .ai-sdlc/ folder holds the kit's runtime (sdlc.py), its manifest and the evidence ledger. Commit it so everyone runs the same checks; ignore it only for a personal experiment.",
 
@@ -664,6 +665,13 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      .gemini/settings.json, and with --harness cursor the three
                      shell rules into .cursor/hooks.json, through
                      .claude/hooks/adapter.sh.
+  --no-finish-guard  do not register the finish guard. With Claude Code chosen, a fresh
+                     install adds two session hooks to .claude/settings.json: at
+                     session start it notes HEAD; when the agent stops, it names a
+                     Tier 1 or 2 item this session committed that is not Done or
+                     Parked, once per item, and asks for `sdlc.py finish <ID>`. It
+                     never blocks a tool call. The charter's Finish guard row turns
+                     it off. --finish-guard adds it on --upgrade.
   --git-hooks [all|secrets]
                      install the opt-in git hooks, which every agent and every human
                      inherit from git itself: a pre-commit that refuses staged
@@ -773,6 +781,7 @@ class Options(object):
         self.decision_given = False
         self.acquisition_given = False
         self.hooks = False
+        self.finish_guard = None   # None: on for a fresh Claude Code install, off on upgrade
         self.preset = ""
         self.tier_rules = "standard"
         self.tier_rules_given = False
@@ -895,6 +904,10 @@ def parse_args(argv):
             o.assume_yes = True
         elif arg == "--no-skills":
             o.want_skills = False
+        elif arg == "--finish-guard":
+            o.finish_guard = True
+        elif arg == "--no-finish-guard":
+            o.finish_guard = False
         elif arg == "--scaffold-tests":
             o.scaffold_tests = True
         elif arg == "--scaffold-ci":
@@ -2927,7 +2940,7 @@ def managed_source_texts(target, docs, ctx, profile="full"):
 # commands (Antigravity's / menu, Codex, Cursor, Gemini CLI, Copilot). Generated from the
 # command files so there is one source. sdlc-doctor is not here: optional/skills/ already
 # ships a skill by that name.
-LOOP_SKILLS = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-log")
+LOOP_SKILLS = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-finish", "sdlc-log")
 LOOP_SKILL_WHEN = {
     "sdlc-plan": "Use when the user invokes /sdlc-plan or asks to plan, frame or scope a "
                  "change, or when a new request needs a tracked work item and a reviewed "
@@ -2940,6 +2953,9 @@ LOOP_SKILL_WHEN = {
                    "before claiming that anything passes, works or is done.",
     "sdlc-review": "Use when the user invokes /sdlc-review or asks for a review of a plan "
                    "or a change, and when a plan or a diff reaches a review gate.",
+    "sdlc-finish": "Use when the user invokes /sdlc-finish or asks to finish, close or wrap "
+                   "up a work item that is built, and when the finish guard names an item "
+                   "this session left open.",
     "sdlc-log": "Use when the user invokes /sdlc-log or asks to close, log or wrap up a "
                 "work item that is built, verified and reviewed.",
 }
@@ -2975,6 +2991,41 @@ def hook_command(name):
     """Anchored on the project root: a relative path fails open the moment the session's
     working directory is a subdirectory."""
     return 'sh "$CLAUDE_PROJECT_DIR"/.claude/hooks/%s' % name
+
+
+FINISH_GUARD = (("SessionStart", "start", "Noting where this session starts"),
+                ("Stop", "stop", "Checking for committed work left unfinished"))
+
+
+def merge_finish_guard(target, dry_run=False):
+    """Register `sdlc.py guard start|stop` as Claude Code SessionStart and Stop hooks,
+    merged into .claude/settings.json without touching anything else. Returns how many
+    were added, or None when the file could not be read."""
+    settings = Path(target) / ".claude" / "settings.json"
+    data = {}
+    if settings.exists():
+        try:
+            data = json.loads(settings.read_text(encoding="utf-8"))
+        except ValueError:
+            return None
+    if not isinstance(data, dict) or not isinstance(data.setdefault("hooks", {}), dict):
+        return None
+    added = 0
+    for event, arg, status in FINISH_GUARD:
+        command = 'python3 "$CLAUDE_PROJECT_DIR"/%s guard %s' % (RUNTIME_REL, arg)
+        entries = data["hooks"].setdefault(event, [])
+        if not isinstance(entries, list):
+            return None
+        if any(isinstance(e, dict) and any(isinstance(h, dict) and h.get("command") == command
+                                           for h in (e.get("hooks") or [])) for e in entries):
+            continue
+        entries.append({"hooks": [{"type": "command", "command": command,
+                                   "statusMessage": status, "timeout": 30}]})
+        added += 1
+    if added and not dry_run:
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(settings, json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return added
 
 
 def repair_hook_commands(target):
@@ -3455,6 +3506,16 @@ class Installer(object):
     def install_hooks(self):
         """Merged into whatever settings.json is already there, never written over it:
         the file usually carries permissions somebody tuned by hand."""
+        if "CLAUDE.md" in self.harnesses and self.o.finish_guard is not False:
+            if self.o.dry_run:
+                print("  would merge    .claude/settings.json (finish guard)")
+            else:
+                added = merge_finish_guard(self.target)
+                if added is None:
+                    print("  skip           .claude/settings.json is not valid JSON -- finish "
+                          "guard not merged.")
+                elif added:
+                    print("  merge          .claude/settings.json (finish guard)")
         if not self.o.hooks:
             return
         dest_dir = ensure_inside(self.target, self.target / ".claude" / "hooks")
@@ -4552,6 +4613,11 @@ def upgrade(target, o):
         hashes = dict((rel, sha256_text(content)) for rel, content in planned.items())
         write_manifest(target, docs, hashes, regions)
         refresh_profile(target)
+        if o.finish_guard:
+            added = merge_finish_guard(target)
+            print("  %s .claude/settings.json (finish guard%s)" % (
+                "merge         " if added else "skip          ",
+                "" if added else ": already there" if added == 0 else ": not valid JSON"))
         repaired = repair_hook_commands(target)
         if repaired:
             print("  update         .claude/settings.json (%d hook command%s anchored on "
@@ -4700,7 +4766,7 @@ def report(w, inst, skills, tailored):
         chosen = ["claude"] if inst.o.harnesses is None else inst.o.harnesses
     if "claude" in chosen and w.a.get("commands", True):
         print("  Claude Code    open the project and run  /sdlc-plan <what you want to build>")
-        print("                 then /sdlc-build, /sdlc-verify, /sdlc-review, /sdlc-log")
+        print("                 then /sdlc-build, /sdlc-verify, /sdlc-finish")
     others = [HARNESS_TITLES.get(n, n) for n in chosen if n != "claude"]
     if others or inst.o.native_harnesses:
         names = ", ".join(others + (["Codex and others"] if inst.o.native_harnesses else []))

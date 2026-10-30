@@ -47,6 +47,14 @@ Evidence stays enforced where it can be enforced honestly: `sdlc-evidence-check`
 which records each stage's output and exit code under `.ai-sdlc/evidence/` for a claim to
 cite.
 
+What did ship is narrower: the **finish guard** (`sdlc.py guard`, registered on
+`SessionStart` and `Stop` by the installer when Claude Code is chosen, not part of
+`--hooks`). It does not judge whether checks ran. It asks one decidable question: did a
+commit made in this session name a Tier 1 or 2 item whose backlog row is still open? If
+so, it names the item once and asks for `sdlc.py finish <ID>`, or for the agent to say
+what is left. It never fires twice for the same item in a session, never on a session that
+committed nothing, and the charter's **Finish guard** row turns it off.
+
 The same reasoning applies to anything you add here. **Only automate a rule whose
 violation is decidable from the tool call itself.**
 

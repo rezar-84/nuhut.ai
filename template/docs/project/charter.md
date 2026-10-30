@@ -256,6 +256,7 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | **Never Tier 1 here** | _(surfaces from the `AGENTS.md` Tier 1 list that genuinely do not apply — e.g. "no PII: this project holds no personal data, see Data categories held". Without this, "when in doubt, tier up" makes almost everything Tier 1.)_ |
 | **Human approval required for** | _(list — mirrors the "Human approval required for" line in `AGENTS.md`, "Project overrides")_ |
 | **Independent review required for** | `none` · `Tier 1` · `Tier 1 and 2` _(default: none — off unless manually turned on for Tier 1 or Tier 1 and 2. When enabled, `sdlc.py doctor` fails such an item, once built, if no review came from a model family other than the author's; a same-family review is a self-check and clears nothing. Judged only on commits that carry Agent or Model trailers)_ |
+| **Finish guard** | `on` · `off` _(default: on where the installer registered it (Claude Code). When the agent stops, it names a Tier 1 or 2 item this session committed that is not yet Done or Parked, once per item, and asks for `sdlc.py finish <ID>`. It never blocks a tool call. CI's `sdlc.py doctor --strict` is the check that holds for every tool)_ |
 | **Agent budget per tier** | _(optional, e.g. "Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h". `sdlc.py metrics` reports usage from Tokens and Minutes commit trailers against it; nothing is enforced)_ |
 | **Approvers** | _(names for Tier 1's two approvals)_ |
 | **Staleness threshold** | _(e.g. 90 days — after this, a `project/` doc is treated as a hypothesis)_ |
@@ -273,6 +274,7 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | **Performance budgets** | _(or "none set" — which is a known gap, not a neutral state)_ |
 | **Primary outcome** | _(the one user action success is measured by: sign-up, activation, task completion, purchase… `cro-analyst` optimises for exactly this)_ |
 | **Jurisdictions / regimes** | _(for `privacy-legal`)_ |
+| **Allowed in records** | _(values that are safe to appear in the records, each in backticks, e.g. the owner's own work address or the company phone. `sdlc.py doctor` stops reporting them as personal data. Never a credential: those are rotated, not allowed)_ |
 | **Data categories held** | _(or "none" — and say how you know)_ |
 
 ### Languages & localisation

@@ -4,6 +4,41 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Finishing an item is one command: `sdlc.py finish <ID>` and `/sdlc-finish`.** The steps
+  agents skipped most were the ones after the build: review, worklog, evidence.
+  - `finish` checks what the item's tier owes and nothing more: a verify run (not at
+    Tier 3), a ship review at Tier 1, an independent review where the charter asks, and
+    `plan-check` when there is a plan. Each thing missing comes back as an `OWED` line
+    with the command that supplies it.
+  - It drafts the worklog entry from git and the evidence ledger and marks the parts only
+    the agent knows `TODO(finish)`. It refuses until they are written.
+  - Last it sets Done, or **Parked** at Tier 1 so a human gives the merge approval.
+  - When checks cannot run here, `--waive verify --by <name> --reason "…"` records a
+    *Not run* with the name and the reason. It never counts as Verified, is refused at
+    Tier 1, and `metrics` counts waivers.
+  - `verify --item <ID>` names the item in the ledger rows, so a run before the commit
+    counts for the item.
+  - `/sdlc-finish` is the new loop command, and an `sdlc-finish` skill for the other
+    tools. `/sdlc-log` stays.
+- **The finish guard (Claude Code).** When the agent stops, it names a Tier 1 or 2 item
+  this session committed that is still open, once per item, and asks for `finish`.
+  - It reads git and the backlog only, never runs doctor, and never blocks a tool call.
+  - A fresh install with Claude Code registers it (`--no-finish-guard` skips it), and
+    `--upgrade --finish-guard` adds it to an existing project. The charter's new
+    **Finish guard** row turns it off.
+  - `doctor --strict` in CI remains the check that holds for every tool.
+- **Accept old findings once: `doctor --baseline`.** It writes
+  `docs/project/doctor-baseline.json`, and doctor, `--strict` and the viewer then show only
+  new findings, with a line saying how many were accepted and when (`--all` lists them).
+  - Rewriting the baseline only removes fixed findings; it never adds one.
+  - A leaked credential is never accepted.
+  - The charter's new **Allowed in records** row lists values that are safe in the records,
+    such as the owner's own address, so they stop being reported as personal data.
+- **Record repairs that preview first.** `fix rotate-worklog`, `fix normalise-status`
+  and `fix link-evidence` show what they would change; `--apply` writes it.
+  - `normalise-status` keeps a status's note in the Task cell.
+  - The board now reads a status word with a note (`Completed (merged 8acbc4a)`,
+    `Shipped — v2`) as its column.
 - **Fewer false "missing step" alarms, and every finding says how to fix it.** On real
   projects most Done items showed lifecycle gaps that were not gaps. Measured on two
   installed projects, Done items with a gap fell from 172 to 129 of 298 and from 71 to 58
