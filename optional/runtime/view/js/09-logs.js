@@ -80,6 +80,9 @@
   }
 
   // One doctor finding with its full advice, beside the list it came from.
+  // Who can act on a finding (sdlc.py FIX_HINTS): only "owner" needs a person.
+  var FIX_WHO = { tool: "a command fixes it", agent: "your agent can fix it", owner: "needs your decision" };
+
   function openFindingDrawer(a) {
     setInspect({ kind: "finding", id: a.check + "|" + a.where + "|" + a.message.slice(0, 40), a: a });
     var box = el("div", { style: "display: flex; flex-direction: column; height: 100%;" }, [
@@ -93,6 +96,11 @@
       el("div", { cls: "drawer-body" }, [
         a.where ? el("p", { style: "font-family: var(--mono); font-size: 12px; margin-top: 0;" }, [inline(a.where)]) : null,
         el("div", { style: "font-size: 14px; line-height: 1.55; max-width: 65ch;" }, [inline(a.message)]),
+        a.fix ? el("div", { style: "margin-top: 16px; max-width: 65ch;" }, [
+          el("strong", { text: "How to fix" }),
+          el("span", { cls: "chip", style: "margin-left: 8px;", text: FIX_WHO[a.who] || FIX_WHO.agent }),
+          el("div", { style: "font-size: 14px; line-height: 1.55; margin-top: 4px;" }, [inline(a.fix)])
+        ]) : null,
         el("p", { cls: "muted", style: "font-size: 12px; margin-top: 16px;" }, ["Re-check after fixing: ", el("code", { text: "python3 .ai-sdlc/bin/sdlc.py doctor" })])
       ])
     ]);

@@ -9,7 +9,9 @@ this compact form (`sdlc.py log --since <ref>` drafts it):
   · deferred: nothing | <follow-up ID and reason>
 ```
 
-Tier 1 and Tier 2 use the full entry below.
+Tier 1 and Tier 2 use the full entry below. The one exception: `Lean` effort on a clean
+Tier 2 item with no open risk, follow-up or decision may use the compact form, which is
+Lean's "concise but complete" record (`../process/00-operating-model.md`).
 
 ## {{PREFIX}}-### — <title>
 
@@ -38,13 +40,13 @@ _(Actual commands and actual results. Not "tests pass".)_
 <real output, or a faithful summary: "142 passed, 0 failed, 3 skipped">
 ```
 
-_(One line for each of the ten check stages in `../process/04-quality-gates.md`, in that
+_(One line for each check stage in `../process/04-quality-gates.md`, in that
 order — all of them, including the ones that did not run. The charter's Commands table
 supplies the command for each; its `Install` and `Run locally` rows are not stages and are
 not reported here. A stage missing from this record is indistinguishable from one that
-passed. Use the six words from `../process/06-evidence-and-claims.md`: Verified ·
-Reported · Assumed · Unknown · Not run · Absent — plus *Measured* for a score, latency,
-or freshness number, which carries its method, subject version, N, spread, and date.)_
+passed. Use the seven words from `../process/06-evidence-and-claims.md`: Verified ·
+Reported · Assumed · Unknown · Not run · Absent · Measured. *Measured* is for a score,
+latency or freshness number, and carries its method, subject version, N, spread, and date.)_
 
 - [x] `checks.lint` — Verified — _(result)_
 - [ ] `checks.integration` — **Not run** — _(why, and what would be needed)_

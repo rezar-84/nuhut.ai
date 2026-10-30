@@ -4,6 +4,33 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Fewer false "missing step" alarms, and every finding says how to fix it.** On real
+  projects most Done items showed lifecycle gaps that were not gaps. Measured on two
+  installed projects, Done items with a gap fell from 172 to 129 of 298 and from 71 to 58
+  of 76. The rest are real.
+  - Doctor and the viewer read one table of what each tier owes (`required_steps`). A
+    Tier 3 item owes only its commit (plus a compact line under `Strict`), so doctor no
+    longer fails a Done Tier 3 row for having no worklog entry.
+  - An epic file is the epic's plan and, once its Design review section is filled, its
+    design review; that review also covers the items the epic's Items section lists. A
+    Tier 1 member still writes its own plan.
+  - One worklog entry may close several items (`## ACME-1 / ACME-2 — title`), and a commit
+    may name a range (`ACME-4..7`, `ACME-4–7`, `ACME-4 to ACME-7`); each item counts.
+  - Verify has two new states. **skipped**: the worklog says a check was Not run, with the
+    reason. **unproven**: the worklog reports results with no `sdlc.py verify` run behind
+    them. Neither is a gap; metrics count unproven items separately.
+  - A `### Verified` heading is no longer read as a Verified claim, so "Not run" under it
+    stops raising the evidence warning. A `### Verified` heading also no longer counts as
+    proof that checks ran.
+  - Every doctor finding carries `fix` (the command, or the file and section to write) and
+    `who` (`tool`, `agent` or `owner`). Doctor prints it, and the viewer shows it in the
+    finding drawer and on each gap's next action.
+  - `sdlc.py log --id <ID>` drafts one item's line from just before its first commit.
+    `--since` is optional with it. This repairs the viewer's log action, which passed an
+    option that did not exist.
+  - Docs agree with themselves: the Definition of Done is tiered, Tier 1 needs two human
+    approvals everywhere, the evidence vocabulary has seven words everywhere, and the
+    worklog template states the Lean exception for a clean Tier 2 item.
 - **Documentation, help and a demo.**
   - The README is now a landing page: a quick start, a one-minute demo, a feature tour with screenshots, a command overview, and a FAQ.
   - New guides: [getting started](docs/getting-started.md), [the viewer](docs/viewer.md), [multi-agent work](docs/multi-agent.md), [living specs](docs/specs.md), [command reference](docs/cli.md), [troubleshooting](docs/troubleshooting.md), and a [docs index](docs/README.md).

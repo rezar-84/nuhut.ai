@@ -38,7 +38,7 @@ Tier by **blast radius and reversibility**, not by topic. When in doubt, tier up
 
 | Tier | When | Required |
 | --- | --- | --- |
-| **1** | It changes a contract others consume, stored data or its schema, authentication or authorisation, rules that move money, a release pipeline, or it is hard to reverse | Written plan · design and ship review by the active roles · ADR · human approval before merge · rollback plan |
+| **1** | It changes a contract others consume, stored data or its schema, authentication or authorisation, rules that move money, a release pipeline, or it is hard to reverse | Written plan · design and ship review by the active roles · ADR · two human approvals before merge · rollback plan |
 | **2** | New or changed behaviour that tests can cover and a revert undoes | Short plan · review by the roles whose surface it touches · tests · worklog entry |
 | **3** | Typo, copy, comment, formatting, a test, a patch bump, a doc edit | The commit message with the ID is the record |
 

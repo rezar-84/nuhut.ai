@@ -50,8 +50,12 @@ check it against these items as you would any other request.)*
 
 ## Definition of Done
 
-An item is `Done` only when all of these are true. Anything unmet is either fixed or
-becomes a tracked follow-up named in the worklog entry — never an unstated gap.
+An item is `Done` only when all of these are true **for its tier**. Anything unmet is
+either fixed or becomes a tracked follow-up named in the worklog entry — never an unstated
+gap. Tier 1 owes every line. Tier 2 owes every line except the ones marked *(Tier 1)*.
+Tier 3 owes Function, the checks its change affects and a clean scan; its commit message
+is its record, so the Documentation lines do not apply to it, except the compact worklog
+line under `Strict` tier rules (`AGENTS.md`, Tiers).
 
 ### Function
 - [ ] Every acceptance criterion demonstrably met, including the negative cases.
@@ -64,7 +68,7 @@ becomes a tracked follow-up named in the worklog entry — never an unstated gap
 ### Quality
 - [ ] Tests written and passing, covering the happy path *and* the refusals.
 - [ ] The project's full check sequence run, with real output reported
-      (`04-quality-gates.md`).
+      (`04-quality-gates.md`). Tier 3: the stages the change affects.
 - [ ] Ephemeral test environments torn down: all containers, background servers, and test
       daemons stopped; host memory, CPU, and ports released.
 - [ ] No new lint/type/security-scan warnings introduced, or each one justified in
@@ -77,11 +81,13 @@ becomes a tracked follow-up named in the worklog entry — never an unstated gap
 - [ ] Human approvals obtained where `AGENTS.md`, "Project overrides", requires them.
 
 ### Documentation
-- [ ] Worklog entry appended, every section of `templates/worklog-entry.md` filled in.
+- [ ] Worklog entry appended, every section of `templates/worklog-entry.md` filled in
+      (Tier 3 under `Strict` tier rules: the compact line).
 - [ ] Backlog status updated; follow-ups created with IDs.
 - [ ] Every `project/` artifact the change falsified is updated or marked `stale`
       (`07-traceability.md`).
-- [ ] ADR written for any material decision; superseded ADRs marked, not edited.
+- [ ] ADR written for any material decision *(Tier 1, or any tier that makes one)*;
+      superseded ADRs marked, not edited.
 - [ ] `assumptions-and-risks.md` reconciled — resolved entries closed, new ones added.
 
 ### Operability *(anything that deploys)*

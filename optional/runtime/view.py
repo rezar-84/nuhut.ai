@@ -30,7 +30,7 @@ COLUMNS = (("Now", ("In progress", "In review")), ("Next", ("Ready",)),
            ("Blocked", ("Blocked",)), ("Parked", ("Parked",)), ("Later", ("Deferred",)),
            ("Done", ("Done",)), ("Dropped", ("Dropped",)))
 STEPS = ("Frame", "Plan", "Design review", "Build", "Verify", "Ship review", "Log", "Close")
-RECORD_DIRS = ("plans", "reviews", "defects", "postmortems", "adr")
+RECORD_DIRS = ("plans", "reviews", "defects", "postmortems", "adr", "epics")
 MAX_DOC_CHARS = 400000
 MAX_COMMITS = 3000
 
@@ -142,12 +142,15 @@ def worklog_entries(text, source, id_re):
     entries, current, sub = [], None, None
     for n, line in enumerate(text.splitlines()):
         if line.startswith("## "):
-            m = re.match(r"^##\s+(%s)(?:\s+\([^)]*\))?\s+[—-]+\s*(.*)$" % id_re.pattern, line)
+            # One entry may close several items: `## ACME-1, ACME-2 — title` (or `/`, `&`).
+            m = re.match(r"^##\s+((?:%s)(?:\s*[,&/]\s*(?:%s))*)(?:\s+\([^)]*\))?\s+[—-]+\s*(.*)$"
+                         % (id_re.pattern, id_re.pattern), line)
             current = None
             if m:
-                current = {"id": m.group(1), "title": m.group(2).strip(), "source": source,
-                           "line": n + 1, "date": "", "status": "", "sections": {},
-                           "compact": False}
+                ids = re.findall(id_re.pattern, m.group(1))
+                current = {"id": ids[0], "ids": ids, "title": m.group(m.lastindex).strip(),
+                           "source": source, "line": n + 1, "date": "", "status": "",
+                           "sections": {}, "compact": False}
                 entries.append(current)
                 sub = "_head"
             continue
@@ -375,7 +378,7 @@ def _build_inner(rt, project):
             refs = []
         else:
             continue
-        found = sorted(set(id_re.findall(subject)))
+        found = sorted(set(id_re.findall(subject)) | rt.id_ranges(subject, prefix))
         all_commits.append({"sha": sha, "parents": parents, "refs": refs,
                             "author": author, "date": date,
                             "subject": subject, "items": found})
@@ -450,10 +453,11 @@ def _build_inner(rt, project):
             model["order"].append(i)
         return model["items"][i]
     for n, entry in enumerate(model["worklog"]):
-        it = item(entry["id"])
-        it.setdefault("worklog", []).append(n)
-        if not it.get("title"):
-            it["title"] = entry["title"]
+        for entry_id in entry.get("ids") or [entry["id"]]:
+            it = item(entry_id)
+            it.setdefault("worklog", []).append(n)
+            if not it.get("title"):
+                it["title"] = entry["title"]
     for n, doc in enumerate(model["docs"]):
         if doc["owner_id"]:
             item(doc["owner_id"]).setdefault("records", []).append(n)
@@ -507,11 +511,12 @@ def _build_inner(rt, project):
         author = next((tags for _, _, tags in (commits or []) if tags.get("Model") or tags.get("Agent")), None)
         if author:
             it["author"] = "%s / %s" % (author.get("Agent", "?"), author.get("Model", "?"))
+    rules = rt.tier_rules(project)
     for it in model["items"].values():
         for dep in it.get("depends", []):
             if dep in model["items"]:
                 model["items"][dep].setdefault("dependents", []).append(it["id"])
-        it["steps"] = lifecycle(it, model)
+        it["steps"] = lifecycle(it, model, rt, rules)
         has_plan = any(model["docs"][n]["kind"] == "plans" for n in it.get("records", []))
         if has_plan and hasattr(rt, "plan_check") and it.get("column") == "Now":
             try:
@@ -605,7 +610,7 @@ def build_item_thread(it, model):
         dkind = doc.get("kind", "record")
         dstage = doc.get("stage", "")
         ddate = (doc.get("meta") or {}).get("last-reviewed", "")
-        if dkind == "plans":
+        if dkind in ("plans", "epics"):
             events.append({
                 "kind": "plan",
                 "order": 20,
@@ -697,32 +702,67 @@ def build_item_thread(it, model):
     return events
 
 
-def lifecycle(it, model):
-    """Frame -> Close, each step done / missing / n/a, from which records exist."""
+def section_text(text, heading):
+    """The body under a `## heading` (any level), without the fill-in markers."""
+    m = re.search(r"(?m)^#+ +%s\b[^\n]*\n(.*?)(?=^#+ |\Z)" % re.escape(heading), text or "", re.S)
+    return re.sub(r"_\([^)]*\)_", "", m.group(1)).strip() if m else ""
+
+
+def lifecycle(it, model, rt, rules="Standard"):
+    """Frame -> Close, each step done / unproven / skipped / missing / n/a, from which
+    records exist and what the item's tier owes (rt.required_steps). An epic file is the
+    epic's plan, and its filled Design review section is the design review
+    (process/11-epics.md). A worklog that says a check was Not run, with the reason, is an
+    honest skip; one that reports results no verify run backs is unproven. Neither is a gap."""
     records = [model["docs"][n] for n in it.get("records", [])]
     kinds = set((d["kind"], d["stage"]) for d in records)
+    epic_docs = [d for d in records if d["kind"] == "epics"]
     entries = [model["worklog"][n] for n in it.get("worklog", [])]
-    tier = it.get("tier", "")
-    verified = any(any(re.search(r"verif", name, re.I) for name in e["sections"])
-                   or "verified:" in e["sections"].get("Summary", "") for e in entries)
     done = it.get("column") == "Done"
     started = it.get("column") in ("Now", "Done")  # before work starts, nothing is owed yet
+    owed = rt.required_steps(rt.tier_of(it.get("tier", "")), rules, started, done)
 
-    verified = verified or any(str(e.get("result", "")).startswith("Verified: pass")
-                               for e in it.get("evidence", []))
+    verified = any(str(e.get("result", "")).startswith("Verified: pass")
+                   for e in it.get("evidence", []))
+    # What the worklog says about checks: its Verified section (or one named like it,
+    # "Verification", "Quality gates verified"), or a compact line's `verified:` field.
+    reports = [body.strip() for e in entries for name, body in e["sections"].items()
+               if re.search(r"(?i)verif|quality gate", name)]
+    summaries = [e["sections"].get("Summary", "") for e in entries]
+    not_run = any(re.match(r"(?i)[-*\s]*not run\b", r) for r in reports) or \
+        any(re.search(r"(?i)\bverified:\s*not run", s) for s in summaries)
+    # Results reported with no verify run behind them: recorded, not proven. doctor's
+    # evidence check names each one; the step is not a gap.
+    claimed = any(r and not re.match(r"(?i)[-*\s]*(not run|absent|none|n/a)\b", r)
+                  for r in reports) or any(rt.claims_verified(s) for s in summaries)
     stages = set(r["stage"] for r in it.get("reviews", []))
+    # An epic's plan and design review cover the items its Items section lists; a Tier 1
+    # member still writes its own plan (CARD.md, Development method).
+    member_of = [d for d in model["docs"] if d["kind"] == "epics" and d not in epic_docs
+                 and it["id"] in re.findall(r"[A-Za-z][A-Za-z0-9]*-[0-9]+",
+                                            section_text(d["text"], "Items"))]
+    has_plan = ("plans", "") in kinds or bool(epic_docs) or \
+        (bool(member_of) and rt.tier_of(it.get("tier", "")) != "1")
+    has_design = (("reviews", "design") in kinds or "design" in stages or
+                  any(section_text(d["text"], "Design review") for d in epic_docs + member_of))
 
-    def need(present, required=True):
-        return "done" if present else ("missing" if required else "n/a")
+    def need(step, present, skipped=False, unproven=False):
+        if present:
+            return "done"
+        if unproven:
+            return "unproven"
+        if skipped:
+            return "skipped"
+        return "missing" if owed[step] else "n/a"
     return {
-        "Frame": need(bool(it.get("row"))),
-        "Plan": need(("plans", "") in kinds, tier == "1" and started),
-        "Design review": need(("reviews", "design") in kinds or "design" in stages, tier == "1" and started),
-        "Build": need(bool(it.get("commits")), done),
-        "Verify": need(verified, done),
-        "Ship review": need(("reviews", "ship") in kinds or "ship" in stages, tier == "1" and done),
-        "Log": need(bool(entries), done),
-        "Close": need(done, False) if not done else "done",
+        "Frame": need("Frame", bool(it.get("row"))),
+        "Plan": need("Plan", has_plan),
+        "Design review": need("Design review", has_design),
+        "Build": need("Build", bool(it.get("commits"))),
+        "Verify": need("Verify", verified, not_run, claimed and not not_run),
+        "Ship review": need("Ship review", ("reviews", "ship") in kinds or "ship" in stages),
+        "Log": need("Log", bool(entries)),
+        "Close": "done" if done else "n/a",
     }
 
 
@@ -988,9 +1028,17 @@ def metrics(rt, project, model, today=None):
 
     gaps = [it["id"] for it in done
             if any(v == "missing" for v in it.get("steps", {}).values())]
+    skips = [it["id"] for it in done if it["id"] not in gaps
+             and any(v == "skipped" for v in it.get("steps", {}).values())]
+    unproven = [it["id"] for it in done if it.get("steps", {}).get("Verify") == "unproven"]
     add("Done with a lifecycle gap", "lagging", "%d of %d" % (len(gaps), len(done)) +
-        (": " + ", ".join(gaps[:8]) + (" …" if len(gaps) > 8 else "") if gaps else ""),
-        "Done items missing a plan, review, commit or worklog entry their tier requires")
+        (": " + ", ".join(gaps[:8]) + (" …" if len(gaps) > 8 else "") if gaps else "") +
+        ("; %d more skipped a check on record" % len(skips) if skips else ""),
+        "Done items missing a plan, review, commit, verification or worklog entry their tier "
+        "requires; a check the worklog says was Not run, with its reason, is a skip, not a gap")
+    if unproven:
+        add("Verified by word only", "lagging", "%d of %d Done items" % (len(unproven), len(done)),
+            "worklog reports check results with no sdlc.py verify run on the item's commits")
 
     plan_dates = {}
     plans_dir = os.path.join(project.docs, "project", "plans")
@@ -1376,8 +1424,10 @@ def serve(rt, project, template, opts):
                     if payload.get("strict"):
                         cmd_args.append("--strict")
                 elif sub == "log":
-                    since = str(payload.get("since") or "main").strip()
-                    if safe_re.match(since):
+                    since = str(payload.get("since") or "").strip()
+                    if not since and not payload.get("item_id"):
+                        since = "main"
+                    if since and safe_re.match(since):
                         cmd_args.extend(["--since", since])
                     iid = str(payload.get("item_id") or "").strip()
                     if iid and safe_re.match(iid):
@@ -1520,7 +1570,8 @@ def build_map_svg(model, interactive=True):
 
     kind_names = {
         "record": "Records", "plans": "Plans", "reviews": "Reviews", "defects": "Defects",
-        "postmortems": "Postmortems", "adr": "ADRs", "archive": "Worklog archive"
+        "postmortems": "Postmortems", "adr": "ADRs", "epics": "Epics",
+        "archive": "Worklog archive"
     }
     by_doc = []
     for k in sorted(kinds):

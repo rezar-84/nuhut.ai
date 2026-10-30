@@ -38,7 +38,8 @@
         items.forEach(function (a) {
           var line = el("div", { cls: "doc-line", role: "listitem", title: a.message }, [
             el("span", { cls: "dl-lvl " + a.level, text: a.level }),
-            el("div", { style: "min-width: 0;" }, [el("div", { cls: "dl-txt", text: firstSentence(a.message) }), el("div", { cls: "dl-where dl-txt", text: a.where || "" })])
+            el("div", { style: "min-width: 0;" }, [el("div", { cls: "dl-txt", text: firstSentence(a.message) }), el("div", { cls: "dl-where dl-txt", text: a.where || "" }),
+              a.fix ? el("div", { cls: "dl-where dl-txt", text: (a.who === "owner" ? "Needs you: " : "Fix: ") + a.fix }) : null])
           ]);
           line.addEventListener("click", function () { openFindingDrawer(a); });
           makeInteractive(line, function () { openFindingDrawer(a); }, a.level + " " + a.check + ": " + a.message);

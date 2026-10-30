@@ -79,7 +79,7 @@ confidence propagates.
 Never write "should work", "presumably passes", or "I've made sure that…" for something
 you did not observe. If you did not run the tests, the sentence is "tests not run".
 
-### Measured — the sixth word has conditions
+### Measured — the seventh word has conditions
 
 The other five words describe checks that pass or fail. A great deal of software does
 neither: an evaluation suite scores, a benchmark distributes, a pipeline is fresh to

@@ -3341,12 +3341,110 @@ def test_semver():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_lifecycle_gaps():
+    print("lifecycle: steps owed by tier, honest skips, epics, shared entries, fixes")
+    d = tempfile.mkdtemp(prefix="sdlc-steps-")
+    subprocess.call(["git", "init", "-q", d])
+    run([d, "LCX", "-y"])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=tester"]
+
+    def sdlc(*args):
+        p = subprocess.Popen([sys.executable, script] + list(args), cwd=d,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        o, e = p.communicate()
+        return p.returncode, o.decode("utf-8", "replace"), e.decode("utf-8", "replace")
+
+    def commit(message):
+        subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+        subprocess.call(git + ["commit", "-qm", message], cwd=d, stdout=subprocess.DEVNULL)
+
+    backlog = read(d, "docs/project/backlog.md")
+    i = backlog.index("## Done")
+    j = backlog.index("\n", backlog.index("| --- ", i)) + 1
+    rows = ["| LCX-%d | %s | %s | qa | | %s | 2026-01-02 |" % row for row in (
+        (1, "Typo fix", "3", "Done"),
+        (2, "Owner said ship fast", "2", "Done"),
+        (3, "Tests reported by hand", "2", "Done"),
+        (10, "Epic: billing", "1", "Done on epic branch"),
+        (11, "Invoice model", "2", "Done"),
+        (12, "Payment capture", "1", "Done"),
+        (20, "Shared entry one", "2", "Done"),
+        (21, "Shared entry two", "2", "Done"),
+        (31, "Inside a commit range", "2", "Done"))]
+    write(d, "docs/project/backlog.md", backlog[:j] + "\n".join(rows) + "\n" + backlog[j:])
+    write(d, "docs/project/epics/LCX-10.md", "# Epic LCX-10\n\n## Items\n\n| LCX-11 | LCX-12 |\n\n"
+          "## Shared plan\n\nOne ledger.\n\n## Design review\n\nPass, two S3 notes.\n")
+    write(d, "docs/project/worklog.md", read(d, "docs/project/worklog.md") +
+          "\n## LCX-2 — Owner said ship fast\n\n**Date:** 2026-01-02 **Tier:** 2\n\n"
+          "### Verified\n\n- Not run: the owner asked to skip tests for this release\n\n"
+          "## LCX-3 — Tests reported by hand\n\n**Date:** 2026-01-02 **Tier:** 2\n\n"
+          "### Verification\n\nnpm test -> 42 passed\n\n"
+          "## LCX-20 / LCX-21 — Two items, one entry\n\n**Date:** 2026-01-02 **Tier:** 2\n\n"
+          "### Verified\n\n- Not run: covered by the release suite\n")
+    commit("chore: records")
+    for message in ("fix(LCX-1): typo", "feat(LCX-2): fast path", "feat(LCX-3): hand tested",
+                    "feat(LCX-11): invoices", "feat(LCX-12): capture", "feat(LCX-20): one",
+                    "feat(LCX-21): two", "feat: batch (LCX-30..32)"):
+        write(d, "src/%s.txt" % message.split(":")[0].replace("(", "-").rstrip(")"), message)
+        commit(message)
+
+    code, out, err = sdlc("view", "--json")
+    try:
+        items = json.loads(out)["items"]
+    except ValueError:
+        items = {}
+    steps = lambda i: items.get(i, {}).get("steps", {})
+    check("a Tier 3 item owes only its commit", not [k for k, v in steps("LCX-1").items() if v == "missing"],
+          str(steps("LCX-1")))
+    check("a check the worklog says was Not run is a skip, not a gap",
+          steps("LCX-2").get("Verify") == "skipped", str(steps("LCX-2")))
+    check("results reported with no verify run are unproven, not missing",
+          steps("LCX-3").get("Verify") == "unproven", str(steps("LCX-3")))
+    check("an epic file is the epic's plan and design review",
+          steps("LCX-10").get("Plan") == "done" and steps("LCX-10").get("Design review") == "done",
+          str(steps("LCX-10")))
+    check("an epic's design review covers its members; a Tier 1 member still owes a plan",
+          steps("LCX-11").get("Design review") in ("done", "n/a") and steps("LCX-12").get("Design review") == "done"
+          and steps("LCX-12").get("Plan") == "missing", str(steps("LCX-12")))
+    check("one worklog entry naming several items counts for each",
+          steps("LCX-20").get("Log") == "done" and steps("LCX-21").get("Log") == "done", str(steps("LCX-21")))
+    check("a commit naming a range counts for every item in it",
+          steps("LCX-31").get("Build") == "done", str(steps("LCX-31")))
+
+    code, out, err = sdlc("doctor", "--json")
+    try:
+        findings = json.loads(out)
+    except ValueError:
+        findings = []
+    check("doctor does not ask a Tier 3 item for a worklog entry",
+          not any("LCX-1" == f["where"].split()[-1] and "worklog" in f["message"] for f in findings), out[-400:])
+    check("a Verified heading over 'Not run' is not read as a Verified claim",
+          not any(f["check"] == "evidence" and f["where"].endswith("LCX-2") for f in findings), out[-400:])
+    check("every finding says how to fix it and who can",
+          findings and all(f.get("fix") and f.get("who") in ("tool", "agent", "owner") for f in findings),
+          str([f for f in findings if not f.get("fix")])[:400])
+    code, out, err = sdlc("doctor")
+    check("doctor prints the fix under each finding", "fix (" in out, out[-300:])
+    code, out, err = sdlc("log", "--id", "LCX-21")
+    check("log --id drafts only that item, from just before its first commit",
+          code == 0 and "LCX-21" in out and "LCX-20" not in out, out + err)
+
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import sdlc as rt
+    check("ranges keep zero padding and never read a title dash as a range",
+          sorted(rt.id_ranges("ACME-001..003", "ACME")) == ["ACME-001", "ACME-002", "ACME-003"]
+          and not rt.id_ranges("## ACME-5 — 12 fixes", "ACME") and not rt.id_ranges("ACME-5 to 12 days", "ACME"))
+    check("Strict tier rules make a Tier 3 item log a line",
+          rt.required_steps("3", "Strict", True, True)["Log"] and not rt.required_steps("3", "Standard", True, True)["Log"])
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_git_hooks,
-                 test_runtime, test_view, test_kit_value_benchmark, test_kit_value_checks,
+                 test_runtime, test_view, test_lifecycle_gaps, test_kit_value_benchmark, test_kit_value_checks,
                  test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
                  test_domain_detection,

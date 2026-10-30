@@ -184,6 +184,25 @@ def backlog_rows(text, prefix, legacy_prefixes=None):
     return rows
 
 
+def id_ranges(text, prefix):
+    """IDs a range names: ACME-4..7 or ACME-4–7 (en dash, no spaces, either end may repeat
+    the prefix) or ACME-4 to ACME-7, so one commit or entry that closes several items counts
+    for each. The em dash is the worklog's title separator, never a range. Zero padding
+    follows the first ID; spans over 100 are taken as a typo and ignored."""
+    if not prefix:
+        return set()
+    found = set()
+    p = re.escape(prefix)
+    pattern = (r"\b%s-([0-9]+)(?:(?:\.\.|–)(?:%s-)?([0-9]+)|\s+to\s+%s-([0-9]+))\b"
+               % (p, p, p))
+    for a, b, c in re.findall(pattern, text or ""):
+        lo, hi = int(a), int(b or c)
+        width = len(a) if a.startswith("0") else 0
+        if lo < hi <= lo + 100:
+            found.update("%s-%0*d" % (prefix, width, n) for n in range(lo, hi + 1))
+    return found
+
+
 def ids_in(text, prefix, extra_ids=None):
     patterns = []
     if prefix:
@@ -192,7 +211,7 @@ def ids_in(text, prefix, extra_ids=None):
         patterns.append(r"\b(?:" + "|".join(re.escape(i) for i in sorted(extra_ids, key=len, reverse=True)) + r")\b")
     if not patterns:
         return set()
-    found = set(re.findall(r"|".join(patterns), text))
+    found = set(re.findall(r"|".join(patterns), text)) | id_ranges(text, prefix)
     if extra_ids:
         for m in re.finditer(r"\b([A-Za-z]+)([0-9]+)(?:\.([0-9]+))?\s*[-–—]\s*(?:([A-Za-z]+))?([0-9]+)(?:\.([0-9]+))?\b", text):
             p1, n1, sub1, p2, n2, sub2 = m.groups()
@@ -296,13 +315,90 @@ class Project(object):
 
 # ---------------------------------------------------------------- doctor
 
+# What to do about a finding, and who can do it: `tool` (a runtime command repairs it),
+# `agent` (the agent edits a record) or `owner` (a human decides). Matched in order on
+# (check, message); {item} is the work item ID at the end of `where`, {where} the place.
+SDLC = "python3 .ai-sdlc/bin/sdlc.py"
+FIX_HINTS = (
+    ("substitution", r"", "tool", "Re-run install.sh <this project> --upgrade, or replace the "
+     "placeholder with the project's value by hand"),
+    ("contract", r"", "tool", SDLC + " fix wire-pointer"),
+    ("charter", r"charter is missing", "tool", "Re-run install.sh <this project> --upgrade; it "
+     "recreates the charter without touching other records"),
+    ("charter", r"^blank, so Unknown", "agent", "Write each blank command in the charter's "
+     "Commands table, or 'absent' where the stage does not exist: " + SDLC +
+     " config --set STAGE=COMMAND"),
+    ("charter", r"^blank$", "owner", "Fill the row in {where}"),
+    ("charter", r"legacy row", "owner", "Decide what Operating mode meant here, then replace the "
+     "row with Default effort mode"),
+    ("charter", r"row missing", "tool", "install.sh <this project> --upgrade reinserts the row"),
+    ("charter", r"undecided", "owner", "Pick one value in {where} (or " + SDLC + " config)"),
+    ("charter", r"must be exactly one of", "agent", "Set the row in {where} to exactly one of "
+     "the listed values"),
+    ("charter", r"", "agent", "Record what the message names in {where}"),
+    ("roles", r"", "owner", "Tick each role in the charter's Active roles, or write why it does "
+     "not apply"),
+    ("stack", r"support ended", "owner", "Open a backlog item to upgrade off the unsupported "
+     "version"),
+    ("stack", r"", "agent", "Re-read the versions from their registry or vendor page and set "
+     "**Verified on:** to today in the ADR's Version facts"),
+    ("staleness", r"", "agent", "Check the document against how things are now, correct what "
+     "changed, and set last-reviewed to today"),
+    ("traceability", r"no work item prefix", "owner", "Set the work item prefix in the charter"),
+    ("traceability", r"Done with no worklog entry", "agent", "Record the work: " + SDLC +
+     " log --since <commit before {item}> --write drafts the entry from its commits; add Why "
+     "and Not done. If nothing was built, set the row to Dropped"),
+    ("traceability", r"Parked with no one", "owner", "Name the person {item} waits on in "
+     "'Waiting on whom'"),
+    ("traceability", r"in the worklog but not in the backlog", "agent", "Add a backlog row for "
+     "{item} with its tier and status, or correct the ID in the worklog"),
+    ("traceability", r"recent commit or branch", "agent", "Add a backlog row for the ID (a "
+     "retroactive ID, CARD.md), or fix the commit's Work-Item trailer"),
+    ("backlog", r"", "owner", "Decide: finish it, park it with a named human, return it to "
+     "Ready, defer it or drop it, and update {where}"),
+    ("lessons", r"", "agent", "Turn the recurring lessons into checks or hooks and remove them "
+     "from AGENTS.md section 9"),
+    ("rollback", r"", "owner", "Rehearse the rollback and record its Last executed date"),
+    ("sensitive", r"credential", "owner", "Rotate the credential first, then remove the line; "
+     "deleting it alone does not undo the leak"),
+    ("sensitive", r"", "agent", "Replace the personal detail with a role (\"the owner\", "
+     "\"a client\")"),
+    ("worklog", r"", "agent", "Move closed entries into worklog-archive/<year>-part<N>.md"),
+    ("profile", r"kit_version", "tool", "Finish the upgrade: install.sh <this project> --upgrade"),
+    ("profile", r"", "tool", SDLC + " fix sync-profile"),
+    ("epics", r"an epic with no", "agent", "Create the epic file from templates/epic.md"),
+    ("epics", r"", "agent", "Correct the Epic cell of {item}, or add the epic's row"),
+    ("dependencies", r"", "agent", "Correct the Depends on cell of {item}"),
+    ("hooks", r"", "owner", "Install jq, or remove the hooks"),
+    ("bite", r"", "tool", SDLC + " bite --restore"),
+    ("independence", r"", "tool", SDLC + " review {item} --role <role> --by <other harness>"),
+    ("evidence", r"", "agent", "Run " + SDLC + " verify and cite the run. For past work that "
+     "cannot be re-run, change the worklog's Verified line to 'Not run: <reason>'"),
+    ("claims", r"still claimed", "tool", SDLC + " release {item}"),
+    ("claims", r"", "owner", "Decide which agent keeps {item}; the other releases it"),
+    ("specs", r"not applied", "tool", SDLC + " spec apply {item} --write"),
+)
+
+
+def fix_hint(check, where, message):
+    """(fix, who) for a finding, from FIX_HINTS; ("", "") when none applies."""
+    found = re.search(r"([A-Za-z][A-Za-z0-9]*-[0-9]+)\s*$", where or "")
+    for name, pattern, who, fix in FIX_HINTS:
+        if name == check and re.search(pattern, message or ""):
+            return fix.replace("{item}", found.group(1) if found else "the item") \
+                      .replace("{where}", where or "the record"), who
+    return "", ""
+
+
 class Findings(object):
     def __init__(self):
         self.items = []
 
-    def add(self, level, check, where, message):
+    def add(self, level, check, where, message, fix=None, who=None):
+        hint, hint_who = fix_hint(check, where, message)
         self.items.append({"level": level, "check": check, "where": where,
-                           "message": message})
+                           "message": message, "fix": fix or hint,
+                           "who": who or hint_who})
 
 
 def check_placeholders(project, out):
@@ -477,6 +573,39 @@ def tier_rules(project):
     return picked if state == "decided" else "Standard"
 
 
+def tier_of(cell):
+    """'1', '2' or '3' from a Tier cell ("1", "**Tier 2**", "3 (auto)"); '' when unreadable."""
+    found = re.search(r"[123]", re.sub(r"_\([^)]*\)_", "", cell or ""))
+    return found.group(0) if found else ""
+
+
+def status_column(status):
+    """The board column a backlog status belongs to, read the way the viewer reads it, so
+    "Done on epic branch" or "Completed" is Done for doctor too."""
+    try:
+        return runtime_module("view").column_of(status)
+    except ImportError:
+        return status if status in ("Done", "Parked", "Dropped") else "Other"
+
+
+def required_steps(tier, rules, started, done):
+    """Which lifecycle steps an item owes, from its tier, whether work has started or is
+    Done, and the charter's Tier rules (AGENTS.md section 2, CARD.md). The one table doctor
+    and the viewer both read, so they never disagree. An unreadable tier counts as Tier 2.
+    Tier 3: the commit is the record, plus a worklog line under Strict."""
+    tier = tier if tier in ("1", "2", "3") else "2"
+    return {
+        "Frame": True,
+        "Plan": tier == "1" and started,
+        "Design review": tier == "1" and started,
+        "Build": done,
+        "Verify": done and tier != "3",
+        "Ship review": tier == "1" and done,
+        "Log": done and (tier != "3" or rules == "Strict"),
+        "Close": False,
+    }
+
+
 def check_traceability(project, out):
     prefix = project.prefix
     legacy_prefixes = getattr(project, "legacy_prefixes", None)
@@ -490,8 +619,10 @@ def check_traceability(project, out):
     known = set(row[0] for row in rows)
     logged = ids_in(worklog, prefix, known)
     backlog_where = os.path.join(project.docs, "project", "backlog.md")
+    rules = tier_rules(project)
     for item, status, cells in rows:
-        if status == "Done" and item not in logged:
+        owes_log = required_steps(tier_of(cells[2]), rules, True, True)["Log"]
+        if status_column(status) == "Done" and owes_log and item not in logged:
             is_legacy = not (prefix and re.fullmatch(r"%s-[0-9]+" % re.escape(prefix), item))
             if is_legacy:
                 out.add("warn", "traceability", "%s %s" % (backlog_where, item),
@@ -903,6 +1034,9 @@ def print_findings(items):
     for item in items:
         print("%-4s  %-12s  %-*s  %s" % (item["level"], item["check"], width, item["where"],
                                           item["message"]))
+        if item.get("fix"):
+            print("%-4s  %-12s  %-*s  fix (%s): %s" % ("", "", width, "", item.get("who") or "agent",
+                                                      item["fix"]))
     fails = sum(1 for item in items if item["level"] == "fail")
     print("\n%d finding(s): %d fail, %d warn" % (len(items), fails, len(items) - fails))
 
@@ -1127,7 +1261,8 @@ def item_commits(project, item):
     found = []
     pattern = re.compile(r"(?<![A-Za-z0-9])%s(?![0-9])" % re.escape(item))
     for sha, parent, body, tags in _parsed_commits(project):
-        if tags.get("Work-Item") == item or pattern.search(body):
+        if tags.get("Work-Item") == item or pattern.search(body) or \
+                item in id_ranges(body, project.prefix):
             found.append((sha, parent, tags))
     return found
 
@@ -1406,6 +1541,15 @@ def check_identity(project, out):
                     % (tier, status, author, item))
 
 
+def claims_verified(entry):
+    """Whether a worklog entry claims a Verified result. The template's `### Verified`
+    heading is a section name, not a claim, and "Not run" or "Absent" under it claim
+    nothing; a compact line's `verified: <run>: pass` does claim it."""
+    body = re.sub(r"(?m)^#+ .*$", "", entry)
+    return bool(re.search(r"\bVerified\b", body) or
+                re.search(r"(?i)\bverified:\s*(?!not run|absent|none\b|-|n/a)\S", body))
+
+
 def check_verified_claims(project, out):
     """A worklog entry that says Verified for an item must have a ledger row for one of
     that item's commits. Only entries for items that have commits are judged."""
@@ -1418,7 +1562,7 @@ def check_verified_claims(project, out):
     where = os.path.join(project.docs, "project", "worklog.md")
     for entry in entries:
         head = re.match(r"^(?:## |- [0-9-]+ · )(%s-[0-9]+)" % re.escape(prefix), entry)
-        if not head or not re.search(r"\bVerified\b", entry):
+        if not head or not claims_verified(entry):
             continue
         item = head.group(1)
         if not item_commits(project, item):
@@ -2862,7 +3006,9 @@ def main(argv):
     met = sub.add_parser("metrics", help="process measures from the records and git")
     met.add_argument("--json", action="store_true", help="print as JSON")
     lg = sub.add_parser("log", help="draft worklog lines from commits and verify runs")
-    lg.add_argument("--since", required=True, help="git ref to start after, e.g. main or HEAD~5")
+    lg.add_argument("--since", help="git ref to start after, e.g. main or HEAD~5 (default with "
+                    "--id: just before the item's first commit)")
+    lg.add_argument("--id", help="draft only this work item's line")
     lg.add_argument("--write", action="store_true", help="insert the drafts into the worklog "
                     "(items it already names are skipped)")
     tr = sub.add_parser("trailers", help="print the commit trailers for a work item")
@@ -3091,10 +3237,26 @@ def main(argv):
             return view.print_metrics(sys.modules[__name__], project, opts)
         return view.run(sys.modules[__name__], project, opts)
     if opts.command == "log":
-        if not project.git("rev-parse", "--verify", "--quiet", opts.since + "^{commit}").strip():
-            sys.stderr.write("log: %r is not a commit\n" % opts.since)
+        since = opts.since
+        if not since and opts.id:
+            found = item_commits(project, opts.id)
+            if not found:
+                sys.stderr.write("log: no commit names %s\n" % opts.id)
+                return 2
+            since = found[-1][1].split(" ")[0]
+            if not since:
+                sys.stderr.write("log: %s starts at the root commit; pass --since\n" % opts.id)
+                return 2
+        if not since:
+            sys.stderr.write("log: give --since <ref>, or --id <item>\n")
             return 2
-        lines, orphans = log_entries(project, opts.since)
+        if not project.git("rev-parse", "--verify", "--quiet", since + "^{commit}").strip():
+            sys.stderr.write("log: %r is not a commit\n" % since)
+            return 2
+        lines, orphans = log_entries(project, since)
+        if opts.id:
+            lines = [line for line in lines if line.split(" · ")[1] == opts.id]
+            orphans = []
         if opts.write:
             written = write_log(project, lines)
             print("wrote %d line(s) to %s/project/worklog.md" % (len(written), project.docs))

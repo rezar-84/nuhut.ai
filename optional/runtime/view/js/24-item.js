@@ -29,7 +29,9 @@
     M.steps.forEach(function (s) {
       var st = (it.steps || {})[s] || "n/a";
       steps.appendChild(el("span", { cls: "step " + (st === "n/a" ? "na" : st), text: s + (st === "missing" ? " ?" : ""),
-        title: st === "missing" ? "Expected for this tier and status, but no record of it was found" : st }));
+        title: st === "missing" ? "Expected for this tier and status, but no record of it was found" :
+          (st === "skipped" ? "Not run, and the worklog says why" :
+          (st === "unproven" ? "The worklog reports results, but no sdlc.py verify run backs them" : st)) }));
     });
     main.appendChild(steps);
     // Who wrote it, who reviewed it, and what the evidence ledger holds: read-only facts

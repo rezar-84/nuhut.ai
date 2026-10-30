@@ -16,7 +16,9 @@
       if (st === "missing") missingList.push(s);
       pips.appendChild(el("span", {
         cls: "card-pip " + st,
-        title: s + ": " + (st === "done" ? "Done" : (st === "missing" ? "Missing record!" : "Pending/NA"))
+        title: s + ": " + (st === "done" ? "Done" : (st === "missing" ? "Missing record!" :
+          (st === "skipped" ? "Not run, with the reason on record" :
+          (st === "unproven" ? "Results reported, no verify run behind them" : "Pending/NA"))))
       }));
     });
     var summaryText = stepsDone + " of " + M.steps.length + " lifecycle steps done" +

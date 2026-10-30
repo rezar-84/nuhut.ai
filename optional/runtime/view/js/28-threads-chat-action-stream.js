@@ -61,6 +61,16 @@
     return order[0] || "";
   }
 
+  // What closes each lifecycle gap, so a missing step always comes with its way out.
+  var STEP_FIX = {
+    "Plan": "Write docs/project/plans/<ID>.md (or the epic file) from templates/plan.md, or record why the item needed none",
+    "Design review": "Write docs/project/reviews/<ID>-design.md, or fill the epic file's Design review section",
+    "Build": "No commit names the item: add its ID to the commit's Work-Item trailer, or set the row to Dropped if nothing was built",
+    "Verify": "Run sdlc.py verify on the item's commits; for past work that cannot be re-run, write 'Not run: <reason>' under Verified in its worklog entry",
+    "Ship review": "Write docs/project/reviews/<ID>-ship.md, or record in the worklog why it was not reviewed",
+    "Log": "sdlc.py log --id <ID> --write drafts the entry from the commits; add Why and Not done"
+  };
+
   function diagnoseNextAction(it) {
     var kit = M.kit || {}, c = kit.constraints || {};
     var revCli = THREAD_STATE.reviewer || c.preferred_reviewer || "codex";
@@ -150,11 +160,11 @@
     }
     if (steps["Log"] === "missing" || !(it.worklog && it.worklog.length)) {
       return {
-        label: "All checks green — draft compact worklog line from commits & verify runs",
-        why: "Verified, but no worklog entry records it",
-        cmd: "python3 .ai-sdlc/bin/sdlc.py log --since main --id " + id + " --write",
-        desc: "Synthesizes a compact worklog entry for " + id + " from git commits and verification evidence",
-        runPayload: { subcommand: "log", since: "main", item_id: id, write: true },
+        label: "Draft the worklog line for " + id + " from its commits & verify runs",
+        why: "Its tier needs a worklog entry and none names " + id,
+        cmd: "python3 .ai-sdlc/bin/sdlc.py log --id " + id + " --write",
+        desc: "Writes a compact worklog line for " + id + " from its git commits and verification evidence; add Why and Not done by hand",
+        runPayload: { subcommand: "log", item_id: id, write: true },
         kind: "ok"
       };
     }
@@ -179,9 +189,9 @@
       return {
         label: plural(gaps.length, "lifecycle step") + " missing (" + gaps.join(", ") + ") — record " + (gaps.length === 1 ? "it" : "them") + " before closing " + id,
         why: "Its tier and status call for records that do not exist",
-        cmd: "python3 .ai-sdlc/bin/sdlc.py doctor --strict",
-        desc: "Strict doctor names each missing record and where it belongs",
-        runPayload: { subcommand: "doctor", strict: true },
+        cmd: "/sdlc-log " + id,
+        desc: STEP_FIX[gaps[0]] || "Write the missing record, or say in the worklog why the step was not run",
+        runPayload: null,
         kind: "warn"
       };
     }
