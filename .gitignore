@@ -8,6 +8,11 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
+# Local agent / tool caches and handoff notes
+.ai-sdlc/
+.impeccable/
+HANDOFF.md
+
 # Environment and sensitive credential files
 .env
 .env.*

@@ -23,6 +23,7 @@
 ## Design
 
 - [What the kit is, and is not](design.md): scope, and how it relates to Spec Kit, OpenSpec, Kiro and the app builders.
+- [Roadmap, findings and known gaps](roadmap.md): why 4.x changed what it did, what comes next, and what is still missing.
 - [Benchmarks](../benchmarks/kit-value/README.md): the protocol for measuring whether the kit is worth its cost.
 - [Changelog](../CHANGELOG.md) · [Contributing](../CONTRIBUTING.md) · [Security](../SECURITY.md)
 

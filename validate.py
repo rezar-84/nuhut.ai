@@ -16,6 +16,9 @@ ALLOWED_PLACEHOLDERS = {"DOCS_DIR", "KIT_VERSION", "PLACEHOLDER", "PREFIX", "PRO
 PLACEHOLDER = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}")
 LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+PRIVATE_LEAK_RE = re.compile(
+    r"(?i)(/home/[A-Za-z0-9_.-]+|/Users/[A-Za-z0-9_.-]+|rubuntu|tasario|corpifind|lawkin|daadsolutions|\bTASA-[0-9]+)"
+)
 
 
 def markdown_files():
@@ -392,6 +395,30 @@ def print_reading_lists():
             print("  %6d  %s" % (n, label))
 
 
+def no_private_leaks(errors):
+    """The kit repository must never contain developer machine paths (/home/<user>,
+    /Users/<user>) or private project names."""
+    proc = subprocess.run(["git", "ls-files"], cwd=str(ROOT), stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL, universal_newlines=True)
+    paths = [ROOT / p for p in proc.stdout.splitlines() if p.strip()]
+    for extra in (ROOT / "docs").glob("*.md"):
+        if extra not in paths:
+            paths.append(extra)
+    for path in paths:
+        if path.name == "validate.py" or not path.is_file():
+            continue
+        if path.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".ico", ".pyc"):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        match = PRIVATE_LEAK_RE.search(text)
+        if match:
+            errors.append("%s contains private machine path or project name: %r"
+                          % (path.relative_to(ROOT), match.group(0)))
+
+
 def main():
     if sys.argv[1:] == ["--reading-lists"]:
         print_reading_lists()
@@ -530,6 +557,7 @@ def main():
     single_viewer(errors)
     docs_stay_true(errors)
     reading_budget(errors)
+    no_private_leaks(errors)
 
     if errors:
         for error in errors:
