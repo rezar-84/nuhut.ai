@@ -13,6 +13,7 @@ Grouped the way `sdlc.py --help` groups them:
 | Viewer and reports | `view`, `lens`, `audit`, `metrics` |
 | Work items and agents | `claim`, `release`, `claims`, `parallel`, `trailers`, `review`, `log` |
 | Specs | `spec` |
+| Writing | `slop` |
 | Setup | `config`, `fix` |
 
 Global options: `--root <dir>` runs against another project; `--selftest` checks the
@@ -29,6 +30,7 @@ was refused, `2` a usage error.
 | **`view`** | `--serve`, `--port`, `--interval`, `--github`, `--no-user`, `--export-html <file>`, `--svg`, `--no-open`, `--json` | Draws the project as one interactive page ([the viewer](viewer.md)): Inbox, Board, Dashboard, Blockages, Git, Documents, Project. `--serve` keeps it live on `127.0.0.1` and lets it run commands and change kit settings; `--github` adds open issues and PRs; `--no-user` hides `~/.claude` items. `--export-html` writes one offline file. |
 | **`lens`** | `--area stack\|deps\|build\|security\|deploy\|env\|agents`, `--user`, `--json` | The **Project lens**, read-only:<br>- the stack, detected live<br>- direct dependencies per manifest, with lockfiles<br>- `file:line` errors from the latest failing verify stages<br>- security: vulnerable packages from the last `audit`, doctor's sensitive-data findings, a committed or un-ignored `.env`, container risks, open security-review findings<br>- deployment platforms, CI workflows and containers (Dockerfiles, compose services)<br>- environment variable **names** (templates vs code; values are never read)<br>- the agentic stack: skills, commands, subagents, hooks, MCP servers, plugins, harness files and other kits; `--user` adds `~/.claude` |
 | **`spec list\|show\|validate\|apply`** | `apply <ID> [--write]`, `validate [--strict]`, `--json` | Living specs, when the charter's **Specs** row is on (`config --specs on`).<br>- `docs/project/specs/<capability>.md` holds requirements (SHALL/MUST) with WHEN/THEN scenarios.<br>- An item that changes behaviour adds `specs/changes/<ID>.md` (ADDED / MODIFIED / REMOVED).<br>- `apply` merges it on close (exact names only, a dry run without `--write`) and archives it.<br>- An existing `openspec/` folder and Spec Kit specs are read beside them, read-only.<br>- Shown under Documents ▸ Specs and in each item's thread. |
+| **`slop [paths]`** | `--strict`, `--guide`, `--json` | [The slop filter](slop-filter.md): lists the phrasings that make prose read as machine-written, by file and line, with a fix for each. With no path it scans the prose files changed against `HEAD`; `-` reads standard input.<br>- strong tells (chatbot leftovers, `not just X, but Y`, inflated significance, unnamed experts) count on one sighting<br>- moderate tells (stock vocabulary, `serves as` for `is`) count in clusters<br>- weak tells (dashes, groups of three) are reported only when dense<br>Exit `1` when a file fails and either `--strict` is given or the charter's **Slop filter** row is `strict`. Code, link targets, quoted lines and lines marked `slop-ok` are skipped. No model call. |
 | **`claim <ID>`** | `--agent`, `--worktree PATH`, `--no-worktree`, `--base REF`, `--mark` | Takes a work item. It writes an atomic claim to `<git-common-dir>/nuhut/claims/`, which every worktree of the clone sees, so a second agent is refused. It creates the branch `<ID>-<slug>` and, by default, a worktree at `../<repo>-<ID>`. `--mark` sets the backlog row to In progress, from the main worktree only. |
 | **`release <ID>`** / **`claims`** | `--remove-worktree` / `--json` | Frees an item (`--remove-worktree` is refused when the worktree is dirty), or lists who holds what. Doctor warns about claims gone stale, claims on finished items, and two branches for one claimed item. |
 | **`parallel`** | `--json` | The unclaimed Ready items whose dependencies are done, grouped so that no two in a group touch the same files (from each plan's *Files that change*; the charter, migrations and lockfiles each count as one shared file). Also lists the conflicting pairs and the items that need a plan first. The Dashboard shows it under *Parallel work*. |
@@ -38,12 +40,12 @@ was refused, `2` a usage error.
 | **`bite`** | `--base`, `--timeout`, `--restore`, `--json` | Puts the changed product files (never tests, never the kit's paths) back to the base, runs the test command, and restores them. It passes only when the tests pass with the change and fail without it. A backup and marker under `.ai-sdlc/bite/` make an interrupted run recoverable with `--restore`, and the doctor flags one. |
 | **`trailers <ID>`** | `--agent`, `--model` | Prints the `Work-Item`, `Agent` and `Model` commit trailers, from flags, `AI_SDLC_AGENT` / `AI_SDLC_MODEL`, or what the harness exposes. |
 | **`review <ID>`** | `--role`, `--by claude\|codex\|gemini\|cmd:<command>`, `--model`, `--stage` | Sends one role's playbook, the item's diff, the relevant charter rows and the tier to another harness, headless, and saves the review with the reviewer's and author's identity, labelled independent or self-check. |
-| **`config`** | `--effort`, `--independent-review`, `--tier-rules`, `--decision-style`, `--dev-method`, `--reviewer`, `--token-saving`, `--set-check`, `--json` | Inspects or atomically updates kit constraints in `docs/project/charter.md` and syncs `.ai-sdlc/profile.json`. `--token-saving on` switches to `Lean` effort, `Independent review required for: none`, `Standard` tier rules, and compact tier budgets in one step. |
+| **`config`** | `--effort`, `--independent-review`, `--tier-rules`, `--decision-style`, `--dev-method`, `--specs`, `--slop-filter`, `--reviewer`, `--token-saving`, `--set-check`, `--json` | Inspects or atomically updates kit constraints in `docs/project/charter.md` and syncs `.ai-sdlc/profile.json`. `--token-saving on` switches to `Lean` effort, `Independent review required for: none`, `Standard` tier rules, and compact tier budgets in one step. |
 | **`fix`** | `<sync-profile\|wire-pointer\|restore-bite\|unlock-tests\|all>`, `<rotate-worklog\|normalise-status\|link-evidence> [--apply]`, `--json` | Repairs safe, non-destructive setup drift: syncs `.ai-sdlc/profile.json` from the charter, restores missing `AGENTS.md` pointer lines (`CLAUDE.md`, `.cursor/rules/`, etc.), restores interrupted `bite` backups, and clears stale test locks. Never modifies SHA-256-tracked kit files in `.ai-sdlc/manifest.json`.<br>Three record repairs preview what they would change until you add `--apply`:<br>- `rotate-worklog` moves the oldest entries into `worklog-archive/<year>-part<N>.md`<br>- `normalise-status` rewrites a status the board already reads as a kit status (`Completed (merged 8acbc4a)` → `Done`), keeping the note in the Task cell<br>- `link-evidence` adds ledger rows for verify runs kept on disk that never reached the ledger<br>None of them invents evidence. |
 
 Guides for the bigger commands: [the viewer](viewer.md) (`view`, `lens`, `audit`),
 [several agents at once](multi-agent.md) (`claim`, `release`, `claims`, `parallel`,
-`review`), [living specs](specs.md) (`spec`), and [the runtime](runtime.md) for evidence,
+`review`), [living specs](specs.md) (`spec`), [the slop filter](slop-filter.md) (`slop`), and [the runtime](runtime.md) for evidence,
 `verify` and `bite`.
 
 ## Slash commands (Claude Code) and loop skills (other tools)
@@ -57,6 +59,7 @@ Guides for the bigger commands: [the viewer](viewer.md) (`view`, `lens`, `audit`
 | `/sdlc-finish <ID>` | Run `sdlc.py finish`, supply what it lists as owed, fill the drafted worklog entry, then the closing work no script can |
 | `/sdlc-log <ID>` | Close the item by hand: worklog, backlog, docs it falsified, ADR, spec change applied |
 | `/sdlc-doctor` | Audit the records, mechanically then by judgment |
+| `/sdlc-slop [strict] [path]` | Run `sdlc.py slop`, then rewrite what it and a read-through find. Not a loop step; other tools use the `sdlc-slop-filter` skill |
 
 Tools whose `/` menu lists skills (Codex, Cursor, Gemini CLI, Copilot, Antigravity) get the
 same loop as the `sdlc-plan` … `sdlc-log` skills.
@@ -75,6 +78,7 @@ and `--explain <topic>` explains a concept. The ones you will use most:
 | `--preset solo\|team\|regulated` | Effort, decision style, method and tier rules together |
 | `--harness <list>` | Which AI tools read it: claude, cursor, copilot, gemini, windsurf, cline, roo, amp, aider, all |
 | `--specs on\|off` | Living specs of what the system does (default off) |
+| `--slop-filter off\|on\|strict` | Hold prose to a no-AI-tells standard (default off); with `--upgrade`, turns it on for an existing install |
 | `--hooks`, `--git-hooks [secrets]` | Enforcement: tool-call guards, and commit guards every tool and person inherits |
 | `--deploy <list>` | Deploy platform checklists |
 | `--profile compact` | Shorter documents for small models |

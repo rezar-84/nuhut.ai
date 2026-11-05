@@ -133,6 +133,13 @@ What the system does now, as requirements with WHEN/THEN scenarios in
 merged when it closes. The headings match OpenSpec, so existing `openspec/` and Spec Kit
 folders are read alongside without migrating. [Specs](docs/specs.md).
 
+### Copy that does not read as generated (opt-in)
+
+`--slop-filter on|strict` adds a writing standard built on Wikipedia's *Signs of AI
+writing*: a scanner that lists stock phrasings by line, a skill that rewrites them without
+adding or losing a claim, and `/sdlc-slop`. Strict covers all prose the agent writes and
+fails the file in CI. [Slop filter](docs/slop-filter.md).
+
 ### Enforcement, when you want it
 
 `--hooks` refuses unsafe tool calls in Claude Code, Gemini CLI and Cursor: a commit with no
@@ -150,10 +157,11 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 | **Viewer and reports** | `view` the project as one page (`--serve` live) · `lens` stack, build, security, deploy, env, agents · `audit` vulnerable packages · `metrics` process measures |
 | **Work items and agents** | `claim` / `release` / `claims` · `parallel` · `trailers` commit trailers · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |
 | **Specs** | `spec list \| show \| validate \| apply` |
+| **Writing** | `slop` find the phrasings that read as machine-written (`--strict` fails the file) |
 | **Setup** | `config` see or change the charter's constraints · `fix` safe repairs |
 
 In Claude Code: `/sdlc-plan`, `/sdlc-build`, `/sdlc-verify`, `/sdlc-review`, `/sdlc-finish`, `/sdlc-log`,
-`/sdlc-doctor`. Every flag: [command reference](docs/cli.md).
+`/sdlc-doctor`, `/sdlc-slop`. Every flag: [command reference](docs/cli.md).
 
 ## Works with
 
@@ -223,7 +231,7 @@ More: [troubleshooting and FAQ](docs/troubleshooting.md).
 ## Documentation
 
 [Getting started](docs/getting-started.md) · [The viewer](docs/viewer.md) ·
-[Multi-agent work](docs/multi-agent.md) · [Specs](docs/specs.md) ·
+[Multi-agent work](docs/multi-agent.md) · [Specs](docs/specs.md) · [Slop filter](docs/slop-filter.md) ·
 [Command reference](docs/cli.md) · [The runtime](docs/runtime.md) ·
 [Installing](docs/install.md) · [Agent tools](docs/harnesses.md) ·
 [Skills](docs/skills.md) · [Design](docs/design.md) ·
