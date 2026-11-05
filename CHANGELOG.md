@@ -4,6 +4,19 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Slop filter: an opt-in writing standard for copy that does not read as generated.**
+  Built on Wikipedia's *Signs of AI writing*, with ideas from the `humanizer` and
+  `stop-slop` skills.
+  - `sdlc.py slop [paths]` lists the phrasings by file and line with a fix for each: strong
+    tells count once, moderate ones in clusters, weak ones only when dense. It makes no
+    model call and skips code, link targets and quoted lines.
+  - The `sdlc-slop-filter` skill rewrites what the scanner and a read-through find, without
+    adding or losing a claim. `/sdlc-slop [strict] [path]` runs both.
+  - The charter's **Slop filter** row is `off`, `on` or `strict`. Strict covers all prose
+    the agent writes and makes `slop` exit 1 on a failing file.
+  - Set it with `--slop-filter` at install, `sdlc.py config --slop-filter` afterwards, or
+    `--upgrade --slop-filter` to add the skill to an existing project. `slop --strict`
+    applies strict rules for one run. Guide: `docs/slop-filter.md`.
 - **The dashboard's Needs you list stays short.** It shows six rows, then "Show 10 more" or
   "Show all", and scrolls inside its own box once expanded. Three or more doctor failures
   of one rule fold into a single row that opens that rule. A filter switches between

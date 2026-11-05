@@ -40,7 +40,7 @@ RETIRED_STATE = "dashboard-state.js"
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
-                 "finish.py")
+                 "finish.py", "slop.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -174,6 +174,8 @@ EN = {
     "q.devmethod": "Development method",
     "q.specs": "Keep living specs of what the system does?",
     "h.specs": "Living specs describe current behaviour as requirements with WHEN/THEN scenarios (docs/project/specs/). Tier 1-2 items that change behaviour then carry a spec change, applied when the item closes. Off by default; turn on later with sdlc.py config --specs on.",
+    "q.slop": "Slop filter -- hold prose to a no-AI-tells standard?",
+    "h.slop": "Checks copy for the phrasings that make text read as machine-written (stock words, 'not X but Y', inflated significance, chatbot leftovers), after Wikipedia's Signs of AI writing. On installs the sdlc-slop-filter skill for public and user-facing copy and reports findings. Strict applies it to all prose the agent writes and makes sdlc.py slop exit 1 on a failing file. Change later with sdlc.py config --slop-filter off|on|strict.",
     "h.devmethod": "Item runs one work item at a time and stops at each one's approvals. Epic plans several items together, gets one approval for the plan, and stops at the checkpoints it chooses. Checks, reviews and tier approvals never change.",
     "q.decision": "Decision style -- how much the agent decides for you",
     "h.decision": "How much the agent decides for you. Ask puts every material choice to you with options and trade-offs. Guide recommends in plain language and asks. Autopilot takes the recommended option and logs it for review. Tier 1 surfaces and gated commands always stop for a named human, in every style.",
@@ -217,6 +219,7 @@ EN = {
     "l.acquisition": "Acquisition profile",
     "l.devmethod": "Development method",
     "l.specs": "Living specs",
+    "l.slop": "Slop filter",
     "l.decision": "Decision style",
     "l.approval": "Human approval for",
     "l.forbidden": "Forbidden here",
@@ -383,6 +386,7 @@ EN = {
     "x.effort": "how much investigation and review beyond the required minimum",
     "x.devmethod": "Epic suits a feature made of several related changes",
     "x.specs": "Worth it when behaviour outlives the people who wrote it, or when you used Spec Kit or OpenSpec",
+    "x.slop": "Worth it when the project publishes copy; Strict when nothing should ship reading like a chatbot wrote it",
     "x.decision": "for choices with trade-offs; risky changes always stop for you",
     "x.tier": "every change is sorted into a risk tier; this sets how much record each needs",
     "x.acquisition": "only matters for scrapers and crawlers",
@@ -418,7 +422,7 @@ EN = {
     "h.approval": "Actions the agent must stop and get a named human's approval for, whatever the tier. Mirrored into AGENTS.md under Project overrides.",
     "h.a11y": "The accessibility standard the accessibility reviewer holds every interface to. WCAG 2.2 AA is the common legal and practical baseline.",
     "h.docsdir": "The folder the process documents, roles, templates and project records go into. Use another name when docs/ already holds something else.",
-    "h.commands": "Claude Code slash commands for each loop step: /sdlc-plan, /sdlc-build, /sdlc-verify, /sdlc-review, /sdlc-finish, /sdlc-log and /sdlc-doctor. Other tools get the same steps as skills when you pick them above.",
+    "h.commands": "Claude Code slash commands for each loop step: /sdlc-plan, /sdlc-build, /sdlc-verify, /sdlc-review, /sdlc-finish, /sdlc-log, /sdlc-doctor and /sdlc-slop. Other tools get the same steps as skills when you pick them above.",
     "h.skills_pick": "A skill is a short instruction file an agent loads only when its situation arises, for example a privacy review when personal data is touched. Ticked skills match your answers; tick or untick any. They install to .claude/skills/ and, for other tools, .agents/skills/.",
     "h.git_tools": "The .ai-sdlc/ folder holds the kit's runtime (sdlc.py), its manifest and the evidence ledger. Commit it so everyone runs the same checks; ignore it only for a personal experiment.",
 
@@ -591,6 +595,7 @@ How the agent works  (all project defaults, changeable later in the charter)
   --tier-rules <name>    standard | strict       -- how heavy each risk tier is
   --independent-review   none | tier1 | tier1-2  -- when a second model family is required
   --specs on|off         living specs of what the system does (default: off)
+  --slop-filter <mode>   off | on | strict       -- hold prose to a no-AI-tells standard
 
 Which AI tools read it
   --harness <list>       claude, cursor, copilot, gemini, windsurf, cline, roo, amp,
@@ -704,6 +709,12 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --specs on|off
                      living specs of what the system does (docs/project/specs/), with a
                      spec change per Tier 1-2 behaviour change. Default: off.
+  --slop-filter <mode>
+                     off (default), on, or strict. On installs the sdlc-slop-filter skill
+                     for public and user-facing copy and `sdlc.py slop` reports findings.
+                     Strict applies it to all prose the agent writes, and `sdlc.py slop`
+                     exits 1 on a failing file. With --upgrade it sets the charter row
+                     and adds the skill to an existing install.
   --dev-method <name>
                      project default: item (default) or epic. Epic plans several
                      work items together and stops at chosen checkpoints; every
@@ -777,6 +788,7 @@ class Options(object):
         self.dev_method = "item"
         self.dev_method_given = False
         self.specs = ""
+        self.slop_filter = ""
         self.decision_style = "guide"
         self.decision_given = False
         self.acquisition_given = False
@@ -936,6 +948,11 @@ def parse_args(argv):
             if i + 1 >= len(argv) or argv[i + 1] not in ("on", "off"):
                 bad_value("--specs requires on or off")
             o.specs = argv[i + 1]
+            i += 1
+        elif arg == "--slop-filter":
+            if i + 1 >= len(argv) or argv[i + 1] not in ("off", "on", "strict"):
+                bad_value("--slop-filter requires off, on, or strict")
+            o.slop_filter = argv[i + 1]
             i += 1
         elif arg == "--dev-method":
             if i + 1 >= len(argv) or argv[i + 1] not in ("item", "epic"):
@@ -1149,6 +1166,9 @@ SKILL_RULES = (
     ("sdlc-adr", "always", "captures durable decisions instead of losing them", ""),
     ("sdlc-spec", "opt_in", "writes living specs and per-item spec changes (charter Specs: on)",
      "living specs are opt-in; pick it here, or later with --upgrade, when the charter's Specs row is on"),
+    ("sdlc-slop-filter", "opt_in",
+     "holds copy to a no-AI-tells standard (charter Slop filter: on or strict)",
+     "the slop filter is opt-in; pick it here, or later with --upgrade --slop-filter on"),
     ("sdlc-doctor", "always",
      "keeps blank, stale, and drifted project documents from being read as true", ""),
     ("sdlc-accessibility-audit", "ui", "there is an interface to audit",
@@ -1310,6 +1330,13 @@ class Wizard(object):
             return flag == "on"
         return bool(self.a.get("specs"))
 
+    def slop_mode(self):
+        """off, on or strict: the --slop-filter flag, else the wizard's answer."""
+        flag = getattr(self.o, "slop_filter", "")
+        if flag:
+            return flag
+        return SLOP_KEYS.get(self.a.get("slop"), "Off").lower()
+
     def skills(self, rules_only=False):
         """(name, on, why) for every skill this kit ships, judged by the answers.
         rules_only ignores a pick made at the skills question."""
@@ -1320,7 +1347,8 @@ class Wizard(object):
             if rule == "always":
                 on = True
             elif rule == "opt_in":
-                on = name == "sdlc-spec" and self.specs_on()
+                on = (name == "sdlc-spec" and self.specs_on()) or \
+                     (name == "sdlc-slop-filter" and self.slop_mode() != "off")
             elif rule == "pii_or_deploy":
                 on = bool(self.fact("pii") or self.fact("deploy"))
             elif rule == "multilingual":
@@ -1869,6 +1897,8 @@ class Wizard(object):
             return DEV_METHOD_KEYS.get(value, "Item")
         if step.sid == "decision":
             return DECISION_KEYS.get(value, "Guide")
+        if step.sid == "slop":
+            return SLOP_KEYS.get(value, "Off")
         if step.kind == "choice":
             if step.sid in ("access_model", "mfa_policy", "platform"):   # the value is the wording
                 return str(value) if value else "(blank)"
@@ -2021,6 +2051,7 @@ EFFORT_KEYS = {"l": "Lean", "n": "Normal", "x": "Beast"}
 ACQUISITION_KEYS = {"s": "Standard", "a": "Advanced"}
 DEV_METHOD_KEYS = {"i": "Item", "e": "Epic"}
 DECISION_KEYS = {"a": "Ask", "g": "Guide", "p": "Autopilot"}
+SLOP_KEYS = {"o": "Off", "n": "On", "s": "Strict"}
 
 
 # Presets set four charter rows together. An explicit flag always wins over the preset,
@@ -2065,6 +2096,11 @@ EFFORT_OPTIONS = (
 DEV_METHOD_OPTIONS = (
     ("i", "Item", "one work item at a time, approvals at each", True),
     ("e", "Epic", "plan several items together, one plan approval, chosen checkpoints", False),
+)
+SLOP_OPTIONS = (
+    ("o", "Off", "no writing filter", True),
+    ("n", "On", "public and user-facing copy is checked; findings are advice", False),
+    ("s", "Strict", "all prose the agent writes; `sdlc.py slop` fails a file with tells", False),
 )
 DECISION_OPTIONS = (
     ("a", "Ask", "every material choice put to you, with options and trade-offs", False),
@@ -2695,6 +2731,9 @@ def build_steps(w):
                  preset_field(w, "dev_method")], label="l.devmethod"),
         Step("specs", "sec.process", "yesno", "q.specs", help="h.specs", label="l.specs",
              default=lambda w: getattr(w.o, "specs", "") == "on", when=lambda w: not getattr(w.o, "specs", "")),
+        Step("slop", "sec.process", "choice", "q.slop", help="h.slop", label="l.slop",
+             options=SLOP_OPTIONS, default="o",
+             when=lambda w: not getattr(w.o, "slop_filter", "")),
         Step("decision", "sec.process", "choice", "q.decision", help="h.decision",
              options=DECISION_OPTIONS, default=lambda w: {"ask": "a", "guide": "g", "autopilot": "p"}[
                  preset_field(w, "decision_style")], label="l.decision"),
@@ -4125,6 +4164,8 @@ class Installer(object):
             text = fill_row(text, "**Development method**", selected_dev_method(self.w))
         if getattr(self.o, "specs", ""):
             text = fill_row(text, "**Specs**", "`%s`" % self.o.specs)
+        if getattr(self.o, "slop_filter", ""):
+            text = fill_row(text, "**Slop filter**", "`%s`" % self.o.slop_filter)
         if self.o.decision_given:
             text = fill_row(text, "**Decision style**", selected_decision(self.w))
         if self.o.tier_rules_given:
@@ -4177,6 +4218,7 @@ class Installer(object):
         text = fill_row(text, "**Acquisition profile**", selected_acquisition(w))
         text = fill_row(text, "**Development method**", selected_dev_method(w))
         text = fill_row(text, "**Specs**", "`on`" if w.specs_on() else "`off`")
+        text = fill_row(text, "**Slop filter**", "`%s`" % w.slop_mode())
         if self.o.tier_rules_given or a.get("tier"):
             text = fill_row(text, "**Tier rules**", selected_tier_rules(w))
         if self.o.independent_review_given:
@@ -4379,6 +4421,49 @@ def find_docs(target, preferred):
     return ""
 
 
+SLOP_ROW = re.compile(r"^\| \*\*Slop filter\*\* \|.*$", re.M)
+
+
+def slop_filter_upgrade(target, charter, o, ctx):
+    """The slop filter on an existing install. The charter's row decides; an explicit
+    --slop-filter rewrites that one row first, because the person asked for exactly that.
+    Returns the skill's files to manage when the filter is on or strict."""
+    text = charter.read_text(encoding="utf-8", errors="replace") if charter.exists() else ""
+    flag = getattr(o, "slop_filter", "")
+    if flag and text and not o.dry_run:
+        row = "| **Slop filter** | `%s` |" % flag
+        if SLOP_ROW.search(text):
+            new = SLOP_ROW.sub(lambda m: row, text, count=1)
+        else:
+            anchor = re.search(r"^\| \*\*(Specs|Development method|Default effort mode)\*\* \|.*$",
+                               text, re.M)
+            new = text[:anchor.end()] + "\n" + row + text[anchor.end():] if anchor else text
+        if new != text:
+            charter.write_text(new, encoding="utf-8")
+            print("  update         %s (Slop filter: %s)" % (charter.relative_to(target), flag))
+        elif not SLOP_ROW.search(new):
+            print("  warning        no Risk defaults table in %s; add a `| **Slop filter** | "
+                  "`%s` |` row by hand" % (charter.relative_to(target), flag))
+        text = new
+    found = re.search(r"^\| \*\*Slop filter\*\* \| `(off|on|strict)` \|", text, re.M)
+    mode = flag or (found.group(1) if found else "off")
+    if mode == "off":
+        return {}
+    base = SRC / "optional" / "skills" / "sdlc-slop-filter"
+    roots = [Path(".claude") / "skills"]
+    if (target / ".agents" / "skills").is_dir():
+        roots.append(Path(".agents") / "skills")
+    if not (target / ".claude").is_dir() and len(roots) > 1:
+        roots = roots[1:]
+    planned = {}
+    for root in roots:
+        for src in sorted(base.rglob("*")):
+            if src.is_file():
+                planned[(root / "sdlc-slop-filter" / src.relative_to(base)).as_posix()] = \
+                    substitute(src.read_text(encoding="utf-8"), ctx)
+    return planned
+
+
 def upgrade(target, o):
     if o.preset or o.tier_rules_given:
         print("note: --preset and --tier-rules apply to new installs. An upgrade keeps the "
@@ -4427,6 +4512,7 @@ def upgrade(target, o):
     previous_files = previous.get("files", {}) if previous else {}
     o.profile = installed_profile(target)
     planned = managed_source_texts(target, docs, inst.ctx, o.profile)
+    planned.update(slop_filter_upgrade(target, charter, o, inst.ctx))
     if o.profile == "compact":
         print("Compact profile: the numbered process/ documents stay uninstalled.")
     try:

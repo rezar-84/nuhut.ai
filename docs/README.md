@@ -10,6 +10,7 @@
 - [The viewer](viewer.md): Inbox, Board, Dashboard, Project lens, Specs, the side panel, shortcuts, privacy.
 - [Several agents at once](multi-agent.md): claims, worktrees, parallel work, review fan-out.
 - [Living specs](specs.md): what the system does now, per-item changes, OpenSpec and Spec Kit.
+- [The slop filter](slop-filter.md): a no-AI-tells writing standard, off, on or strict.
 - [Troubleshooting and FAQ](troubleshooting.md)
 
 ## Reference

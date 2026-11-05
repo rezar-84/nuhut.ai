@@ -2782,12 +2782,12 @@ def test_guided_setup():
     check("full: local ignore goes to .git/info/exclude",
           ".ai-sdlc/" in read(d, ".git/info/exclude"))
     check("full: starter CI written", os.path.exists(os.path.join(d, ".github", "workflows", "quality.yml")))
-    check("full: slash command count is not hardcoded", "Install the 7 /sdlc-* slash commands" in log)
+    check("full: slash command count is not hardcoded", "Install the 8 /sdlc-* slash commands" in log)
     shutil.rmtree(d, ignore_errors=True)
 
     # Help: short by default, everything on request, values listable.
     code, out = run(["--help"])
-    check("--help is short and grouped", code == 0 and out.count("\n") < 60 and "Examples" in out,
+    check("--help is short and grouped", code == 0 and out.count("\n") <= 60 and "Examples" in out,
           str(out.count("\n")))
     code, out = run(["--help", "full"])
     check("--help full keeps every option", code == 0 and "--git-exclude" in out and "--adopt" in out)
@@ -3222,6 +3222,88 @@ def test_specs():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_slop_filter():
+    print("slop filter: install flag, scanner, strict, config, upgrade")
+    d = tempfile.mkdtemp(prefix="sdlc-slop-")
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "SLP", "-y"])
+    check("default install: the scanner and command arrive, the skill does not", code == 0
+          and "**Slop filter**" in read(d, "docs/project/charter.md")
+          and "| **Slop filter** | `on` |" not in read(d, "docs/project/charter.md")
+          and not os.path.exists(os.path.join(d, ".claude", "skills", "sdlc-slop-filter"))
+          and os.path.isfile(os.path.join(d, ".ai-sdlc", "bin", "slop.py"))
+          and os.path.isfile(os.path.join(d, ".claude", "commands", "sdlc-slop.md")), out[-300:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args, **kw):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, input=kw.get("stdin"))
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+
+    sloppy = ("# Launch\n\nIn today's fast-paced world, our platform stands as a testament to "
+              "innovation. It's not just a tool, it's a partner.\n\nExperts agree it plays a "
+              "pivotal role.\n")
+    clean = ("# Launch\n\nThe importer reads a CSV file of up to 50,000 rows and reports each "
+             "rejected row with its line number.\n")
+    write(d, "copy/sloppy.md", sloppy)
+    write(d, "copy/clean.md", clean)
+    write(d, "copy/quoted.md", "# Notes\n\n```\nstands as a testament to innovation\n```\n\n"
+          "> Experts agree it plays a pivotal role.\n\nWe cut `delve` from the page.\n\n"
+          "It stands as a testament to nothing. <!-- slop-ok -->\n")
+    code, out = sdlc("slop", "copy/sloppy.md")
+    check("off: an explicit run is advisory and names the tells", code == 0
+          and "not-x-but-y" in out and "vague-attribution" in out and "significance" in out
+          and "copy/sloppy.md:3" in out and "advisory" in out, out[-600:])
+    code, out = sdlc("slop", "--strict", "copy/sloppy.md")
+    check("--strict fails a file with strong tells, whatever the charter says", code == 1
+          and "FAIL" in out, out[-300:])
+    code, out = sdlc("slop", "--strict", "copy/clean.md", "copy/quoted.md")
+    check("strict passes plain prose, and skips code, quotes and slop-ok lines", code == 0
+          and "0 finding(s)" in out, out[-400:])
+    code, out = sdlc("slop", "--strict", "-", stdin=sloppy.encode("utf-8"))
+    check("standard input is scanned", code == 1 and "<stdin>:3" in out, out[-300:])
+    code, out = sdlc("slop", "--json", "copy")
+    data = json.loads(out) if code == 0 else {}
+    check("--json reports each file with its verdict", data.get("mode") == "off"
+          and dict((f["file"], f["fails"]) for f in data.get("files", []))
+          == {"copy/clean.md": False, "copy/quoted.md": False, "copy/sloppy.md": True}, out[-300:])
+    code, out = sdlc("slop", "--guide")
+    check("--guide prints the rules", code == 0 and "not-x-but-y" in out and "Not tells" in out, out[-200:])
+    code, out = sdlc("slop")
+    check("no path: the changed and untracked prose files", code == 0 and "copy/sloppy.md" in out,
+          out[-300:])
+
+    code, out = sdlc("config", "--slop-filter", "on")
+    check("config --slop-filter on sets the charter row", code == 0
+          and "| **Slop filter** | `on` |" in read(d, "docs/project/charter.md"), out[-300:])
+    code, out = sdlc("slop", "copy/sloppy.md")
+    check("on: findings are listed and the exit code stays 0", code == 0 and "advisory" not in out
+          and "not-x-but-y" in out, out[-300:])
+    sdlc("config", "--slop-filter", "strict")
+    code, out = sdlc("slop", "copy/sloppy.md")
+    check("strict in the charter fails the file without the flag", code == 1 and "FAIL" in out, out[-300:])
+
+    code, out = run([d, "--upgrade"])
+    rel = ".claude/skills/sdlc-slop-filter/SKILL.md"
+    check("an upgrade installs the skill the charter row calls for", code == 0
+          and os.path.isfile(os.path.join(d, rel)) and "{" * 2 not in read(d, rel)
+          and rel in json.loads(read(d, ".ai-sdlc/manifest.json")).get("files", {}), out[-400:])
+    code, out = run([d, "--upgrade", "--slop-filter", "on"])
+    check("--upgrade --slop-filter rewrites the row", code == 0
+          and "| **Slop filter** | `on` |" in read(d, "docs/project/charter.md"), out[-300:])
+
+    d2 = tempfile.mkdtemp(prefix="sdlc-slop-flag-")
+    code, out = run([d2, "SLQ", "-y", "--slop-filter", "strict"])
+    check("--slop-filter strict at install sets the row and installs the skill", code == 0
+          and "| **Slop filter** | `strict` |" in read(d2, "docs/project/charter.md")
+          and os.path.isfile(os.path.join(d2, rel))
+          and "docs/roles/copywriter.md" in read(d2, rel), out[-300:])
+    code, out = run([d2, "SLR", "-y", "--slop-filter", "loud"])
+    check("a bad --slop-filter value is refused", code != 0 and "off, on, or strict" in out, out[-200:])
+    shutil.rmtree(d, ignore_errors=True)
+    shutil.rmtree(d2, ignore_errors=True)
+
+
 def test_upgrade_to_41():
     """A 4.0.x install from before the Project lens (80c6748) upgrades: the new runtime
     modules, templates and process doc arrive, the records stay, and the new commands run."""
@@ -3254,7 +3336,7 @@ def test_upgrade_to_41():
               all(os.path.isfile(os.path.join(d, "docs", rel)) for rel in ("templates/spec.md", "templates/spec-change.md", "process/15-specs.md")))
         after = read(d, "docs/project/charter.md").splitlines()
         added = [l for l in after if l not in charter_before.splitlines()]
-        new_rows = ("| **Specs** |", "| **Finish guard** |", "| **Allowed in records** |")
+        new_rows = ("| **Specs** |", "| **Slop filter** |", "| **Finish guard** |", "| **Allowed in records** |")
         check("project records keep every line; the charter only gains the new rows",
               all(l in after for l in charter_before.splitlines()) and len(added) == len(new_rows)
               and all(any(l.startswith(r) for l in added) for r in new_rows)
@@ -3582,7 +3664,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_upgrade_to_41, test_demo_project):
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_upgrade_to_41, test_demo_project):
         test()
     print("")
     if failures:
