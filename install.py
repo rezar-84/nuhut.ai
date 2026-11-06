@@ -40,7 +40,7 @@ RETIRED_STATE = "dashboard-state.js"
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
-                 "finish.py", "slop.py")
+                 "finish.py", "slop.py", "sync.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.

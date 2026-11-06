@@ -8,7 +8,12 @@ CLOSE), with the runtime doing the mechanical part:
 
 $ARGUMENTS
 
-1. **Run it:**
+1. **Get in step first.** Run `python3 .ai-sdlc/bin/sdlc.py sync --fetch`. If the branch
+   is behind the default branch, bring those commits in the way the charter's **Updating a
+   branch** row says, resolve any conflict as `{{DOCS_DIR}}/process/05-change-control.md`,
+   "Conflicts", describes, and run `sdlc.py verify --item <ID>` again.
+
+2. **Run it:**
 
    ```sh
    python3 .ai-sdlc/bin/sdlc.py finish <ID>
@@ -21,10 +26,10 @@ $ARGUMENTS
    evidence ledger and sets the backlog row to Done. At Tier 1 it sets **Parked** for
    the human merge approval instead; it never approves on anyone's behalf.
 
-2. **Each `OWED` line says what is missing and the command that supplies it.** Do that,
+3. **Each `OWED` line says what is missing and the command that supplies it.** Do that,
    then run `finish` again. Do not edit records to make a line go away.
 
-3. **When the checks genuinely cannot run here** (no database, no device), a named
+4. **When the checks genuinely cannot run here** (no database, no device), a named
    person may waive them, never at Tier 1:
 
    ```sh
@@ -35,18 +40,18 @@ $ARGUMENTS
    Verified, and `sdlc.py metrics` counts waivers. Do not waive on your own initiative:
    ask the person, and give their words as the reason.
 
-4. **Fill the drafted entry.** For Tier 1 and 2, `finish` writes every section it can
+5. **Fill the drafted entry.** For Tier 1 and 2, `finish` writes every section it can
    from git and the ledger and marks the rest `TODO(finish)`: Why, Not done,
    Discovered, Decisions, Assumptions, and for Tier 2 the plan and review verdicts.
    Replace each one with the real content. Write "nothing deferred" or "none" when that
    is the truth; never delete a section. `finish` refuses while a `TODO(finish)` is
    left.
 
-5. **Then do the closing work no script can.** Reconcile
+6. **Then do the closing work no script can.** Reconcile
    `{{DOCS_DIR}}/project/assumptions-and-risks.md`. Update or mark stale the docs the change
    falsified. Add backlog rows for follow-ups. Merge the item's spec change
    (`sdlc.py spec apply <ID> --write`) when there is one. Write an ADR for a durable
    decision.
 
-6. **Report** the final `finish` output: what is done, what is verified, what was
+7. **Report** the final `finish` output: what is done, what is verified, what was
    waived and by whom, and what is open.
