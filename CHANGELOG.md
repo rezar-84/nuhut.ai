@@ -4,6 +4,17 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **`--uninstall` and `--repair`.** The installer could add and upgrade but not remove.
+  - `install.sh <project> --uninstall` removes the files the manifest lists that still
+    match their checksum, the hook entries the kit registered in Claude Code, Gemini CLI
+    and Cursor settings, its line in git hooks, and sections 1-8 of `AGENTS.md`. Edited
+    kit files, section 9, `docs/project/` and the evidence ledger stay. It prints the
+    plan and asks; `-y` skips the question and `--dry-run` only prints the plan. Shared
+    files are backed up before they change.
+  - `install.sh <project> --repair` is an upgrade that restores edited or deleted kit
+    files to the kit's version after backing up the current copies. A stopped upgrade
+    now names it.
+
 - **Slop filter: an opt-in writing standard for copy that does not read as generated.**
   Built on Wikipedia's *Signs of AI writing*, with ideas from the `humanizer` and
   `stop-slop` skills.
