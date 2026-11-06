@@ -3222,6 +3222,88 @@ def test_specs():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_repair_and_uninstall():
+    print("repair and uninstall")
+    d = tempfile.mkdtemp(prefix="sdlc-uninstall-")
+    subprocess.call(["git", "init", "-q"], cwd=d)
+    run([d, "UNI", "-y", "--hooks", "--git-hooks", "all", "--harness", "claude,gemini,cursor"])
+    settings_rel = ".claude/settings.json"
+    settings = json.loads(read(d, settings_rel))
+    settings["permissions"] = {"allow": ["Bash(ls)"]}
+    settings["hooks"]["PreToolUse"].append(
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo mine"}]})
+    write(d, settings_rel, json.dumps(settings))
+    write(d, ".git/hooks/pre-commit", read(d, ".git/hooks/pre-commit") + "echo mine\n")
+    write(d, ".ai-sdlc/protected.txt", read(d, ".ai-sdlc/protected.txt") + "secrets/*\n")
+    write(d, "docs/project/worklog.md", read(d, "docs/project/worklog.md") + "\nmy entry\n")
+
+    # Repair: an upgrade that restores what was edited or deleted, after a backup.
+    edited_rel = "docs/process/00-operating-model.md"
+    write(d, edited_rel, read(d, edited_rel) + "\nlocal edit\n")
+    os.remove(os.path.join(d, "docs", "CARD.md"))
+    write(d, "AGENTS.md", read(d, "AGENTS.md").replace("## 1.", "## 1. EDITED", 1))
+    code, out = run([d, "--upgrade"])
+    check("a stopped upgrade names --repair", code == 1 and "--upgrade --repair" in out, out[-300:])
+    code, out = run([d, "--repair", "--dry-run"])
+    check("--repair --dry-run writes nothing",
+          code == 0 and "local edit" in read(d, edited_rel) and "would update" in out, out[-300:])
+    code, out = run([d, "--repair"])
+    check("--repair restores edited and deleted kit files",
+          code == 0 and "local edit" not in read(d, edited_rel)
+          and os.path.isfile(os.path.join(d, "docs", "CARD.md"))
+          and "EDITED" not in read(d, "AGENTS.md"), out[-400:])
+    backups = os.path.join(d, ".ai-sdlc", "backups")
+    kept = [os.path.join(r, f) for r, _, fs in os.walk(backups) for f in fs]
+    check("--repair backs up the edited copy first",
+          any(p.endswith("00-operating-model.md") and "local edit" in open(p).read() for p in kept))
+    code, out = run([d, "--upgrade"])
+    check("a repaired install upgrades cleanly", code == 0 and "Already up to date" in out, out[-300:])
+
+    # Uninstall: a plan first, then only what the manifest proves is the kit's.
+    write(d, "docs/roles/qa.md", read(d, "docs/roles/qa.md") + "\nour QA rule\n")
+    before = files(d)
+    code, out = run([d, "--uninstall", "--dry-run"])
+    check("--uninstall --dry-run changes nothing",
+          code == 0 and files(d) == before and "would remove" in out, out[-300:])
+    code, out = run([d, "--uninstall"])
+    check("--uninstall without -y and without a terminal refuses",
+          code == 1 and files(d) == before and "not confirmed" in out, out[-300:])
+    code, out = run([d, "--uninstall", "-y"])
+    check("--uninstall succeeds", code == 0 and "Done:" in out, out[-400:])
+    gone = ["docs/CARD.md", "docs/process", "docs/templates", ".claude/hooks", ".claude/commands",
+            ".claude/skills", ".ai-sdlc/bin", ".ai-sdlc/git-hooks", ".ai-sdlc/manifest.json",
+            ".ai-sdlc/gates.txt", ".gemini/settings.json", ".cursor/hooks.json", ".git/hooks/commit-msg"]
+    left = [rel for rel in gone if os.path.exists(os.path.join(d, rel))]
+    check("kit files, and directories left empty, are removed", not left, str(left))
+    check("an edited kit file is kept", "our QA rule" in read(d, "docs/roles/qa.md"))
+    check("project records are kept",
+          "my entry" in read(d, "docs/project/worklog.md")
+          and os.path.isfile(os.path.join(d, "docs", "project", "charter.md")))
+    check("a hook list the project added to is kept", "secrets/*" in read(d, ".ai-sdlc/protected.txt"))
+    after = json.loads(read(d, settings_rel))
+    commands = [h["command"] for e in after["hooks"]["PreToolUse"] for h in e["hooks"]]
+    check("settings.json keeps the project's own hook and permissions, loses the kit's",
+          commands == ["echo mine"] and after["permissions"] == {"allow": ["Bash(ls)"]}
+          and "Stop" not in after["hooks"], json.dumps(after)[:300])
+    hook = read(d, ".git/hooks/pre-commit")
+    check("a shared git hook loses only the kit's line",
+          "echo mine" in hook and ".ai-sdlc/git-hooks" not in hook, hook)
+    agents = read(d, "AGENTS.md")
+    check("AGENTS.md keeps section 9 and loses the kit sections",
+          "## 9. Project overrides" in agents and "ai-sdlc:kit-begin" not in agents
+          and "## 1." not in agents)
+    check("files the kit shared are backed up before they change",
+          os.path.isfile(os.path.join(backups, "uninstall-v" + installer.VERSION, "AGENTS.md")))
+    code, out = run([d, "--uninstall", "-y"])
+    check("a second --uninstall has nothing to go on and says so",
+          code == 1 and "manifest.json" in out, out[-300:])
+    code, out = run([d, "UNI", "-y"])
+    check("the project can be installed again afterwards",
+          code == 0 and os.path.isfile(os.path.join(d, ".ai-sdlc", "manifest.json"))
+          and "our QA rule" in read(d, "docs/roles/qa.md"), out[-300:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_slop_filter():
     print("slop filter: install flag, scanner, strict, config, upgrade")
     d = tempfile.mkdtemp(prefix="sdlc-slop-")
@@ -3664,7 +3746,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_upgrade_to_41, test_demo_project):
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project):
         test()
     print("")
     if failures:

@@ -166,7 +166,7 @@ to install the docs under a different directory, `--harness <list>`, `--profile
 `--decision-style <ask|guide|autopilot>`, `--specs <on|off>`, `--slop-filter <off|on|strict>`, `--acquisition-profile <standard|advanced>`,
 `--hooks`, `--git-hooks [all|secrets]`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
 `--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`,
-`--plain`, `--sections <list>`, and `--upgrade`.
+`--plain`, `--sections <list>`, `--upgrade`, `--repair` and `--uninstall`.
 
 **Living specs.** The Process section asks *Keep living specs of what the system does?*
 (default no; `--specs on|off` answers it). Yes sets the charter's **Specs** row to `on` and
@@ -393,6 +393,43 @@ replaces them, and stops — like any other managed file — if they were edited
 charter row, the upgrade inserts it blank, in its own table, and lists it. An existing row
 is never changed. Skills the project did not choose are not added by an upgrade — `ls
 optional/skills` shows what a newer version ships.
+
+### Repairing an install
+
+```sh
+./install.sh /path/to/your-project --repair
+```
+
+`--repair` is an upgrade that does not stop on local edits. Every kit-owned file that was
+edited or deleted is restored to the kit's version, sections 1–8 of `AGENTS.md` included.
+The copies it replaces go to `.ai-sdlc/backups/` first. A skill or checklist whose whole
+folder was removed stays removed. `--repair --dry-run` lists what would change.
+
+Use it when an upgrade stops with "kit-owned files were modified or removed" and the edits
+are not worth keeping. If they are, move them to section 9 of `AGENTS.md` or to
+`docs/project/` before you repair.
+
+## Removing the kit
+
+```sh
+./install.sh /path/to/your-project --uninstall --dry-run   # the plan, nothing changed
+./install.sh /path/to/your-project --uninstall             # the plan, then a question
+./install.sh /path/to/your-project --uninstall -y          # no question
+```
+
+| Removed | Kept |
+| --- | --- |
+| Kit files the manifest lists that still match their recorded checksum | Kit files you edited |
+| The hook entries the kit added to `.claude/settings.json`, `.gemini/settings.json` and `.cursor/hooks.json` | Every other setting and hook in those files |
+| The kit's line in `pre-commit` and `commit-msg` | The rest of each git hook |
+| Sections 1–8 of `AGENTS.md`, when unedited | Section 9, or the whole file when sections 1–8 were edited |
+| `.ai-sdlc/manifest.json`, `profile.json`, and hook lists still as seeded | `docs/project/` (charter, backlog, worklog, plans, reviews), the evidence ledger, backups |
+
+A file the kit shared with the project is copied to `.ai-sdlc/backups/uninstall-v<version>/`
+before it changes. The pointer lines in `CLAUDE.md` and the other tool files stay; the
+report lists them. An install without a manifest (from before 3.3) cannot be uninstalled
+until `--upgrade --adopt` has written one. Installing again afterwards works as a first
+install and adds only the files that are missing.
 
 This only works if you keep project-specific rules where they belong: in `AGENTS.md`
 ("Project overrides") and in `docs/project/`, never inside `process/` or `roles/`. The

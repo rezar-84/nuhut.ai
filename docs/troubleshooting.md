@@ -27,6 +27,16 @@ Never on install. `--upgrade` replaces only the kit's own files that you have no
 (tracked by hash in `.ai-sdlc/manifest.json`), backs up what it changes, and never
 rewrites project records.
 
+**An upgrade stopped because kit files were modified. Now what?**
+Keep the edits by moving them to section 9 of `AGENTS.md` or to `docs/project/`. To drop
+them, `./install.sh <project> --repair` restores the kit's versions and backs yours up
+under `.ai-sdlc/backups/`.
+
+**How do I remove the kit?**
+`./install.sh <project> --uninstall` shows what it will remove and asks. It removes the
+kit's unedited files and the hook entries it registered. Your charter, backlog, worklog,
+edited files and section 9 of `AGENTS.md` stay. [Details](install.md#removing-the-kit).
+
 **Can I use it with Spec Kit or OpenSpec?**
 Yes. Nuhut governs how each change is made and proven. Its opt-in living specs use
 OpenSpec's headings and read existing `openspec/` and Spec Kit folders as they are

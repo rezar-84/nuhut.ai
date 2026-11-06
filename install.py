@@ -618,8 +618,8 @@ Running it
   -y, --yes              no questions, every default (implied without a terminal)
   --dry-run              list what would be written, write nothing
   --upgrade [--adopt]    refresh managed files; --adopt once for pre-3.3 installs
-  --plain                numbered, typed prompts instead of arrow-key menus
-  --lang <code>          language for these prompts (default: en)
+  --repair | --uninstall restore edited kit files | remove the kit, keep your records
+  --plain, --lang <code> typed prompts instead of menus; prompt language (default: en)
 
 More
   --help full            every option in detail
@@ -756,6 +756,16 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --upgrade          refresh manifest-owned portable docs and installed skills. Stops
                      on local edits, backs up changes, removes obsolete managed files,
                      and never touches project records or AGENTS.md.
+  --repair           an upgrade that does not stop on local edits: every kit-owned
+                     file that was edited or deleted is restored to the kit's
+                     version, after the current copy is backed up under
+                     .ai-sdlc/backups/. A skill or checklist whose whole folder was
+                     removed stays removed.
+  --uninstall        remove what the manifest says the kit owns and nobody edited,
+                     the hook entries it registered, and sections 1-8 of AGENTS.md.
+                     Edited kit files, section 9 of AGENTS.md, the charter, backlog,
+                     worklog and the evidence ledger are kept. Shows the plan and
+                     asks first; -y skips the question, --dry-run only shows the plan.
 """
 
 
@@ -784,6 +794,8 @@ class Options(object):
         self.acquisition_profile = "standard"
         self.deploy = None          # None: not given; []: explicitly none
         self.adopt = False
+        self.repair = False
+        self.uninstall = False
         self.effort_given = False
         self.dev_method = "item"
         self.dev_method_given = False
@@ -912,6 +924,11 @@ def parse_args(argv):
             o.upgrade = True
         elif arg == "--adopt":
             o.adopt = True
+        elif arg == "--repair":
+            o.repair = True
+            o.upgrade = True
+        elif arg == "--uninstall":
+            o.uninstall = True
         elif arg in ("-y", "--yes", "--non-interactive"):
             o.assume_yes = True
         elif arg == "--no-skills":
@@ -4567,9 +4584,10 @@ def upgrade(target, o):
         legacy = None if parts else agents_legacy_split(text)
         if parts:
             recorded = (previous or {}).get("regions", {}).get(AGENTS_REL)
-            if recorded and sha256_text(parts[1]) != recorded:
+            edited = bool(recorded) and sha256_text(parts[1]) != recorded
+            if edited:
                 modified.append("%s (the kit-managed sections 1-8)" % AGENTS_REL)
-            else:
+            if not edited or o.repair:
                 regions[AGENTS_REL] = sha256_text(new_region)
                 if parts[0] + new_region + parts[2] != text:
                     extra[AGENTS_REL] = parts[0] + new_region + parts[2]
@@ -4627,13 +4645,21 @@ def upgrade(target, o):
                      "a filename containing a quote. Re-run with --upgrade --adopt "
                      "to replace them (backed up first)." % len(stale_hooks))
 
-    if modified:
+    if modified and o.repair:
+        print("Repair: %d kit-owned file%s edited or removed here will be restored to the "
+              "kit's version:" % (len(modified), " that was" if len(modified) == 1 else "s that were"))
+        for rel in modified:
+            print("  restore        %s" % rel)
+        print("")
+    elif modified:
         sys.stderr.write("error: upgrade stopped; kit-owned files were modified or removed:\n")
         for rel in modified:
             sys.stderr.write("       %s\n" % rel)
         sys.stderr.write("       Move project rules to section 9 of AGENTS.md or the project "
                          "docs, restore these files from the kit, or merge the new kit "
                          "manually.\n")
+        sys.stderr.write("       To restore them all to the kit's version (yours are backed "
+                         "up first): --upgrade --repair\n")
         return 1
 
     obsolete = sorted(set(previous_files) - set(planned))
@@ -4743,6 +4769,248 @@ def upgrade(target, o):
         print("What each is for: install.sh --list skills. To add the ones that fit, run the")
         print("guided setup again; it only adds files that are missing:")
         print("  %s/install.sh %s --full" % (SRC, target))
+    return 0
+
+
+# ---------------------------------------------------------------- uninstall
+
+def kit_hook_command(command):
+    """True for a hook command this kit registered, in any harness's settings file."""
+    command = str(command or "")
+    if "/.claude/hooks/adapter.sh " in command or (RUNTIME_REL + " guard ") in command:
+        return True
+    return any(command.endswith(".claude/hooks/" + spec[0]) for spec in Installer.HOOK_SPECS)
+
+
+def strip_kit_hooks(data):
+    """Drop the entries this kit registered from a parsed settings file, leaving every
+    other hook as it was. Returns how many were dropped."""
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return 0
+    removed = 0
+    for event in list(hooks):
+        entries = hooks[event]
+        if not isinstance(entries, list):
+            continue
+        kept = []
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("hooks"), list):
+                specs = [s for s in entry["hooks"]
+                         if not (isinstance(s, dict) and kit_hook_command(s.get("command")))]
+                dropped = len(entry["hooks"]) - len(specs)
+                removed += dropped
+                if dropped and not specs:
+                    continue
+                if dropped:
+                    entry = dict(entry, hooks=specs)
+            elif isinstance(entry, dict) and kit_hook_command(entry.get("command")):
+                removed += 1            # Cursor: the entry is the command
+                continue
+            kept.append(entry)
+        if kept:
+            hooks[event] = kept
+        elif entries:
+            del hooks[event]
+    if removed and not hooks:
+        del data["hooks"]
+    return removed
+
+
+HOOK_SETTINGS = (".claude/settings.json", ".gemini/settings.json", ".cursor/hooks.json")
+
+
+def git_hook_dirs(target):
+    """Where install_git_hooks may have chained a call: husky, core.hooksPath, .git/hooks."""
+    dirs = [target / ".husky", target / ".git" / "hooks"]
+    try:
+        configured = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=str(target),
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    universal_newlines=True).stdout.strip()
+    except OSError:
+        configured = ""
+    if configured:
+        path = Path(configured) if os.path.isabs(configured) else target / configured
+        try:
+            dirs.append(ensure_inside(target, path))
+        except RuntimeError:
+            pass
+    return [d for d in dirs if d.is_dir()]
+
+
+def uninstall(target, o):
+    """Remove what the manifest proves is the kit's and unchanged. Anything edited, and
+    every project record, stays: an uninstall must not be the way a project loses work."""
+    manifest = load_manifest(target)
+    if not manifest:
+        sys.stderr.write("error: no %s in %s, so nothing here can be shown to be the kit's.\n"
+                         % (MANIFEST_REL.as_posix(), target))
+        sys.stderr.write("       An install from before 3.3 gets a manifest from "
+                         "--upgrade --adopt; then run --uninstall again.\n")
+        return 1
+    docs = manifest.get("docs_dir") if isinstance(manifest.get("docs_dir"), str) else None
+    docs = docs or find_docs(target, o.docs_dir) or o.docs_dir
+    remove, edited, gone = [], [], []
+    try:
+        for rel, recorded in sorted(manifest["files"].items()):
+            if not is_managed_rel(rel, docs):
+                raise RuntimeError("manifest contains an unmanaged path: %s" % rel)
+            path = ensure_inside(target, target / rel)
+            if not path.is_file():
+                gone.append(rel)
+            elif sha256_file(path) == recorded:
+                remove.append(rel)
+            else:
+                edited.append(rel)
+    except RuntimeError as exc:
+        sys.stderr.write("error: %s\n" % exc)
+        return 1
+
+    # Files the kit only added to: each gets its addition taken back out, nothing else.
+    rewrites, deletes, notes = {}, [], []
+    for rel in HOOK_SETTINGS:
+        path = target / rel
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            notes.append("%s is not valid JSON, so its hook entries were not checked. Remove "
+                         "any that call .claude/hooks/ or %s by hand." % (rel, RUNTIME_REL))
+            continue
+        count = strip_kit_hooks(data)
+        if not count:
+            continue
+        if data in ({}, {"version": 1}):
+            deletes.append((rel, "%d kit hook%s, nothing else in it" % (count, "" if count == 1 else "s")))
+        else:
+            rewrites[rel] = (json.dumps(data, indent=2, sort_keys=True) + "\n",
+                             "%d kit hook%s removed" % (count, "" if count == 1 else "s"))
+    for hooks_dir in git_hook_dirs(target):
+        for name, call in Installer.GIT_HOOK_CALLS:
+            path = hooks_dir / name
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            lines = text.splitlines()
+            rest = [line for line in lines if line.strip() != call]
+            if len(rest) == len(lines):
+                continue
+            rel = path.relative_to(target).as_posix()
+            if all(not line.strip() or line.startswith("#!") for line in rest):
+                deletes.append((rel, "it only called the kit hook"))
+            else:
+                rewrites[rel] = ("\n".join(rest) + "\n", "call to the kit hook removed")
+    agents = target / AGENTS_REL
+    if agents.is_file():
+        text = agents.read_text(encoding="utf-8")
+        parts = agents_split(text)
+        recorded = (manifest.get("regions") or {}).get(AGENTS_REL)
+        if parts and recorded and sha256_text(parts[1]) == recorded:
+            rewrites[AGENTS_REL] = (parts[0].rstrip("\n") + "\n\n" + parts[2].lstrip("\n"),
+                                    "kit sections 1-8 removed, section 9 kept")
+        elif parts:
+            notes.append("AGENTS.md sections 1-8 were edited here (or predate the recorded "
+                         "checksum), so the file was left whole. It still describes the kit's "
+                         "process; delete those sections by hand when you no longer want them.")
+    own = [rel for rel in (MANIFEST_REL.as_posix(), PROFILE_REL.as_posix())
+           if (target / rel).is_file()]
+    # The hook lists are the project's once it adds a line; still as seeded, they are ours.
+    for name, seed in Installer.HOOK_LISTS:
+        path = target / ".ai-sdlc" / name
+        if path.is_file() and path.read_text(encoding="utf-8", errors="replace") == seed:
+            own.append(".ai-sdlc/" + name)
+
+    print("Uninstalling Nuhut kit v%s from %s" % (manifest.get("kit_version", "?"), target))
+    verb = "would " if o.dry_run else ""
+    for rel in remove + own:
+        print("  %-14s %s" % (verb + "remove", rel))
+    for rel, why in deletes:
+        print("  %-14s %s (%s)" % (verb + "remove", rel, why))
+    for rel in sorted(rewrites):
+        print("  %-14s %s (%s)" % (verb + "edit", rel, rewrites[rel][1]))
+    for rel in edited:
+        print("  keep           %s (edited here)" % rel)
+    total = len(remove) + len(own) + len(deletes)
+    print("")
+    print("%d file%s to remove, %d to edit, %d edited kit file%s kept."
+          % (total, "" if total == 1 else "s", len(rewrites), len(edited),
+             "" if len(edited) == 1 else "s"))
+    if o.dry_run:
+        print("Dry run: nothing was changed.")
+        return 0
+    if not o.assume_yes:
+        if not TERM.interactive_in:
+            sys.stderr.write("error: not confirmed. Re-run with -y to uninstall, or with "
+                             "--dry-run to see this plan only.\n")
+            return 1
+        try:
+            answer = input("Remove these files? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Nothing was changed.")
+            return 0
+
+    # A removed file equals the kit's copy, so reinstalling restores it. A file the kit
+    # shared with the project does not, so those are copied aside before they change.
+    shared = sorted(rewrites) + [rel for rel, _ in deletes]
+    if shared:
+        stem = "uninstall-v%s" % manifest.get("kit_version", "legacy")
+        backup_dir = target / ".ai-sdlc" / "backups" / stem
+        suffix = 2
+        while backup_dir.exists():
+            backup_dir = target / ".ai-sdlc" / "backups" / ("%s-%d" % (stem, suffix))
+            suffix += 1
+        for rel in shared:
+            dest = backup_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(target / rel), str(dest))
+        print("  backup         %s (%d files)" % (backup_dir.relative_to(target).as_posix(),
+                                                  len(shared)))
+    try:
+        for rel in sorted(rewrites):
+            atomic_write_text(target / rel, rewrites[rel][0])
+        for rel in remove + own + [rel for rel, _ in deletes]:
+            path = target / rel
+            if path.is_file():
+                path.unlink()
+            parent = path.parent
+            while parent != target and target in parent.parents:
+                try:
+                    parent.rmdir()          # only ever an empty directory
+                except OSError:
+                    break
+                parent = parent.parent
+    except (IOError, OSError) as exc:
+        sys.stderr.write("error: uninstall stopped part-way: %s\n" % exc)
+        sys.stderr.write("       Re-run --uninstall to finish; it only removes what is left.\n")
+        return 1
+
+    print("")
+    print("Done: %d removed, %d edited." % (total, len(rewrites)))
+    print("")
+    print("Left in place, because they are yours:")
+    records = [name for name in ("project", "specs", "epics", "adr")
+               if (target / docs / name).is_dir()]
+    if records:
+        print("  %s/%s  (charter, backlog, worklog and other records)"
+              % (docs, ", ".join(records)))
+    if (target / AGENTS_REL).is_file():
+        print("  AGENTS.md  (section 9, or the whole file if it was edited)")
+    pointers = [rel for rel, _ in HARNESS_POINTERS if (target / rel).is_file()
+                and "AGENTS.md" in (target / rel).read_text(encoding="utf-8", errors="replace")]
+    if pointers:
+        print("  %s  (each still points at AGENTS.md; remove that line if you delete it)"
+              % ", ".join(pointers))
+    if (target / ".ai-sdlc").is_dir():
+        print("  .ai-sdlc/  (%s)" % ", ".join(sorted(p.name for p in (target / ".ai-sdlc").iterdir())))
+    for note in notes:
+        print("")
+        print("note: %s" % note)
+    if gone:
+        print("")
+        print("note: %d kit file%s already gone." % (len(gone), " was" if len(gone) == 1 else "s were"))
     return 0
 
 
@@ -4962,12 +5230,15 @@ def main(argv):
         if target is None:
             return 1
 
-    interactive = (not o.assume_yes and not o.upgrade and TERM.interactive_in)
+    interactive = (not o.assume_yes and not o.upgrade and not o.uninstall
+                   and TERM.interactive_in)
     if target is None and not interactive:
         usage()
     if interactive:
         TERM.enable_rich(o.plain)
 
+    if o.uninstall:
+        return uninstall(target, o)
     if o.upgrade:
         return upgrade(target, o)
 

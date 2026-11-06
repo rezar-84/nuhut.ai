@@ -216,6 +216,10 @@ them. [What the kit is, and is not](docs/design.md).
 **Will it overwrite my files?** No. Install never overwrites, and upgrade replaces only
 unmodified kit files.
 
+**Can I take it out again?** Yes. `./install.sh <project> --uninstall` removes the kit's
+unedited files and hook entries, and keeps your records. `--repair` restores kit files
+that were edited or deleted.
+
 **Do I need Claude Code?** No. Any tool that reads `AGENTS.md` works; Claude Code adds
 typed commands.
 
