@@ -4,6 +4,21 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Git: staying in step with the remote, and conflicts.** The kit had branch, commit
+  and approval rules but said nothing about fetching, how a branch takes in new commits,
+  or what to do with a conflict.
+  - `sdlc.py sync [--fetch] [--strict] [--json]` reports where the checkout stands
+    against its upstream and the default branch, an unfinished merge or rebase, and
+    unpushed work, and names the next command. It never merges, rebases, pulls or
+    pushes. Exit 1 on a `STOP` (diverged or behind its upstream, a conflict, a detached
+    HEAD); `--strict` also fails when the branch is behind the default branch.
+  - `process/05-change-control.md` gains "Staying in step with the remote" (the flow
+    is trunk-based; when to sync; merge or rebase; pushing; what never to run) and
+    "Conflicts" (seven rules, ending in verify again).
+  - Charter row **Updating a branch**: `merge` (the default when blank) or `rebase`.
+  - `/sdlc-build` and `/sdlc-finish` run `sync --fetch` first. `sdlc.py finish` refuses
+    while a merge or rebase is unfinished and notes a branch behind the default branch.
+
 - **`--uninstall` and `--repair`.** The installer could add and upgrade but not remove.
   - `install.sh <project> --uninstall` removes the files the manifest lists that still
     match their checksum, the hook entries the kit registered in Claude Code, Gemini CLI

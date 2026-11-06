@@ -242,6 +242,20 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     out.append("build    %d commit(s)" % len(commits))
     if project.git("status", "--porcelain", "--untracked-files=no").strip():
         out.append("note     uncommitted changes are not part of what finish records")
+    try:
+        sync = rt.runtime_module("sync").state(project, rt.default_branch(project))
+    except Exception:
+        sync = None                      # finish never fails on a git oddity it only reports
+    if sync and (sync["operation"] or sync["conflicted"]):
+        owe("sync     a %s is unfinished%s: resolve it (05-change-control.md, \"Conflicts\") "
+            "or `git %s --abort`, then verify again"
+            % (sync["operation"] or "merge",
+               " (%d file(s) in conflict)" % len(sync["conflicted"]) if sync["conflicted"] else "",
+               sync["operation"] or "merge"))
+    elif sync and sync["behind_default"] and sync["branch"] != sync["default"] and not already:
+        out.append("sync     note: %d commit(s) behind %s as of the last fetch. Bring them in and "
+                   "verify again before this merges (`%s sync --fetch`)"
+                   % (sync["behind_default"], sync["default_ref"], SDLC))
 
     run = verify_state(rt, project, item, commits)
     waived = waivers(rt, project, item)

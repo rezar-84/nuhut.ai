@@ -11,7 +11,7 @@ Grouped the way `sdlc.py --help` groups them:
 | --- | --- |
 | Records and checks | `doctor`, `verify`, `bite`, `plan-check` |
 | Viewer and reports | `view`, `lens`, `audit`, `metrics` |
-| Work items and agents | `claim`, `release`, `claims`, `parallel`, `trailers`, `review`, `log` |
+| Work items and agents | `claim`, `release`, `claims`, `parallel`, `trailers`, `sync`, `review`, `log` |
 | Specs | `spec` |
 | Writing | `slop` |
 | Setup | `config`, `fix` |
@@ -38,6 +38,7 @@ was refused, `2` a usage error.
 | **`metrics`** | `--json` | Calculates quantitative project health metrics: work-in-progress (WIP), verification pass rate, cycle time, lead time, time waiting on humans, lifecycle record gaps, and usage against the charter's optional agent budget per tier. |
 | **`log`** | `--since <ref>`, `--id <ID>`, `--write` | Drafts worklog lines, one per work item, from the commits since `<ref>` (IDs from subjects or `Work-Item` trailers) and the verify runs recorded on them. `--id` drafts one item's line, from just before its first commit unless `--since` says otherwise. `--write` inserts them under the worklog's marker, newest first, skipping items the worklog already names. Records become byproducts, not essays. |
 | **`bite`** | `--base`, `--timeout`, `--restore`, `--json` | Puts the changed product files (never tests, never the kit's paths) back to the base, runs the test command, and restores them. It passes only when the tests pass with the change and fail without it. A backup and marker under `.ai-sdlc/bite/` make an interrupted run recoverable with `--restore`, and the doctor flags one. |
+| **`sync`** | `--fetch`, `--strict`, `--json` | Where the checkout stands: ahead of or behind its upstream and the default branch, an unfinished merge or rebase, unpushed work, with the next command for each. Changes nothing; `--fetch` runs `git fetch --prune` first. Exit 1 on a `STOP` line; `--strict` also on a branch behind the default branch. Rules: `process/05-change-control.md`, "Staying in step with the remote". |
 | **`trailers <ID>`** | `--agent`, `--model` | Prints the `Work-Item`, `Agent` and `Model` commit trailers, from flags, `AI_SDLC_AGENT` / `AI_SDLC_MODEL`, or what the harness exposes. |
 | **`review <ID>`** | `--role`, `--by claude\|codex\|gemini\|cmd:<command>`, `--model`, `--stage` | Sends one role's playbook, the item's diff, the relevant charter rows and the tier to another harness, headless, and saves the review with the reviewer's and author's identity, labelled independent or self-check. |
 | **`config`** | `--effort`, `--independent-review`, `--tier-rules`, `--decision-style`, `--dev-method`, `--specs`, `--slop-filter`, `--reviewer`, `--token-saving`, `--set-check`, `--json` | Inspects or atomically updates kit constraints in `docs/project/charter.md` and syncs `.ai-sdlc/profile.json`. `--token-saving on` switches to `Lean` effort, `Independent review required for: none`, `Standard` tier rules, and compact tier budgets in one step. |

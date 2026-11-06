@@ -2993,6 +2993,7 @@ Work items and agents
   release <ID>        free it (--remove-worktree to clean up)                         release ACME-12
   claims / parallel   who holds what / which Ready items can run side by side        parallel
   trailers <ID>       the Work-Item, Agent and Model commit trailers                   trailers ACME-12
+  sync                behind the remote or the default branch? conflicts? next command  sync --fetch
   review <ID>         one role's review of the diff, by another model family          review ACME-12 --role security --by codex
   log                 draft worklog lines from commits and verify runs                log --since main --write
 
@@ -3036,6 +3037,8 @@ EXAMPLES = {
             "fix normalise-status --apply", "fix link-evidence --apply"],
     "lens": ["lens", "lens --area build", "lens --user --json"],
     "audit": ["audit", "audit --strict           # exit 1 on a critical or high vulnerability"],
+    "sync": ["sync                     # as of the last fetch", "sync --fetch             # fetch first",
+             "sync --fetch --strict    # exit 1 when behind the default branch too (CI, before finish)"],
     "slop": ["slop                     # prose files changed against HEAD",
              "slop README.md docs/", "slop --strict content/   # exit 1 when a file fails (CI)",
              "slop --guide             # the rules", "slop - < draft.md"],
@@ -3202,6 +3205,13 @@ def main(argv):
                     help="exit 1 when a file fails, whatever the charter's Slop filter row says")
     sl.add_argument("--guide", action="store_true", help="print the rules and what each one wants")
     sl.add_argument("--json", action="store_true")
+    sy = sub.add_parser("sync", help="where this checkout stands against its remote and the "
+                        "default branch; reports and names the next command, changes nothing")
+    sy.add_argument("--fetch", action="store_true",
+                    help="run `git fetch --prune` first, so the figures are current")
+    sy.add_argument("--strict", action="store_true",
+                    help="also exit 1 when the branch is behind the default branch")
+    sy.add_argument("--json", action="store_true")
     sp = sub.add_parser("spec", help="living specs: list, show, validate, apply an item's change")
     sp.add_argument("action", choices=("list", "show", "validate", "apply"))
     sp.add_argument("target", nargs="?", help="capability (show) or work item ID (apply)")
@@ -3273,6 +3283,22 @@ def main(argv):
                                         opts.by if opts.waive else None, opts.reason,
                                         opts.dry_run)
         print("\n".join(lines))
+        return code
+    if opts.command == "sync":
+        sync_mod = runtime_module("sync")
+        how = sync_mod.strategy(labelled(project.charter, "Updating a branch"))
+        state = sync_mod.state(project, default_branch(project), opts.fetch)
+        if state is None:
+            sys.stderr.write("sync: not a git repository here\n")
+            return 2
+        found = sync_mod.findings(state, how)
+        code = sync_mod.exit_code(found, opts.strict)
+        if opts.json:
+            print(json.dumps({"state": state, "strategy": how, "exit": code, "findings": [
+                {"level": level, "text": text, "command": command}
+                for level, text, command in found]}, indent=2, sort_keys=True))
+        else:
+            print("\n".join(sync_mod.report(state, found, how)))
         return code
     if opts.command == "slop":
         slop_mod = runtime_module("slop")

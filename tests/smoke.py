@@ -2422,7 +2422,7 @@ def test_upgrade_ownership():
         idx = [i for i, l in enumerate(lines) if l.startswith("| **%s** |" % label)]
         return idx and lines[idx[0] - 1].startswith("| **%s** |" % neighbour)
     check("missing charter rows return in their own tables",
-          after("Deployment platforms", "Direct commits to it")
+          after("Deployment platforms", "Updating a branch")
           and after("MFA / OTP policy", "Access level model"), out[-400:])
     check("existing charter answers are untouched",
           "| **Default effort mode** | Lean |" in charter)
@@ -3304,6 +3304,89 @@ def test_repair_and_uninstall():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_sync():
+    print("sync: the remote, the default branch, conflicts")
+    base = tempfile.mkdtemp(prefix="sdlc-sync-")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com")
+
+    def git(cwd, *args):
+        return subprocess.run(("git",) + args, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, universal_newlines=True)
+
+    def sync(cwd, *args):
+        p = subprocess.run([sys.executable, os.path.join(cwd, ".ai-sdlc", "bin", "sdlc.py"), "sync"]
+                           + list(args), cwd=cwd, env=env, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    remote, a, b = (os.path.join(base, n) for n in ("remote.git", "a", "b"))
+    git(base, "init", "-q", "--bare", remote)
+    git(base, "clone", "-q", remote, a)
+    git(a, "checkout", "-q", "-b", "main")
+    run([a, "SYN", "-y"])
+    charter = read(a, "docs/project/charter.md")
+    check("the charter has the Updating a branch row", "| **Updating a branch** |" in charter)
+    write(a, "docs/project/charter.md", re.sub(r"(?m)^\| \*\*Default branch\*\* \|.*$",
+                                             "| **Default branch** | `main` |", charter))
+    write(a, "f.txt", "base\n")
+    git(a, "add", "-A"); git(a, "commit", "-qm", "init"); git(a, "push", "-q", "-u", "origin", "main")
+    git(base, "clone", "-q", remote, b)
+    write(b, "f.txt", "theirs\n")
+    git(b, "commit", "-qam", "b changes f"); git(b, "push", "-q")
+
+    code, out = sync(a)
+    check("without --fetch the report is as of the last fetch", code == 0 and "In step" in out, out)
+    code, out = sync(a, "--fetch")
+    check("behind its upstream is a STOP with a fast-forward",
+          code == 1 and "STOP" in out and "git merge --ff-only origin/main" in out, out)
+    head = git(a, "rev-parse", "HEAD").stdout
+    check("sync changes nothing", git(a, "rev-parse", "HEAD").stdout == head
+          and not git(a, "status", "--porcelain").stdout.strip())
+
+    git(a, "checkout", "-q", "-b", "feat/SYN-001-x")
+    write(a, "g.txt", "mine\n")
+    git(a, "add", "-A"); git(a, "commit", "-qm", "SYN-001 add g")
+    code, out = sync(a)
+    check("behind the default branch is an UPDATE, not a failure",
+          code == 0 and "UPDATE" in out and "git merge origin/main" in out, out)
+    check("a branch that was never pushed is noted", "git push -u origin feat/SYN-001-x" in out, out)
+    code, out = sync(a, "--strict")
+    check("--strict fails a branch behind the default branch", code == 1, out)
+    code, out = sync(a, "--json")
+    data = json.loads(out)
+    check("--json carries the state and the findings",
+          data["state"]["behind_default"] == 1 and data["strategy"] == "merge"
+          and any(f["level"] == "update" for f in data["findings"]), out[:300])
+
+    write(a, "docs/project/charter.md", re.sub(
+        r"(?m)^\| \*\*Updating a branch\*\* \|.*$", "| **Updating a branch** | `rebase` |",
+        read(a, "docs/project/charter.md")))
+    code, out = sync(a)
+    check("the charter's rebase choice changes the suggested command",
+          "git rebase origin/main" in out, out)
+    git(a, "checkout", "-q", "--", "docs/project/charter.md")
+
+    write(a, "f.txt", "mine\n")
+    git(a, "commit", "-qam", "SYN-001 change f")
+    git(a, "merge", "origin/main")
+    code, out = sync(a)
+    check("an unfinished merge is a STOP that names the files and the way out",
+          code == 1 and "f.txt" in out and "git merge --abort" in out, out)
+    p = subprocess.run([sys.executable, os.path.join(a, ".ai-sdlc", "bin", "sdlc.py"), "finish",
+                        "SYN-001", "--dry-run"], cwd=a, env=env, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, universal_newlines=True)
+    check("finish does not crash beside an unfinished merge", "Traceback" not in p.stdout, p.stdout[-300:])
+    git(a, "merge", "--abort")
+
+    plain = tempfile.mkdtemp(prefix="sdlc-sync-none-")
+    run([plain, "SYN", "-y"])
+    code, out = sync(plain)
+    check("outside a git repository sync says so", code == 2 and "not a git repository" in out, out)
+    shutil.rmtree(base, ignore_errors=True)
+    shutil.rmtree(plain, ignore_errors=True)
+
+
 def test_slop_filter():
     print("slop filter: install flag, scanner, strict, config, upgrade")
     d = tempfile.mkdtemp(prefix="sdlc-slop-")
@@ -3418,7 +3501,7 @@ def test_upgrade_to_41():
               all(os.path.isfile(os.path.join(d, "docs", rel)) for rel in ("templates/spec.md", "templates/spec-change.md", "process/15-specs.md")))
         after = read(d, "docs/project/charter.md").splitlines()
         added = [l for l in after if l not in charter_before.splitlines()]
-        new_rows = ("| **Specs** |", "| **Slop filter** |", "| **Finish guard** |", "| **Allowed in records** |")
+        new_rows = ("| **Specs** |", "| **Slop filter** |", "| **Updating a branch** |", "| **Finish guard** |", "| **Allowed in records** |")
         check("project records keep every line; the charter only gains the new rows",
               all(l in after for l in charter_before.splitlines()) and len(added) == len(new_rows)
               and all(any(l.startswith(r) for l in added) for r in new_rows)
@@ -3746,7 +3829,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project):
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project):
         test()
     print("")
     if failures:

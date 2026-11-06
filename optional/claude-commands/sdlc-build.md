@@ -22,8 +22,10 @@ anything verified.
    (`{{DOCS_DIR}}/process/03-ready-and-done.md`, "Checkable at BUILD"). An unmet item
    makes the row `Blocked` with the reason, not a guess.
 
-3. **Claim it.** Set the backlog row to `In progress`, and work on a branch that carries
-   the ID (`{{DOCS_DIR}}/process/05-change-control.md`).
+3. **Claim it.** Run `python3 .ai-sdlc/bin/sdlc.py sync --fetch` and deal with any `STOP`
+   line first. Set the backlog row to `In progress`, and work on a branch that carries the
+   ID, started from the default branch as the remote has it
+   (`{{DOCS_DIR}}/process/05-change-control.md`, "Staying in step with the remote").
 
 4. **For a defect, the reproducing test comes first.** Write it, watch it fail for the
    reported reason, commit it, and lock it as `05-change-control.md`, "Fixing a defect",
