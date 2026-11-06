@@ -2422,7 +2422,7 @@ def test_upgrade_ownership():
         idx = [i for i, l in enumerate(lines) if l.startswith("| **%s** |" % label)]
         return idx and lines[idx[0] - 1].startswith("| **%s** |" % neighbour)
     check("missing charter rows return in their own tables",
-          after("Deployment platforms", "Direct commits to it")
+          after("Deployment platforms", "Updating a branch")
           and after("MFA / OTP policy", "Access level model"), out[-400:])
     check("existing charter answers are untouched",
           "| **Default effort mode** | Lean |" in charter)
@@ -2782,12 +2782,12 @@ def test_guided_setup():
     check("full: local ignore goes to .git/info/exclude",
           ".ai-sdlc/" in read(d, ".git/info/exclude"))
     check("full: starter CI written", os.path.exists(os.path.join(d, ".github", "workflows", "quality.yml")))
-    check("full: slash command count is not hardcoded", "Install the 7 /sdlc-* slash commands" in log)
+    check("full: slash command count is not hardcoded", "Install the 8 /sdlc-* slash commands" in log)
     shutil.rmtree(d, ignore_errors=True)
 
     # Help: short by default, everything on request, values listable.
     code, out = run(["--help"])
-    check("--help is short and grouped", code == 0 and out.count("\n") < 60 and "Examples" in out,
+    check("--help is short and grouped", code == 0 and out.count("\n") <= 60 and "Examples" in out,
           str(out.count("\n")))
     code, out = run(["--help", "full"])
     check("--help full keeps every option", code == 0 and "--git-exclude" in out and "--adopt" in out)
@@ -3222,6 +3222,253 @@ def test_specs():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_repair_and_uninstall():
+    print("repair and uninstall")
+    d = tempfile.mkdtemp(prefix="sdlc-uninstall-")
+    subprocess.call(["git", "init", "-q"], cwd=d)
+    run([d, "UNI", "-y", "--hooks", "--git-hooks", "all", "--harness", "claude,gemini,cursor"])
+    settings_rel = ".claude/settings.json"
+    settings = json.loads(read(d, settings_rel))
+    settings["permissions"] = {"allow": ["Bash(ls)"]}
+    settings["hooks"]["PreToolUse"].append(
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo mine"}]})
+    write(d, settings_rel, json.dumps(settings))
+    write(d, ".git/hooks/pre-commit", read(d, ".git/hooks/pre-commit") + "echo mine\n")
+    write(d, ".ai-sdlc/protected.txt", read(d, ".ai-sdlc/protected.txt") + "secrets/*\n")
+    write(d, "docs/project/worklog.md", read(d, "docs/project/worklog.md") + "\nmy entry\n")
+
+    # Repair: an upgrade that restores what was edited or deleted, after a backup.
+    edited_rel = "docs/process/00-operating-model.md"
+    write(d, edited_rel, read(d, edited_rel) + "\nlocal edit\n")
+    os.remove(os.path.join(d, "docs", "CARD.md"))
+    write(d, "AGENTS.md", read(d, "AGENTS.md").replace("## 1.", "## 1. EDITED", 1))
+    code, out = run([d, "--upgrade"])
+    check("a stopped upgrade names --repair", code == 1 and "--upgrade --repair" in out, out[-300:])
+    code, out = run([d, "--repair", "--dry-run"])
+    check("--repair --dry-run writes nothing",
+          code == 0 and "local edit" in read(d, edited_rel) and "would update" in out, out[-300:])
+    code, out = run([d, "--repair"])
+    check("--repair restores edited and deleted kit files",
+          code == 0 and "local edit" not in read(d, edited_rel)
+          and os.path.isfile(os.path.join(d, "docs", "CARD.md"))
+          and "EDITED" not in read(d, "AGENTS.md"), out[-400:])
+    backups = os.path.join(d, ".ai-sdlc", "backups")
+    kept = [os.path.join(r, f) for r, _, fs in os.walk(backups) for f in fs]
+    check("--repair backs up the edited copy first",
+          any(p.endswith("00-operating-model.md") and "local edit" in open(p).read() for p in kept))
+    code, out = run([d, "--upgrade"])
+    check("a repaired install upgrades cleanly", code == 0 and "Already up to date" in out, out[-300:])
+
+    # Uninstall: a plan first, then only what the manifest proves is the kit's.
+    write(d, "docs/roles/qa.md", read(d, "docs/roles/qa.md") + "\nour QA rule\n")
+    before = files(d)
+    code, out = run([d, "--uninstall", "--dry-run"])
+    check("--uninstall --dry-run changes nothing",
+          code == 0 and files(d) == before and "would remove" in out, out[-300:])
+    code, out = run([d, "--uninstall"])
+    check("--uninstall without -y and without a terminal refuses",
+          code == 1 and files(d) == before and "not confirmed" in out, out[-300:])
+    code, out = run([d, "--uninstall", "-y"])
+    check("--uninstall succeeds", code == 0 and "Done:" in out, out[-400:])
+    gone = ["docs/CARD.md", "docs/process", "docs/templates", ".claude/hooks", ".claude/commands",
+            ".claude/skills", ".ai-sdlc/bin", ".ai-sdlc/git-hooks", ".ai-sdlc/manifest.json",
+            ".ai-sdlc/gates.txt", ".gemini/settings.json", ".cursor/hooks.json", ".git/hooks/commit-msg"]
+    left = [rel for rel in gone if os.path.exists(os.path.join(d, rel))]
+    check("kit files, and directories left empty, are removed", not left, str(left))
+    check("an edited kit file is kept", "our QA rule" in read(d, "docs/roles/qa.md"))
+    check("project records are kept",
+          "my entry" in read(d, "docs/project/worklog.md")
+          and os.path.isfile(os.path.join(d, "docs", "project", "charter.md")))
+    check("a hook list the project added to is kept", "secrets/*" in read(d, ".ai-sdlc/protected.txt"))
+    after = json.loads(read(d, settings_rel))
+    commands = [h["command"] for e in after["hooks"]["PreToolUse"] for h in e["hooks"]]
+    check("settings.json keeps the project's own hook and permissions, loses the kit's",
+          commands == ["echo mine"] and after["permissions"] == {"allow": ["Bash(ls)"]}
+          and "Stop" not in after["hooks"], json.dumps(after)[:300])
+    hook = read(d, ".git/hooks/pre-commit")
+    check("a shared git hook loses only the kit's line",
+          "echo mine" in hook and ".ai-sdlc/git-hooks" not in hook, hook)
+    agents = read(d, "AGENTS.md")
+    check("AGENTS.md keeps section 9 and loses the kit sections",
+          "## 9. Project overrides" in agents and "ai-sdlc:kit-begin" not in agents
+          and "## 1." not in agents)
+    check("files the kit shared are backed up before they change",
+          os.path.isfile(os.path.join(backups, "uninstall-v" + installer.VERSION, "AGENTS.md")))
+    code, out = run([d, "--uninstall", "-y"])
+    check("a second --uninstall has nothing to go on and says so",
+          code == 1 and "manifest.json" in out, out[-300:])
+    code, out = run([d, "UNI", "-y"])
+    check("the project can be installed again afterwards",
+          code == 0 and os.path.isfile(os.path.join(d, ".ai-sdlc", "manifest.json"))
+          and "our QA rule" in read(d, "docs/roles/qa.md"), out[-300:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_sync():
+    print("sync: the remote, the default branch, conflicts")
+    base = tempfile.mkdtemp(prefix="sdlc-sync-")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com")
+
+    def git(cwd, *args):
+        return subprocess.run(("git",) + args, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, universal_newlines=True)
+
+    def sync(cwd, *args):
+        p = subprocess.run([sys.executable, os.path.join(cwd, ".ai-sdlc", "bin", "sdlc.py"), "sync"]
+                           + list(args), cwd=cwd, env=env, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    remote, a, b = (os.path.join(base, n) for n in ("remote.git", "a", "b"))
+    git(base, "init", "-q", "--bare", remote)
+    git(base, "clone", "-q", remote, a)
+    git(a, "checkout", "-q", "-b", "main")
+    run([a, "SYN", "-y"])
+    charter = read(a, "docs/project/charter.md")
+    check("the charter has the Updating a branch row", "| **Updating a branch** |" in charter)
+    write(a, "docs/project/charter.md", re.sub(r"(?m)^\| \*\*Default branch\*\* \|.*$",
+                                             "| **Default branch** | `main` |", charter))
+    write(a, "f.txt", "base\n")
+    git(a, "add", "-A"); git(a, "commit", "-qm", "init"); git(a, "push", "-q", "-u", "origin", "main")
+    git(base, "clone", "-q", remote, b)
+    write(b, "f.txt", "theirs\n")
+    git(b, "commit", "-qam", "b changes f"); git(b, "push", "-q")
+
+    code, out = sync(a)
+    check("without --fetch the report is as of the last fetch", code == 0 and "In step" in out, out)
+    code, out = sync(a, "--fetch")
+    check("behind its upstream is a STOP with a fast-forward",
+          code == 1 and "STOP" in out and "git merge --ff-only origin/main" in out, out)
+    head = git(a, "rev-parse", "HEAD").stdout
+    check("sync changes nothing", git(a, "rev-parse", "HEAD").stdout == head
+          and not git(a, "status", "--porcelain").stdout.strip())
+
+    git(a, "checkout", "-q", "-b", "feat/SYN-001-x")
+    write(a, "g.txt", "mine\n")
+    git(a, "add", "-A"); git(a, "commit", "-qm", "SYN-001 add g")
+    code, out = sync(a)
+    check("behind the default branch is an UPDATE, not a failure",
+          code == 0 and "UPDATE" in out and "git merge origin/main" in out, out)
+    check("a branch that was never pushed is noted", "git push -u origin feat/SYN-001-x" in out, out)
+    code, out = sync(a, "--strict")
+    check("--strict fails a branch behind the default branch", code == 1, out)
+    code, out = sync(a, "--json")
+    data = json.loads(out)
+    check("--json carries the state and the findings",
+          data["state"]["behind_default"] == 1 and data["strategy"] == "merge"
+          and any(f["level"] == "update" for f in data["findings"]), out[:300])
+
+    write(a, "docs/project/charter.md", re.sub(
+        r"(?m)^\| \*\*Updating a branch\*\* \|.*$", "| **Updating a branch** | `rebase` |",
+        read(a, "docs/project/charter.md")))
+    code, out = sync(a)
+    check("the charter's rebase choice changes the suggested command",
+          "git rebase origin/main" in out, out)
+    git(a, "checkout", "-q", "--", "docs/project/charter.md")
+
+    write(a, "f.txt", "mine\n")
+    git(a, "commit", "-qam", "SYN-001 change f")
+    git(a, "merge", "origin/main")
+    code, out = sync(a)
+    check("an unfinished merge is a STOP that names the files and the way out",
+          code == 1 and "f.txt" in out and "git merge --abort" in out, out)
+    p = subprocess.run([sys.executable, os.path.join(a, ".ai-sdlc", "bin", "sdlc.py"), "finish",
+                        "SYN-001", "--dry-run"], cwd=a, env=env, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, universal_newlines=True)
+    check("finish does not crash beside an unfinished merge", "Traceback" not in p.stdout, p.stdout[-300:])
+    git(a, "merge", "--abort")
+
+    plain = tempfile.mkdtemp(prefix="sdlc-sync-none-")
+    run([plain, "SYN", "-y"])
+    code, out = sync(plain)
+    check("outside a git repository sync says so", code == 2 and "not a git repository" in out, out)
+    shutil.rmtree(base, ignore_errors=True)
+    shutil.rmtree(plain, ignore_errors=True)
+
+
+def test_slop_filter():
+    print("slop filter: install flag, scanner, strict, config, upgrade")
+    d = tempfile.mkdtemp(prefix="sdlc-slop-")
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "SLP", "-y"])
+    check("default install: the scanner and command arrive, the skill does not", code == 0
+          and "**Slop filter**" in read(d, "docs/project/charter.md")
+          and "| **Slop filter** | `on` |" not in read(d, "docs/project/charter.md")
+          and not os.path.exists(os.path.join(d, ".claude", "skills", "sdlc-slop-filter"))
+          and os.path.isfile(os.path.join(d, ".ai-sdlc", "bin", "slop.py"))
+          and os.path.isfile(os.path.join(d, ".claude", "commands", "sdlc-slop.md")), out[-300:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args, **kw):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, input=kw.get("stdin"))
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+
+    sloppy = ("# Launch\n\nIn today's fast-paced world, our platform stands as a testament to "
+              "innovation. It's not just a tool, it's a partner.\n\nExperts agree it plays a "
+              "pivotal role.\n")
+    clean = ("# Launch\n\nThe importer reads a CSV file of up to 50,000 rows and reports each "
+             "rejected row with its line number.\n")
+    write(d, "copy/sloppy.md", sloppy)
+    write(d, "copy/clean.md", clean)
+    write(d, "copy/quoted.md", "# Notes\n\n```\nstands as a testament to innovation\n```\n\n"
+          "> Experts agree it plays a pivotal role.\n\nWe cut `delve` from the page.\n\n"
+          "It stands as a testament to nothing. <!-- slop-ok -->\n")
+    code, out = sdlc("slop", "copy/sloppy.md")
+    check("off: an explicit run is advisory and names the tells", code == 0
+          and "not-x-but-y" in out and "vague-attribution" in out and "significance" in out
+          and "copy/sloppy.md:3" in out and "advisory" in out, out[-600:])
+    code, out = sdlc("slop", "--strict", "copy/sloppy.md")
+    check("--strict fails a file with strong tells, whatever the charter says", code == 1
+          and "FAIL" in out, out[-300:])
+    code, out = sdlc("slop", "--strict", "copy/clean.md", "copy/quoted.md")
+    check("strict passes plain prose, and skips code, quotes and slop-ok lines", code == 0
+          and "0 finding(s)" in out, out[-400:])
+    code, out = sdlc("slop", "--strict", "-", stdin=sloppy.encode("utf-8"))
+    check("standard input is scanned", code == 1 and "<stdin>:3" in out, out[-300:])
+    code, out = sdlc("slop", "--json", "copy")
+    data = json.loads(out) if code == 0 else {}
+    check("--json reports each file with its verdict", data.get("mode") == "off"
+          and dict((f["file"], f["fails"]) for f in data.get("files", []))
+          == {"copy/clean.md": False, "copy/quoted.md": False, "copy/sloppy.md": True}, out[-300:])
+    code, out = sdlc("slop", "--guide")
+    check("--guide prints the rules", code == 0 and "not-x-but-y" in out and "Not tells" in out, out[-200:])
+    code, out = sdlc("slop")
+    check("no path: the changed and untracked prose files", code == 0 and "copy/sloppy.md" in out,
+          out[-300:])
+
+    code, out = sdlc("config", "--slop-filter", "on")
+    check("config --slop-filter on sets the charter row", code == 0
+          and "| **Slop filter** | `on` |" in read(d, "docs/project/charter.md"), out[-300:])
+    code, out = sdlc("slop", "copy/sloppy.md")
+    check("on: findings are listed and the exit code stays 0", code == 0 and "advisory" not in out
+          and "not-x-but-y" in out, out[-300:])
+    sdlc("config", "--slop-filter", "strict")
+    code, out = sdlc("slop", "copy/sloppy.md")
+    check("strict in the charter fails the file without the flag", code == 1 and "FAIL" in out, out[-300:])
+
+    code, out = run([d, "--upgrade"])
+    rel = ".claude/skills/sdlc-slop-filter/SKILL.md"
+    check("an upgrade installs the skill the charter row calls for", code == 0
+          and os.path.isfile(os.path.join(d, rel)) and "{" * 2 not in read(d, rel)
+          and rel in json.loads(read(d, ".ai-sdlc/manifest.json")).get("files", {}), out[-400:])
+    code, out = run([d, "--upgrade", "--slop-filter", "on"])
+    check("--upgrade --slop-filter rewrites the row", code == 0
+          and "| **Slop filter** | `on` |" in read(d, "docs/project/charter.md"), out[-300:])
+
+    d2 = tempfile.mkdtemp(prefix="sdlc-slop-flag-")
+    code, out = run([d2, "SLQ", "-y", "--slop-filter", "strict"])
+    check("--slop-filter strict at install sets the row and installs the skill", code == 0
+          and "| **Slop filter** | `strict` |" in read(d2, "docs/project/charter.md")
+          and os.path.isfile(os.path.join(d2, rel))
+          and "docs/roles/copywriter.md" in read(d2, rel), out[-300:])
+    code, out = run([d2, "SLR", "-y", "--slop-filter", "loud"])
+    check("a bad --slop-filter value is refused", code != 0 and "off, on, or strict" in out, out[-200:])
+    shutil.rmtree(d, ignore_errors=True)
+    shutil.rmtree(d2, ignore_errors=True)
+
+
 def test_upgrade_to_41():
     """A 4.0.x install from before the Project lens (80c6748) upgrades: the new runtime
     modules, templates and process doc arrive, the records stay, and the new commands run."""
@@ -3254,7 +3501,7 @@ def test_upgrade_to_41():
               all(os.path.isfile(os.path.join(d, "docs", rel)) for rel in ("templates/spec.md", "templates/spec-change.md", "process/15-specs.md")))
         after = read(d, "docs/project/charter.md").splitlines()
         added = [l for l in after if l not in charter_before.splitlines()]
-        new_rows = ("| **Specs** |", "| **Finish guard** |", "| **Allowed in records** |")
+        new_rows = ("| **Specs** |", "| **Slop filter** |", "| **Updating a branch** |", "| **Finish guard** |", "| **Allowed in records** |")
         check("project records keep every line; the charter only gains the new rows",
               all(l in after for l in charter_before.splitlines()) and len(added) == len(new_rows)
               and all(any(l.startswith(r) for l in added) for r in new_rows)
@@ -3582,7 +3829,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_upgrade_to_41, test_demo_project):
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project):
         test()
     print("")
     if failures:

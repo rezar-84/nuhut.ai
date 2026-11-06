@@ -4,6 +4,45 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Git: staying in step with the remote, and conflicts.** The kit had branch, commit
+  and approval rules but said nothing about fetching, how a branch takes in new commits,
+  or what to do with a conflict.
+  - `sdlc.py sync [--fetch] [--strict] [--json]` reports where the checkout stands
+    against its upstream and the default branch, an unfinished merge or rebase, and
+    unpushed work, and names the next command. It never merges, rebases, pulls or
+    pushes. Exit 1 on a `STOP` (diverged or behind its upstream, a conflict, a detached
+    HEAD); `--strict` also fails when the branch is behind the default branch.
+  - `process/05-change-control.md` gains "Staying in step with the remote" (the flow
+    is trunk-based; when to sync; merge or rebase; pushing; what never to run) and
+    "Conflicts" (seven rules, ending in verify again).
+  - Charter row **Updating a branch**: `merge` (the default when blank) or `rebase`.
+  - `/sdlc-build` and `/sdlc-finish` run `sync --fetch` first. `sdlc.py finish` refuses
+    while a merge or rebase is unfinished and notes a branch behind the default branch.
+
+- **`--uninstall` and `--repair`.** The installer could add and upgrade but not remove.
+  - `install.sh <project> --uninstall` removes the files the manifest lists that still
+    match their checksum, the hook entries the kit registered in Claude Code, Gemini CLI
+    and Cursor settings, its line in git hooks, and sections 1-8 of `AGENTS.md`. Edited
+    kit files, section 9, `docs/project/` and the evidence ledger stay. It prints the
+    plan and asks; `-y` skips the question and `--dry-run` only prints the plan. Shared
+    files are backed up before they change.
+  - `install.sh <project> --repair` is an upgrade that restores edited or deleted kit
+    files to the kit's version after backing up the current copies. A stopped upgrade
+    now names it.
+
+- **Slop filter: an opt-in writing standard for copy that does not read as generated.**
+  Built on Wikipedia's *Signs of AI writing*, with ideas from the `humanizer` and
+  `stop-slop` skills.
+  - `sdlc.py slop [paths]` lists the phrasings by file and line with a fix for each: strong
+    tells count once, moderate ones in clusters, weak ones only when dense. It makes no
+    model call and skips code, link targets and quoted lines.
+  - The `sdlc-slop-filter` skill rewrites what the scanner and a read-through find, without
+    adding or losing a claim. `/sdlc-slop [strict] [path]` runs both.
+  - The charter's **Slop filter** row is `off`, `on` or `strict`. Strict covers all prose
+    the agent writes and makes `slop` exit 1 on a failing file.
+  - Set it with `--slop-filter` at install, `sdlc.py config --slop-filter` afterwards, or
+    `--upgrade --slop-filter` to add the skill to an existing project. `slop --strict`
+    applies strict rules for one run. Guide: `docs/slop-filter.md`.
 - **The dashboard's Needs you list stays short.** It shows six rows, then "Show 10 more" or
   "Show all", and scrolls inside its own box once expanded. Three or more doctor failures
   of one rule fold into a single row that opens that rule. A filter switches between

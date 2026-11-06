@@ -25,6 +25,67 @@ the branch rules above. See "Managed platforms" below.
 
 ---
 
+## Staying in step with the remote
+
+The flow is trunk-based. Every item branch starts from the default branch, lives for one
+item, and goes back through the route the charter allows: a pull request, or a direct
+merge where it says so. An epic branch is the one long-lived exception (`11-epics.md`).
+There is no `develop` branch and no release branch unless the charter's Environments
+table names one.
+
+`python3 .ai-sdlc/bin/sdlc.py sync` reports where the checkout stands and names the next
+command. It changes nothing. `--fetch` asks the remote first.
+
+| When | Do |
+| --- | --- |
+| Before starting an item | `sdlc.py sync --fetch`. Start the branch from the default branch as the remote has it, not from a stale local copy. |
+| Before finishing an item | `sdlc.py sync --fetch`. If the branch is behind the default branch, bring those commits in and run `sdlc.py verify` again: a result from before the update describes code that no longer exists. |
+| It prints `STOP` | Deal with that first. Work built on a diverged branch or an unfinished merge is the work most likely to be lost. |
+
+**Updating a branch.** The charter's **Updating a branch** row says how; blank means
+`merge`.
+
+- `merge`: `git merge <remote>/<default branch>` into the item branch. Nothing is
+  rewritten, so it is safe when several agents or a managed platform share the repository.
+- `rebase`: only for a branch nobody else has built on. Push it afterwards with
+  `git push --force-with-lease`, never plain `--force`. Never rebase the default branch,
+  an epic branch, or a branch a managed platform syncs.
+- The default branch itself moves forward only: `git merge --ff-only`. If that fails, the
+  local default branch has commits the remote lacks. Stop and ask; do not merge or reset.
+- Fetch, then merge or rebase by name. A bare `git pull` picks a strategy for you.
+
+**Pushing.** Push an item branch once it has commits, so the work is not on one machine
+only. Push to the default branch only where the charter's **Direct commits to it** row
+allows it.
+
+**Never, to get past a problem:** `git push --force` to a branch someone else has,
+`git reset --hard` or `git checkout -- .` over work you did not write, `git clean` on
+files you did not create, `--no-verify`, or deleting a branch that holds unmerged commits.
+Each one makes the problem disappear by destroying the evidence of it.
+
+### Conflicts
+
+A conflict means two people changed the same thing. Resolving it is a change of its own,
+with the same duty to understand both sides.
+
+1. **Read both sides and their commits** (`git log --merge -p <file>`). Know what each
+   change was for before touching a marker.
+2. **Keep both intents.** The usual right answer contains both changes. Never take one
+   side whole (`-X ours`, `-X theirs`, `git checkout --ours`) because it is quicker.
+3. **Regenerate what is generated.** For a lockfile or a generated file, take either side
+   and run the tool that produces it. Do not edit the markers by hand.
+4. **Records are append-only.** In the backlog and worklog keep both rows and both
+   entries, in date order.
+5. **Stop on a single-writer file.** A conflict in the charter, a migration, or a file the
+   charter lists as single-writer is a Tier 1 stop-and-ask: back out and report it.
+6. **Stop when you cannot tell.** If the other side's intent is not clear from the code
+   and the records, run `git merge --abort` (or `git rebase --abort`) and ask. A wrong
+   resolution compiles, passes review, and silently reverts someone's work.
+7. **Verify again.** After any resolution run `sdlc.py verify`, and say in the worklog
+   entry which files conflicted and how each was resolved.
+
+---
+
 ## Commits
 
 - Small, scoped, and individually coherent. A reviewer should be able to read one commit

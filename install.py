@@ -40,7 +40,7 @@ RETIRED_STATE = "dashboard-state.js"
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
-                 "finish.py")
+                 "finish.py", "slop.py", "sync.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -174,6 +174,8 @@ EN = {
     "q.devmethod": "Development method",
     "q.specs": "Keep living specs of what the system does?",
     "h.specs": "Living specs describe current behaviour as requirements with WHEN/THEN scenarios (docs/project/specs/). Tier 1-2 items that change behaviour then carry a spec change, applied when the item closes. Off by default; turn on later with sdlc.py config --specs on.",
+    "q.slop": "Slop filter -- hold prose to a no-AI-tells standard?",
+    "h.slop": "Checks copy for the phrasings that make text read as machine-written (stock words, 'not X but Y', inflated significance, chatbot leftovers), after Wikipedia's Signs of AI writing. On installs the sdlc-slop-filter skill for public and user-facing copy and reports findings. Strict applies it to all prose the agent writes and makes sdlc.py slop exit 1 on a failing file. Change later with sdlc.py config --slop-filter off|on|strict.",
     "h.devmethod": "Item runs one work item at a time and stops at each one's approvals. Epic plans several items together, gets one approval for the plan, and stops at the checkpoints it chooses. Checks, reviews and tier approvals never change.",
     "q.decision": "Decision style -- how much the agent decides for you",
     "h.decision": "How much the agent decides for you. Ask puts every material choice to you with options and trade-offs. Guide recommends in plain language and asks. Autopilot takes the recommended option and logs it for review. Tier 1 surfaces and gated commands always stop for a named human, in every style.",
@@ -217,6 +219,7 @@ EN = {
     "l.acquisition": "Acquisition profile",
     "l.devmethod": "Development method",
     "l.specs": "Living specs",
+    "l.slop": "Slop filter",
     "l.decision": "Decision style",
     "l.approval": "Human approval for",
     "l.forbidden": "Forbidden here",
@@ -383,6 +386,7 @@ EN = {
     "x.effort": "how much investigation and review beyond the required minimum",
     "x.devmethod": "Epic suits a feature made of several related changes",
     "x.specs": "Worth it when behaviour outlives the people who wrote it, or when you used Spec Kit or OpenSpec",
+    "x.slop": "Worth it when the project publishes copy; Strict when nothing should ship reading like a chatbot wrote it",
     "x.decision": "for choices with trade-offs; risky changes always stop for you",
     "x.tier": "every change is sorted into a risk tier; this sets how much record each needs",
     "x.acquisition": "only matters for scrapers and crawlers",
@@ -418,7 +422,7 @@ EN = {
     "h.approval": "Actions the agent must stop and get a named human's approval for, whatever the tier. Mirrored into AGENTS.md under Project overrides.",
     "h.a11y": "The accessibility standard the accessibility reviewer holds every interface to. WCAG 2.2 AA is the common legal and practical baseline.",
     "h.docsdir": "The folder the process documents, roles, templates and project records go into. Use another name when docs/ already holds something else.",
-    "h.commands": "Claude Code slash commands for each loop step: /sdlc-plan, /sdlc-build, /sdlc-verify, /sdlc-review, /sdlc-finish, /sdlc-log and /sdlc-doctor. Other tools get the same steps as skills when you pick them above.",
+    "h.commands": "Claude Code slash commands for each loop step: /sdlc-plan, /sdlc-build, /sdlc-verify, /sdlc-review, /sdlc-finish, /sdlc-log, /sdlc-doctor and /sdlc-slop. Other tools get the same steps as skills when you pick them above.",
     "h.skills_pick": "A skill is a short instruction file an agent loads only when its situation arises, for example a privacy review when personal data is touched. Ticked skills match your answers; tick or untick any. They install to .claude/skills/ and, for other tools, .agents/skills/.",
     "h.git_tools": "The .ai-sdlc/ folder holds the kit's runtime (sdlc.py), its manifest and the evidence ledger. Commit it so everyone runs the same checks; ignore it only for a personal experiment.",
 
@@ -591,6 +595,7 @@ How the agent works  (all project defaults, changeable later in the charter)
   --tier-rules <name>    standard | strict       -- how heavy each risk tier is
   --independent-review   none | tier1 | tier1-2  -- when a second model family is required
   --specs on|off         living specs of what the system does (default: off)
+  --slop-filter <mode>   off | on | strict       -- hold prose to a no-AI-tells standard
 
 Which AI tools read it
   --harness <list>       claude, cursor, copilot, gemini, windsurf, cline, roo, amp,
@@ -613,8 +618,8 @@ Running it
   -y, --yes              no questions, every default (implied without a terminal)
   --dry-run              list what would be written, write nothing
   --upgrade [--adopt]    refresh managed files; --adopt once for pre-3.3 installs
-  --plain                numbered, typed prompts instead of arrow-key menus
-  --lang <code>          language for these prompts (default: en)
+  --repair | --uninstall restore edited kit files | remove the kit, keep your records
+  --plain, --lang <code> typed prompts instead of menus; prompt language (default: en)
 
 More
   --help full            every option in detail
@@ -704,6 +709,12 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --specs on|off
                      living specs of what the system does (docs/project/specs/), with a
                      spec change per Tier 1-2 behaviour change. Default: off.
+  --slop-filter <mode>
+                     off (default), on, or strict. On installs the sdlc-slop-filter skill
+                     for public and user-facing copy and `sdlc.py slop` reports findings.
+                     Strict applies it to all prose the agent writes, and `sdlc.py slop`
+                     exits 1 on a failing file. With --upgrade it sets the charter row
+                     and adds the skill to an existing install.
   --dev-method <name>
                      project default: item (default) or epic. Epic plans several
                      work items together and stops at chosen checkpoints; every
@@ -745,6 +756,16 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --upgrade          refresh manifest-owned portable docs and installed skills. Stops
                      on local edits, backs up changes, removes obsolete managed files,
                      and never touches project records or AGENTS.md.
+  --repair           an upgrade that does not stop on local edits: every kit-owned
+                     file that was edited or deleted is restored to the kit's
+                     version, after the current copy is backed up under
+                     .ai-sdlc/backups/. A skill or checklist whose whole folder was
+                     removed stays removed.
+  --uninstall        remove what the manifest says the kit owns and nobody edited,
+                     the hook entries it registered, and sections 1-8 of AGENTS.md.
+                     Edited kit files, section 9 of AGENTS.md, the charter, backlog,
+                     worklog and the evidence ledger are kept. Shows the plan and
+                     asks first; -y skips the question, --dry-run only shows the plan.
 """
 
 
@@ -773,10 +794,13 @@ class Options(object):
         self.acquisition_profile = "standard"
         self.deploy = None          # None: not given; []: explicitly none
         self.adopt = False
+        self.repair = False
+        self.uninstall = False
         self.effort_given = False
         self.dev_method = "item"
         self.dev_method_given = False
         self.specs = ""
+        self.slop_filter = ""
         self.decision_style = "guide"
         self.decision_given = False
         self.acquisition_given = False
@@ -900,6 +924,11 @@ def parse_args(argv):
             o.upgrade = True
         elif arg == "--adopt":
             o.adopt = True
+        elif arg == "--repair":
+            o.repair = True
+            o.upgrade = True
+        elif arg == "--uninstall":
+            o.uninstall = True
         elif arg in ("-y", "--yes", "--non-interactive"):
             o.assume_yes = True
         elif arg == "--no-skills":
@@ -936,6 +965,11 @@ def parse_args(argv):
             if i + 1 >= len(argv) or argv[i + 1] not in ("on", "off"):
                 bad_value("--specs requires on or off")
             o.specs = argv[i + 1]
+            i += 1
+        elif arg == "--slop-filter":
+            if i + 1 >= len(argv) or argv[i + 1] not in ("off", "on", "strict"):
+                bad_value("--slop-filter requires off, on, or strict")
+            o.slop_filter = argv[i + 1]
             i += 1
         elif arg == "--dev-method":
             if i + 1 >= len(argv) or argv[i + 1] not in ("item", "epic"):
@@ -1149,6 +1183,9 @@ SKILL_RULES = (
     ("sdlc-adr", "always", "captures durable decisions instead of losing them", ""),
     ("sdlc-spec", "opt_in", "writes living specs and per-item spec changes (charter Specs: on)",
      "living specs are opt-in; pick it here, or later with --upgrade, when the charter's Specs row is on"),
+    ("sdlc-slop-filter", "opt_in",
+     "holds copy to a no-AI-tells standard (charter Slop filter: on or strict)",
+     "the slop filter is opt-in; pick it here, or later with --upgrade --slop-filter on"),
     ("sdlc-doctor", "always",
      "keeps blank, stale, and drifted project documents from being read as true", ""),
     ("sdlc-accessibility-audit", "ui", "there is an interface to audit",
@@ -1310,6 +1347,13 @@ class Wizard(object):
             return flag == "on"
         return bool(self.a.get("specs"))
 
+    def slop_mode(self):
+        """off, on or strict: the --slop-filter flag, else the wizard's answer."""
+        flag = getattr(self.o, "slop_filter", "")
+        if flag:
+            return flag
+        return SLOP_KEYS.get(self.a.get("slop"), "Off").lower()
+
     def skills(self, rules_only=False):
         """(name, on, why) for every skill this kit ships, judged by the answers.
         rules_only ignores a pick made at the skills question."""
@@ -1320,7 +1364,8 @@ class Wizard(object):
             if rule == "always":
                 on = True
             elif rule == "opt_in":
-                on = name == "sdlc-spec" and self.specs_on()
+                on = (name == "sdlc-spec" and self.specs_on()) or \
+                     (name == "sdlc-slop-filter" and self.slop_mode() != "off")
             elif rule == "pii_or_deploy":
                 on = bool(self.fact("pii") or self.fact("deploy"))
             elif rule == "multilingual":
@@ -1869,6 +1914,8 @@ class Wizard(object):
             return DEV_METHOD_KEYS.get(value, "Item")
         if step.sid == "decision":
             return DECISION_KEYS.get(value, "Guide")
+        if step.sid == "slop":
+            return SLOP_KEYS.get(value, "Off")
         if step.kind == "choice":
             if step.sid in ("access_model", "mfa_policy", "platform"):   # the value is the wording
                 return str(value) if value else "(blank)"
@@ -2021,6 +2068,7 @@ EFFORT_KEYS = {"l": "Lean", "n": "Normal", "x": "Beast"}
 ACQUISITION_KEYS = {"s": "Standard", "a": "Advanced"}
 DEV_METHOD_KEYS = {"i": "Item", "e": "Epic"}
 DECISION_KEYS = {"a": "Ask", "g": "Guide", "p": "Autopilot"}
+SLOP_KEYS = {"o": "Off", "n": "On", "s": "Strict"}
 
 
 # Presets set four charter rows together. An explicit flag always wins over the preset,
@@ -2065,6 +2113,11 @@ EFFORT_OPTIONS = (
 DEV_METHOD_OPTIONS = (
     ("i", "Item", "one work item at a time, approvals at each", True),
     ("e", "Epic", "plan several items together, one plan approval, chosen checkpoints", False),
+)
+SLOP_OPTIONS = (
+    ("o", "Off", "no writing filter", True),
+    ("n", "On", "public and user-facing copy is checked; findings are advice", False),
+    ("s", "Strict", "all prose the agent writes; `sdlc.py slop` fails a file with tells", False),
 )
 DECISION_OPTIONS = (
     ("a", "Ask", "every material choice put to you, with options and trade-offs", False),
@@ -2695,6 +2748,9 @@ def build_steps(w):
                  preset_field(w, "dev_method")], label="l.devmethod"),
         Step("specs", "sec.process", "yesno", "q.specs", help="h.specs", label="l.specs",
              default=lambda w: getattr(w.o, "specs", "") == "on", when=lambda w: not getattr(w.o, "specs", "")),
+        Step("slop", "sec.process", "choice", "q.slop", help="h.slop", label="l.slop",
+             options=SLOP_OPTIONS, default="o",
+             when=lambda w: not getattr(w.o, "slop_filter", "")),
         Step("decision", "sec.process", "choice", "q.decision", help="h.decision",
              options=DECISION_OPTIONS, default=lambda w: {"ask": "a", "guide": "g", "autopilot": "p"}[
                  preset_field(w, "decision_style")], label="l.decision"),
@@ -4125,6 +4181,8 @@ class Installer(object):
             text = fill_row(text, "**Development method**", selected_dev_method(self.w))
         if getattr(self.o, "specs", ""):
             text = fill_row(text, "**Specs**", "`%s`" % self.o.specs)
+        if getattr(self.o, "slop_filter", ""):
+            text = fill_row(text, "**Slop filter**", "`%s`" % self.o.slop_filter)
         if self.o.decision_given:
             text = fill_row(text, "**Decision style**", selected_decision(self.w))
         if self.o.tier_rules_given:
@@ -4177,6 +4235,7 @@ class Installer(object):
         text = fill_row(text, "**Acquisition profile**", selected_acquisition(w))
         text = fill_row(text, "**Development method**", selected_dev_method(w))
         text = fill_row(text, "**Specs**", "`on`" if w.specs_on() else "`off`")
+        text = fill_row(text, "**Slop filter**", "`%s`" % w.slop_mode())
         if self.o.tier_rules_given or a.get("tier"):
             text = fill_row(text, "**Tier rules**", selected_tier_rules(w))
         if self.o.independent_review_given:
@@ -4379,6 +4438,49 @@ def find_docs(target, preferred):
     return ""
 
 
+SLOP_ROW = re.compile(r"^\| \*\*Slop filter\*\* \|.*$", re.M)
+
+
+def slop_filter_upgrade(target, charter, o, ctx):
+    """The slop filter on an existing install. The charter's row decides; an explicit
+    --slop-filter rewrites that one row first, because the person asked for exactly that.
+    Returns the skill's files to manage when the filter is on or strict."""
+    text = charter.read_text(encoding="utf-8", errors="replace") if charter.exists() else ""
+    flag = getattr(o, "slop_filter", "")
+    if flag and text and not o.dry_run:
+        row = "| **Slop filter** | `%s` |" % flag
+        if SLOP_ROW.search(text):
+            new = SLOP_ROW.sub(lambda m: row, text, count=1)
+        else:
+            anchor = re.search(r"^\| \*\*(Specs|Development method|Default effort mode)\*\* \|.*$",
+                               text, re.M)
+            new = text[:anchor.end()] + "\n" + row + text[anchor.end():] if anchor else text
+        if new != text:
+            charter.write_text(new, encoding="utf-8")
+            print("  update         %s (Slop filter: %s)" % (charter.relative_to(target), flag))
+        elif not SLOP_ROW.search(new):
+            print("  warning        no Risk defaults table in %s; add a `| **Slop filter** | "
+                  "`%s` |` row by hand" % (charter.relative_to(target), flag))
+        text = new
+    found = re.search(r"^\| \*\*Slop filter\*\* \| `(off|on|strict)` \|", text, re.M)
+    mode = flag or (found.group(1) if found else "off")
+    if mode == "off":
+        return {}
+    base = SRC / "optional" / "skills" / "sdlc-slop-filter"
+    roots = [Path(".claude") / "skills"]
+    if (target / ".agents" / "skills").is_dir():
+        roots.append(Path(".agents") / "skills")
+    if not (target / ".claude").is_dir() and len(roots) > 1:
+        roots = roots[1:]
+    planned = {}
+    for root in roots:
+        for src in sorted(base.rglob("*")):
+            if src.is_file():
+                planned[(root / "sdlc-slop-filter" / src.relative_to(base)).as_posix()] = \
+                    substitute(src.read_text(encoding="utf-8"), ctx)
+    return planned
+
+
 def upgrade(target, o):
     if o.preset or o.tier_rules_given:
         print("note: --preset and --tier-rules apply to new installs. An upgrade keeps the "
@@ -4427,6 +4529,7 @@ def upgrade(target, o):
     previous_files = previous.get("files", {}) if previous else {}
     o.profile = installed_profile(target)
     planned = managed_source_texts(target, docs, inst.ctx, o.profile)
+    planned.update(slop_filter_upgrade(target, charter, o, inst.ctx))
     if o.profile == "compact":
         print("Compact profile: the numbered process/ documents stay uninstalled.")
     try:
@@ -4481,9 +4584,10 @@ def upgrade(target, o):
         legacy = None if parts else agents_legacy_split(text)
         if parts:
             recorded = (previous or {}).get("regions", {}).get(AGENTS_REL)
-            if recorded and sha256_text(parts[1]) != recorded:
+            edited = bool(recorded) and sha256_text(parts[1]) != recorded
+            if edited:
                 modified.append("%s (the kit-managed sections 1-8)" % AGENTS_REL)
-            else:
+            if not edited or o.repair:
                 regions[AGENTS_REL] = sha256_text(new_region)
                 if parts[0] + new_region + parts[2] != text:
                     extra[AGENTS_REL] = parts[0] + new_region + parts[2]
@@ -4541,13 +4645,21 @@ def upgrade(target, o):
                      "a filename containing a quote. Re-run with --upgrade --adopt "
                      "to replace them (backed up first)." % len(stale_hooks))
 
-    if modified:
+    if modified and o.repair:
+        print("Repair: %d kit-owned file%s edited or removed here will be restored to the "
+              "kit's version:" % (len(modified), " that was" if len(modified) == 1 else "s that were"))
+        for rel in modified:
+            print("  restore        %s" % rel)
+        print("")
+    elif modified:
         sys.stderr.write("error: upgrade stopped; kit-owned files were modified or removed:\n")
         for rel in modified:
             sys.stderr.write("       %s\n" % rel)
         sys.stderr.write("       Move project rules to section 9 of AGENTS.md or the project "
                          "docs, restore these files from the kit, or merge the new kit "
                          "manually.\n")
+        sys.stderr.write("       To restore them all to the kit's version (yours are backed "
+                         "up first): --upgrade --repair\n")
         return 1
 
     obsolete = sorted(set(previous_files) - set(planned))
@@ -4657,6 +4769,248 @@ def upgrade(target, o):
         print("What each is for: install.sh --list skills. To add the ones that fit, run the")
         print("guided setup again; it only adds files that are missing:")
         print("  %s/install.sh %s --full" % (SRC, target))
+    return 0
+
+
+# ---------------------------------------------------------------- uninstall
+
+def kit_hook_command(command):
+    """True for a hook command this kit registered, in any harness's settings file."""
+    command = str(command or "")
+    if "/.claude/hooks/adapter.sh " in command or (RUNTIME_REL + " guard ") in command:
+        return True
+    return any(command.endswith(".claude/hooks/" + spec[0]) for spec in Installer.HOOK_SPECS)
+
+
+def strip_kit_hooks(data):
+    """Drop the entries this kit registered from a parsed settings file, leaving every
+    other hook as it was. Returns how many were dropped."""
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return 0
+    removed = 0
+    for event in list(hooks):
+        entries = hooks[event]
+        if not isinstance(entries, list):
+            continue
+        kept = []
+        for entry in entries:
+            if isinstance(entry, dict) and isinstance(entry.get("hooks"), list):
+                specs = [s for s in entry["hooks"]
+                         if not (isinstance(s, dict) and kit_hook_command(s.get("command")))]
+                dropped = len(entry["hooks"]) - len(specs)
+                removed += dropped
+                if dropped and not specs:
+                    continue
+                if dropped:
+                    entry = dict(entry, hooks=specs)
+            elif isinstance(entry, dict) and kit_hook_command(entry.get("command")):
+                removed += 1            # Cursor: the entry is the command
+                continue
+            kept.append(entry)
+        if kept:
+            hooks[event] = kept
+        elif entries:
+            del hooks[event]
+    if removed and not hooks:
+        del data["hooks"]
+    return removed
+
+
+HOOK_SETTINGS = (".claude/settings.json", ".gemini/settings.json", ".cursor/hooks.json")
+
+
+def git_hook_dirs(target):
+    """Where install_git_hooks may have chained a call: husky, core.hooksPath, .git/hooks."""
+    dirs = [target / ".husky", target / ".git" / "hooks"]
+    try:
+        configured = subprocess.run(["git", "config", "--get", "core.hooksPath"], cwd=str(target),
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    universal_newlines=True).stdout.strip()
+    except OSError:
+        configured = ""
+    if configured:
+        path = Path(configured) if os.path.isabs(configured) else target / configured
+        try:
+            dirs.append(ensure_inside(target, path))
+        except RuntimeError:
+            pass
+    return [d for d in dirs if d.is_dir()]
+
+
+def uninstall(target, o):
+    """Remove what the manifest proves is the kit's and unchanged. Anything edited, and
+    every project record, stays: an uninstall must not be the way a project loses work."""
+    manifest = load_manifest(target)
+    if not manifest:
+        sys.stderr.write("error: no %s in %s, so nothing here can be shown to be the kit's.\n"
+                         % (MANIFEST_REL.as_posix(), target))
+        sys.stderr.write("       An install from before 3.3 gets a manifest from "
+                         "--upgrade --adopt; then run --uninstall again.\n")
+        return 1
+    docs = manifest.get("docs_dir") if isinstance(manifest.get("docs_dir"), str) else None
+    docs = docs or find_docs(target, o.docs_dir) or o.docs_dir
+    remove, edited, gone = [], [], []
+    try:
+        for rel, recorded in sorted(manifest["files"].items()):
+            if not is_managed_rel(rel, docs):
+                raise RuntimeError("manifest contains an unmanaged path: %s" % rel)
+            path = ensure_inside(target, target / rel)
+            if not path.is_file():
+                gone.append(rel)
+            elif sha256_file(path) == recorded:
+                remove.append(rel)
+            else:
+                edited.append(rel)
+    except RuntimeError as exc:
+        sys.stderr.write("error: %s\n" % exc)
+        return 1
+
+    # Files the kit only added to: each gets its addition taken back out, nothing else.
+    rewrites, deletes, notes = {}, [], []
+    for rel in HOOK_SETTINGS:
+        path = target / rel
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            notes.append("%s is not valid JSON, so its hook entries were not checked. Remove "
+                         "any that call .claude/hooks/ or %s by hand." % (rel, RUNTIME_REL))
+            continue
+        count = strip_kit_hooks(data)
+        if not count:
+            continue
+        if data in ({}, {"version": 1}):
+            deletes.append((rel, "%d kit hook%s, nothing else in it" % (count, "" if count == 1 else "s")))
+        else:
+            rewrites[rel] = (json.dumps(data, indent=2, sort_keys=True) + "\n",
+                             "%d kit hook%s removed" % (count, "" if count == 1 else "s"))
+    for hooks_dir in git_hook_dirs(target):
+        for name, call in Installer.GIT_HOOK_CALLS:
+            path = hooks_dir / name
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            lines = text.splitlines()
+            rest = [line for line in lines if line.strip() != call]
+            if len(rest) == len(lines):
+                continue
+            rel = path.relative_to(target).as_posix()
+            if all(not line.strip() or line.startswith("#!") for line in rest):
+                deletes.append((rel, "it only called the kit hook"))
+            else:
+                rewrites[rel] = ("\n".join(rest) + "\n", "call to the kit hook removed")
+    agents = target / AGENTS_REL
+    if agents.is_file():
+        text = agents.read_text(encoding="utf-8")
+        parts = agents_split(text)
+        recorded = (manifest.get("regions") or {}).get(AGENTS_REL)
+        if parts and recorded and sha256_text(parts[1]) == recorded:
+            rewrites[AGENTS_REL] = (parts[0].rstrip("\n") + "\n\n" + parts[2].lstrip("\n"),
+                                    "kit sections 1-8 removed, section 9 kept")
+        elif parts:
+            notes.append("AGENTS.md sections 1-8 were edited here (or predate the recorded "
+                         "checksum), so the file was left whole. It still describes the kit's "
+                         "process; delete those sections by hand when you no longer want them.")
+    own = [rel for rel in (MANIFEST_REL.as_posix(), PROFILE_REL.as_posix())
+           if (target / rel).is_file()]
+    # The hook lists are the project's once it adds a line; still as seeded, they are ours.
+    for name, seed in Installer.HOOK_LISTS:
+        path = target / ".ai-sdlc" / name
+        if path.is_file() and path.read_text(encoding="utf-8", errors="replace") == seed:
+            own.append(".ai-sdlc/" + name)
+
+    print("Uninstalling Nuhut kit v%s from %s" % (manifest.get("kit_version", "?"), target))
+    verb = "would " if o.dry_run else ""
+    for rel in remove + own:
+        print("  %-14s %s" % (verb + "remove", rel))
+    for rel, why in deletes:
+        print("  %-14s %s (%s)" % (verb + "remove", rel, why))
+    for rel in sorted(rewrites):
+        print("  %-14s %s (%s)" % (verb + "edit", rel, rewrites[rel][1]))
+    for rel in edited:
+        print("  keep           %s (edited here)" % rel)
+    total = len(remove) + len(own) + len(deletes)
+    print("")
+    print("%d file%s to remove, %d to edit, %d edited kit file%s kept."
+          % (total, "" if total == 1 else "s", len(rewrites), len(edited),
+             "" if len(edited) == 1 else "s"))
+    if o.dry_run:
+        print("Dry run: nothing was changed.")
+        return 0
+    if not o.assume_yes:
+        if not TERM.interactive_in:
+            sys.stderr.write("error: not confirmed. Re-run with -y to uninstall, or with "
+                             "--dry-run to see this plan only.\n")
+            return 1
+        try:
+            answer = input("Remove these files? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("Nothing was changed.")
+            return 0
+
+    # A removed file equals the kit's copy, so reinstalling restores it. A file the kit
+    # shared with the project does not, so those are copied aside before they change.
+    shared = sorted(rewrites) + [rel for rel, _ in deletes]
+    if shared:
+        stem = "uninstall-v%s" % manifest.get("kit_version", "legacy")
+        backup_dir = target / ".ai-sdlc" / "backups" / stem
+        suffix = 2
+        while backup_dir.exists():
+            backup_dir = target / ".ai-sdlc" / "backups" / ("%s-%d" % (stem, suffix))
+            suffix += 1
+        for rel in shared:
+            dest = backup_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(target / rel), str(dest))
+        print("  backup         %s (%d files)" % (backup_dir.relative_to(target).as_posix(),
+                                                  len(shared)))
+    try:
+        for rel in sorted(rewrites):
+            atomic_write_text(target / rel, rewrites[rel][0])
+        for rel in remove + own + [rel for rel, _ in deletes]:
+            path = target / rel
+            if path.is_file():
+                path.unlink()
+            parent = path.parent
+            while parent != target and target in parent.parents:
+                try:
+                    parent.rmdir()          # only ever an empty directory
+                except OSError:
+                    break
+                parent = parent.parent
+    except (IOError, OSError) as exc:
+        sys.stderr.write("error: uninstall stopped part-way: %s\n" % exc)
+        sys.stderr.write("       Re-run --uninstall to finish; it only removes what is left.\n")
+        return 1
+
+    print("")
+    print("Done: %d removed, %d edited." % (total, len(rewrites)))
+    print("")
+    print("Left in place, because they are yours:")
+    records = [name for name in ("project", "specs", "epics", "adr")
+               if (target / docs / name).is_dir()]
+    if records:
+        print("  %s/%s  (charter, backlog, worklog and other records)"
+              % (docs, ", ".join(records)))
+    if (target / AGENTS_REL).is_file():
+        print("  AGENTS.md  (section 9, or the whole file if it was edited)")
+    pointers = [rel for rel, _ in HARNESS_POINTERS if (target / rel).is_file()
+                and "AGENTS.md" in (target / rel).read_text(encoding="utf-8", errors="replace")]
+    if pointers:
+        print("  %s  (each still points at AGENTS.md; remove that line if you delete it)"
+              % ", ".join(pointers))
+    if (target / ".ai-sdlc").is_dir():
+        print("  .ai-sdlc/  (%s)" % ", ".join(sorted(p.name for p in (target / ".ai-sdlc").iterdir())))
+    for note in notes:
+        print("")
+        print("note: %s" % note)
+    if gone:
+        print("")
+        print("note: %d kit file%s already gone." % (len(gone), " was" if len(gone) == 1 else "s were"))
     return 0
 
 
@@ -4876,12 +5230,15 @@ def main(argv):
         if target is None:
             return 1
 
-    interactive = (not o.assume_yes and not o.upgrade and TERM.interactive_in)
+    interactive = (not o.assume_yes and not o.upgrade and not o.uninstall
+                   and TERM.interactive_in)
     if target is None and not interactive:
         usage()
     if interactive:
         TERM.enable_rich(o.plain)
 
+    if o.uninstall:
+        return uninstall(target, o)
     if o.upgrade:
         return upgrade(target, o)
 

@@ -2653,6 +2653,10 @@ def configure_kit(project, changes):
         extra_profile["decision_style"] = val.lower()
         applied.append("Decision style=%s" % val)
 
+    if changes.get("slop_filter") in ("off", "on", "strict"):
+        text = _set_charter_row(text, "Slop filter", "`%s`" % changes["slop_filter"])
+        applied.append("Slop filter=%s" % changes["slop_filter"])
+
     if changes.get("specs") in ("on", "off"):
         text = _set_charter_row(text, "Specs", "`%s`" % changes["specs"])
         if changes["specs"] == "on" and not os.path.isdir(project.path(os.path.join(project.docs, "project", "specs", "changes"))):
@@ -2989,11 +2993,15 @@ Work items and agents
   release <ID>        free it (--remove-worktree to clean up)                         release ACME-12
   claims / parallel   who holds what / which Ready items can run side by side        parallel
   trailers <ID>       the Work-Item, Agent and Model commit trailers                   trailers ACME-12
+  sync                behind the remote or the default branch? conflicts? next command  sync --fetch
   review <ID>         one role's review of the diff, by another model family          review ACME-12 --role security --by codex
   log                 draft worklog lines from commits and verify runs                log --since main --write
 
 Specs (when the charter's Specs row is on)
   spec                list, show, validate, apply <ID> [--write]                       spec apply ACME-12 --write
+
+Writing (the charter's Slop filter row: off, on, strict)
+  slop [paths]        phrasings that read as machine-written, by line, with a fix      slop --strict docs/
 
 Setup
   config              see or change the charter's constraints                          config --specs on
@@ -3024,11 +3032,16 @@ EXAMPLES = {
                "review ACME-12 --role architect --by gemini --stage design"],
     "bite": ["bite npm test", "bite --restore"],
     "config": ["config                   # show the constraints", "config --effort Lean --independent-review tier1",
-               "config --specs on", "config --set-check unit='npm test'"],
+               "config --specs on", "config --slop-filter strict", "config --set-check unit='npm test'"],
     "fix": ["fix all", "fix wire-pointer", "fix rotate-worklog          # preview",
             "fix normalise-status --apply", "fix link-evidence --apply"],
     "lens": ["lens", "lens --area build", "lens --user --json"],
     "audit": ["audit", "audit --strict           # exit 1 on a critical or high vulnerability"],
+    "sync": ["sync                     # as of the last fetch", "sync --fetch             # fetch first",
+             "sync --fetch --strict    # exit 1 when behind the default branch too (CI, before finish)"],
+    "slop": ["slop                     # prose files changed against HEAD",
+             "slop README.md docs/", "slop --strict content/   # exit 1 when a file fails (CI)",
+             "slop --guide             # the rules", "slop - < draft.md"],
     "spec": ["spec list", "spec validate --strict", "spec apply ACME-12          # dry run",
              "spec apply ACME-12 --write"],
     "claim": ["claim ACME-12", "claim ACME-12 --no-worktree --mark",
@@ -3163,6 +3176,9 @@ def main(argv):
     cfg.add_argument("--set-check", action="append", default=[],
                      help="set a check command: STAGE=COMMAND or STAGE=absent")
     cfg.add_argument("--specs", choices=("on", "off"), help="turn living specs on or off (docs/project/specs/)")
+    cfg.add_argument("--slop-filter", choices=("off", "on", "strict"),
+                     help="set the Slop filter: off, on (public copy, advisory) or strict "
+                          "(all prose; `slop` exits 1 on a failing file)")
     cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
     fx = sub.add_parser("fix", help="run safe mechanical repairs on kit setup")
     fx.add_argument("action", nargs="?", default="all",
@@ -3181,6 +3197,21 @@ def main(argv):
     ln.add_argument("--user", action="store_true",
                     help="also list user-level skills, commands, subagents, MCP servers and plugins (~/.claude)")
     ln.add_argument("--json", action="store_true", help="print the lens as JSON")
+    sl = sub.add_parser("slop", help="the slop filter: list the phrasings that make prose read "
+                        "as machine-written, by line, with a fix for each")
+    sl.add_argument("paths", nargs="*", help="files or directories (default: prose files "
+                    "changed against HEAD or untracked); - reads standard input")
+    sl.add_argument("--strict", action="store_true",
+                    help="exit 1 when a file fails, whatever the charter's Slop filter row says")
+    sl.add_argument("--guide", action="store_true", help="print the rules and what each one wants")
+    sl.add_argument("--json", action="store_true")
+    sy = sub.add_parser("sync", help="where this checkout stands against its remote and the "
+                        "default branch; reports and names the next command, changes nothing")
+    sy.add_argument("--fetch", action="store_true",
+                    help="run `git fetch --prune` first, so the figures are current")
+    sy.add_argument("--strict", action="store_true",
+                    help="also exit 1 when the branch is behind the default branch")
+    sy.add_argument("--json", action="store_true")
     sp = sub.add_parser("spec", help="living specs: list, show, validate, apply an item's change")
     sp.add_argument("action", choices=("list", "show", "validate", "apply"))
     sp.add_argument("target", nargs="?", help="capability (show) or work item ID (apply)")
@@ -3253,6 +3284,61 @@ def main(argv):
                                         opts.dry_run)
         print("\n".join(lines))
         return code
+    if opts.command == "sync":
+        sync_mod = runtime_module("sync")
+        how = sync_mod.strategy(labelled(project.charter, "Updating a branch"))
+        state = sync_mod.state(project, default_branch(project), opts.fetch)
+        if state is None:
+            sys.stderr.write("sync: not a git repository here\n")
+            return 2
+        found = sync_mod.findings(state, how)
+        code = sync_mod.exit_code(found, opts.strict)
+        if opts.json:
+            print(json.dumps({"state": state, "strategy": how, "exit": code, "findings": [
+                {"level": level, "text": text, "command": command}
+                for level, text, command in found]}, indent=2, sort_keys=True))
+        else:
+            print("\n".join(sync_mod.report(state, found, how)))
+        return code
+    if opts.command == "slop":
+        slop_mod = runtime_module("slop")
+        if opts.guide:
+            print("\n".join(slop_mod.guide()))
+            return 0
+        charter_mode = slop_mod.mode(project, labelled)
+        strict = opts.strict or charter_mode == "strict"
+        if opts.paths == ["-"]:
+            found, count = slop_mod.scan_text(sys.stdin.read(), "<stdin>")
+            results, unread = [("<stdin>", found, count)], []
+        else:
+            if opts.paths:
+                files = slop_mod.collect(opts.paths, os.getcwd())
+            else:
+                files = slop_mod.changed_prose(project.root)
+                if files is None:
+                    sys.stderr.write("slop: not a git repository here; name the files or "
+                                     "directories to scan\n")
+                    return 2
+            results, unread = slop_mod.scan_paths(files, project.root)
+        for rel in unread:
+            sys.stderr.write("slop: cannot read %s\n" % rel)
+        failed = sum(1 for _, found, count in results if slop_mod.verdict(found, count)[0])
+        if opts.json:
+            print(json.dumps({"mode": charter_mode, "strict": strict, "files": [
+                {"file": rel, "words": count, "fails": slop_mod.verdict(found, count)[0],
+                 "findings": found} for rel, found, count in results]}, indent=2))
+        else:
+            lines = slop_mod.report(results, strict)[0]
+            if not results:
+                lines = ["slop: no prose files to scan" + ("" if opts.paths else
+                         " (nothing changed; name a file or directory)")]
+            print("\n".join(lines))
+            if charter_mode == "off" and not opts.strict:
+                print("The charter's Slop filter row is off, so this run is advisory. "
+                      "Turn it on with: config --slop-filter on|strict")
+        if unread and not results:
+            return 2
+        return 1 if strict and failed else 0
     if opts.command == "spec":
         specs_mod = runtime_module("specs")
         if opts.action == "apply":
@@ -3459,6 +3545,8 @@ def main(argv):
             changes["dev_method"] = opts.dev_method
         if getattr(opts, "specs", None):
             changes["specs"] = opts.specs
+        if getattr(opts, "slop_filter", None):
+            changes["slop_filter"] = opts.slop_filter
         if opts.reviewer:
             changes["preferred_reviewer"] = opts.reviewer
         if opts.token_saving:

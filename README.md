@@ -133,6 +133,13 @@ What the system does now, as requirements with WHEN/THEN scenarios in
 merged when it closes. The headings match OpenSpec, so existing `openspec/` and Spec Kit
 folders are read alongside without migrating. [Specs](docs/specs.md).
 
+### Copy that does not read as generated (opt-in)
+
+`--slop-filter on|strict` adds a writing standard built on Wikipedia's *Signs of AI
+writing*: a scanner that lists stock phrasings by line, a skill that rewrites them without
+adding or losing a claim, and `/sdlc-slop`. Strict covers all prose the agent writes and
+fails the file in CI. [Slop filter](docs/slop-filter.md).
+
 ### Enforcement, when you want it
 
 `--hooks` refuses unsafe tool calls in Claude Code, Gemini CLI and Cursor: a commit with no
@@ -148,12 +155,13 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 | --- | --- |
 | **Records and checks** | `doctor` audit the records · `verify` run the checks, keep the evidence · `bite` prove a test catches the change · `plan-check` diff vs plan · `finish` close an item: evidence, review, worklog draft, status |
 | **Viewer and reports** | `view` the project as one page (`--serve` live) · `lens` stack, build, security, deploy, env, agents · `audit` vulnerable packages · `metrics` process measures |
-| **Work items and agents** | `claim` / `release` / `claims` · `parallel` · `trailers` commit trailers · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |
+| **Work items and agents** | `claim` / `release` / `claims` · `parallel` · `trailers` commit trailers · `sync` behind the remote? conflicts? · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |
 | **Specs** | `spec list \| show \| validate \| apply` |
+| **Writing** | `slop` find the phrasings that read as machine-written (`--strict` fails the file) |
 | **Setup** | `config` see or change the charter's constraints · `fix` safe repairs |
 
 In Claude Code: `/sdlc-plan`, `/sdlc-build`, `/sdlc-verify`, `/sdlc-review`, `/sdlc-finish`, `/sdlc-log`,
-`/sdlc-doctor`. Every flag: [command reference](docs/cli.md).
+`/sdlc-doctor`, `/sdlc-slop`. Every flag: [command reference](docs/cli.md).
 
 ## Works with
 
@@ -208,6 +216,10 @@ them. [What the kit is, and is not](docs/design.md).
 **Will it overwrite my files?** No. Install never overwrites, and upgrade replaces only
 unmodified kit files.
 
+**Can I take it out again?** Yes. `./install.sh <project> --uninstall` removes the kit's
+unedited files and hook entries, and keeps your records. `--repair` restores kit files
+that were edited or deleted.
+
 **Do I need Claude Code?** No. Any tool that reads `AGENTS.md` works; Claude Code adds
 typed commands.
 
@@ -223,7 +235,7 @@ More: [troubleshooting and FAQ](docs/troubleshooting.md).
 ## Documentation
 
 [Getting started](docs/getting-started.md) · [The viewer](docs/viewer.md) ·
-[Multi-agent work](docs/multi-agent.md) · [Specs](docs/specs.md) ·
+[Multi-agent work](docs/multi-agent.md) · [Specs](docs/specs.md) · [Slop filter](docs/slop-filter.md) ·
 [Command reference](docs/cli.md) · [The runtime](docs/runtime.md) ·
 [Installing](docs/install.md) · [Agent tools](docs/harnesses.md) ·
 [Skills](docs/skills.md) · [Design](docs/design.md) ·

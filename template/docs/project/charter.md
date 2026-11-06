@@ -114,6 +114,7 @@ repeating this table.
 | --- | --- |
 | **Default branch** | _(name)_ |
 | **Direct commits to it** | _(allowed / not allowed — `../process/05-change-control.md` forbids them unless this says otherwise)_ |
+| **Updating a branch** | _(`merge` or `rebase` — how an item branch takes in new commits from the default branch. Blank means `merge`. See `../process/05-change-control.md`, "Staying in step with the remote")_ |
 | **Deployment platforms** | _(where each environment runs — a PaaS, a cloud, a container host, or a server you operate. A platform with a checklist in `../platforms/` names its file; `none` if nothing is deployed from here)_ |
 | **Versioning** | _(`semver`, `calver`, or `none` — a deploy is identified by its commit. Blank means `none`; an agent never introduces a version scheme on its own. See `../process/05-change-control.md`, "Versions")_ |
 | **Changelog** | _(the file and its format — e.g. `CHANGELOG.md`, Keep a Changelog, with an `Unreleased` section — or `none`)_ |
@@ -249,6 +250,7 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | **Default effort mode** | `Lean` · `Normal` · `Beast` _(default: Normal; changes breadth above the risk-tier floor, never the floor itself)_ |
 | **Development method** | `Item` · `Epic` _(default: Item. Epic plans several items together and stops at the checkpoints its plan chooses; it never removes a tier's checks or approvals. See `process/11-epics.md`)_ |
 | **Specs** | `on` · `off` _(default: off. When on, behaviour lives in `project/specs/<capability>.md` as requirements with WHEN/THEN scenarios, and Tier 1–2 items that change it carry a spec change applied on close. See `process/15-specs.md`)_ |
+| **Slop filter** | `off` · `on` · `strict` _(default: off. On: public and user-facing copy is checked for the phrasings that make text read as machine-written, and findings are advice. Strict: every piece of prose the agent writes is checked, and `sdlc.py slop` exits 1 on a file with tells. See the `sdlc-slop-filter` skill and `sdlc.py slop --guide`)_ |
 | **Decision style** | `Ask` · `Guide` · `Autopilot` _(default: Guide. How much the agent decides for the person and how much it says in chat; it never lifts a Tier 1 stop or a gated command, and never thins a record. See `process/14-decision-style.md`)_ |
 | **Tier rules** | `Standard` · `Strict` _(default on a new install: Standard — tier by blast radius and reversibility; Tier 3's record is the commit; Tier 2 commits and continues. Strict keeps the 3.x rules, and an upgrade from 3.x sets it so nothing changes silently. See `../CARD.md`, "Tiers")_ |
 | **Acquisition profile** | `Standard` · `Advanced` _(advanced tools require an owned or explicitly authorised target and never grant permission)_ |
