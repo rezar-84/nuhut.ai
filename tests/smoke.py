@@ -216,7 +216,7 @@ def test_non_interactive():
     skills = sorted(os.listdir(os.path.join(d, ".claude", "skills")))
     check("only answer-independent skills", skills == ["sdlc-adr", "sdlc-charter-audit",
                                                        "sdlc-doctor", "sdlc-evidence-check",
-                                                       "sdlc-intake"],
+                                                       "sdlc-intake", "sdlc-test-first"],
           str(skills))
     before = files(d)
     run([d, "ACME", "-y"])

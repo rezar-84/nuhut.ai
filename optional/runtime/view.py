@@ -1412,18 +1412,31 @@ def serve(rt, project, template, opts):
                 return self._send(200, body, "application/json; charset=utf-8")
             if path == "/api/run":
                 sub = str(payload.get("subcommand") or "").strip()
-                allowed = ("verify", "plan-check", "doctor", "log", "trailers", "metrics", "status", "audit")
+                allowed = ("verify", "plan-check", "doctor", "log", "trailers", "metrics", "audit")
                 if sub not in allowed:
                     body = json.dumps({"ok": False, "error": "unsupported command: %s" % sub}).encode("utf-8")
                     return self._send(400, body, "application/json; charset=utf-8")
+                allowed_flags = {
+                    "verify": ("--parallel", "--stage"),
+                    "plan-check": ("--strict", "--base"),
+                    "doctor": ("--strict", "--all"),
+                    "log": ("--since", "--id", "--write"),
+                    "trailers": ("--agent", "--model"),
+                    "metrics": (),
+                    "audit": ("--strict",),
+                }
                 safe_re = re.compile(r"^[A-Za-z0-9_./:-]+$")
                 cmd_args = [sub]
                 raw_args = payload.get("args")
                 if isinstance(raw_args, list) and raw_args:
+                    sub_flags = allowed_flags.get(sub, ())
                     for a in raw_args[:12]:
                         sa = str(a).strip()
                         if not sa or not safe_re.match(sa):
                             return self._send(400, b'{"ok":false,"error":"invalid argument"}\n',
+                                              "application/json; charset=utf-8")
+                        if sa.startswith("-") and sa not in sub_flags:
+                            return self._send(400, b'{"ok":false,"error":"invalid flag"}\n',
                                               "application/json; charset=utf-8")
                         cmd_args.append(sa)
                 elif sub == "verify":

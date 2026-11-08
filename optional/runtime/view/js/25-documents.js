@@ -252,8 +252,11 @@
       // Render Tree Folders
       groupOrder.forEach(function (dir) {
         var folderBox = el("div", { cls: "tree-folder" });
-        var folderHdr = el("div", { cls: "tree-folder-title" });
-        folderHdr.innerHTML = "<span>" + dir + "</span> <span class='chip' style='margin-left:auto; font-size:10px;'>" + groups[dir].length + "</span>";
+        var folderHdr = el("div", { cls: "tree-folder-title" }, [
+          el("span", { text: dir }),
+          " ",
+          el("span", { cls: "chip", style: "margin-left:auto; font-size:10px;", text: String(groups[dir].length) })
+        ]);
 
         var folderItems = el("div", { cls: "tree-folder-items" });
 

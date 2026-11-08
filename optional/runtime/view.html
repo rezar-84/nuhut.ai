@@ -2670,7 +2670,8 @@
 
   function exportHtml() {
     var title = (M.project || "nuhut").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    var doc = "<!doctype html>\n" + document.documentElement.outerHTML;
+    var raw = document.documentElement.outerHTML.replace(/"action_token"\s*:\s*"[^"]*"/g, '"action_token":null');
+    var doc = "<!doctype html>\n" + raw;
     downloadFile(title + "-dashboard.html", doc, "text/html;charset=utf-8");
   }
 
@@ -3211,7 +3212,7 @@
           text: "▶ Run in Project",
           on: { click: function () {
             closeDrawer();
-            THREAD_STATE.selectedId = id;
+            THREAD_STATE.selected = id;
             THREAD_STATE.cmdTab = "recommended";
             go("threads/" + id);
             setTimeout(function () {
@@ -3228,7 +3229,7 @@
             if (navigator.clipboard && navigator.clipboard.writeText) {
               navigator.clipboard.writeText(drawerNext.cmd).then(function () {
                 b.textContent = "✓ Copied!";
-                showKitToast("Copied: " + drawerNext.cmd, false);
+                showToast("Copied CLI Command", drawerNext.cmd);
                 setTimeout(function () { b.textContent = "⧉ Copy CLI Command"; }, 1800);
               });
             }
@@ -3240,7 +3241,7 @@
           text: "Thread ↗",
           on: { click: function () {
             closeDrawer();
-            THREAD_STATE.selectedId = id;
+            THREAD_STATE.selected = id;
             go("threads/" + id);
           } }
         })
@@ -6533,8 +6534,11 @@
       // Render Tree Folders
       groupOrder.forEach(function (dir) {
         var folderBox = el("div", { cls: "tree-folder" });
-        var folderHdr = el("div", { cls: "tree-folder-title" });
-        folderHdr.innerHTML = "<span>" + dir + "</span> <span class='chip' style='margin-left:auto; font-size:10px;'>" + groups[dir].length + "</span>";
+        var folderHdr = el("div", { cls: "tree-folder-title" }, [
+          el("span", { text: dir }),
+          " ",
+          el("span", { cls: "chip", style: "margin-left:auto; font-size:10px;", text: String(groups[dir].length) })
+        ]);
 
         var folderItems = el("div", { cls: "tree-folder-items" });
 
