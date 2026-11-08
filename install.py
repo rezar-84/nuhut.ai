@@ -1181,6 +1181,7 @@ SKILL_RULES = (
     ("sdlc-evidence-check", "always", "fires before any 'done / passing / verified' claim", ""),
     ("sdlc-charter-audit", "always", "keeps the charter's blank and stale cells visible", ""),
     ("sdlc-adr", "always", "captures durable decisions instead of losing them", ""),
+    ("sdlc-test-first", "always", "the test is written before the code, and shown to fail", ""),
     ("sdlc-spec", "opt_in", "writes living specs and per-item spec changes (charter Specs: on)",
      "living specs are opt-in; pick it here, or later with --upgrade, when the charter's Specs row is on"),
     ("sdlc-slop-filter", "opt_in",
@@ -3173,17 +3174,18 @@ def agents_split(text):
 
 
 def agents_legacy_split(text):
-    """An AGENTS.md from before the markers: the title line, then the portable sections,
-    then section 9. None if the file does not have that shape."""
+    """An AGENTS.md from before the markers: any leading comments plus the title line,
+    then the portable sections, then section 9. None if the file does not have that shape."""
     m = re.search(r"^## 9\. Project overrides", text, re.M)
-    if not m or not text.startswith("# "):
+    h1 = re.search(r"^# [^\n]+\n", text, re.M)
+    if not m or not h1 or h1.start() >= m.start():
         return None
-    title_end = text.find("\n") + 1
+    title_end = h1.end()
     return text[:title_end] + "\n", text[title_end:m.start()], text[m.start():]
 
 
 def charter_row_labels(text):
-    return re.findall(r"^\| (\*\*[^*|]+\*\*) \|", text, re.M)
+    return re.findall(r"^\|\s*(\*\*[^*|]+\*\*)\s*\|", text, re.M)
 
 
 def add_missing_charter_rows(installed, template):
@@ -3191,7 +3193,7 @@ def add_missing_charter_rows(installed, template):
     inserted, as the kit writes it, next to a neighbour from the same kit table -- after
     the nearest earlier one, else before the nearest later one. Existing rows, the
     project's answers, are never touched. Returns (text, added, unplaced)."""
-    row = re.compile(r"^\| (\*\*[^*|]+\*\*) \|")
+    row = re.compile(r"^\|\s*(\*\*[^*|]+\*\*)\s*\|")
     tables, current = [], []
     for line in template.split("\n"):
         if line.startswith("|"):
@@ -3207,8 +3209,9 @@ def add_missing_charter_rows(installed, template):
     lines = installed.split("\n")
 
     def index_of(label):
+        pat = re.compile(r"^\|\s*%s\s*\|" % re.escape(label))
         for i, existing in enumerate(lines):
-            if existing.startswith("| %s |" % label):
+            if pat.match(existing):
                 return i
         return -1
 
@@ -3249,9 +3252,10 @@ def fill_row(text, label, value):
     if not value:
         return text
     out, done = [], False
+    pat = re.compile(r"^\|\s*%s\s*\|" % re.escape(label))
     head = "| %s |" % label
     for line in text.split("\n"):
-        if not done and line.startswith(head):
+        if not done and pat.match(line):
             out.append("%s %s |" % (head, _cell(value)))
             done = True
         else:
@@ -3293,8 +3297,9 @@ def set_role(text, role, active, reason):
     """Tick or untick a role row, keeping the 'Active if' column and giving every
     unticked row the answer it came from -- a blank reason means nobody decided."""
     out, done = [], False
+    pat = re.compile(r"^\|\s*%s\s*\|" % re.escape(role))
     for line in text.split("\n"):
-        if not done and line.startswith("| %s | " % role):
+        if not done and pat.match(line):
             cells = line.split("|")
             if len(cells) >= 6:
                 cells[2] = " %s " % ("☑" if active else "☐")
@@ -3307,7 +3312,7 @@ def set_role(text, role, active, reason):
 
 
 def tick_artifact(text, name):
-    return text.replace("☐ %s" % name, "☑ %s" % name, 1)
+    return re.sub(r"☐\s+%s\b" % re.escape(name), "☑ %s" % name, text, count=1)
 
 
 def today():
@@ -4438,7 +4443,7 @@ def find_docs(target, preferred):
     return ""
 
 
-SLOP_ROW = re.compile(r"^\| \*\*Slop filter\*\* \|.*$", re.M)
+SLOP_ROW = re.compile(r"^\|\s*\*\*Slop filter\*\*\s*\|.*$", re.M)
 
 
 def slop_filter_upgrade(target, charter, o, ctx):
@@ -4452,17 +4457,17 @@ def slop_filter_upgrade(target, charter, o, ctx):
         if SLOP_ROW.search(text):
             new = SLOP_ROW.sub(lambda m: row, text, count=1)
         else:
-            anchor = re.search(r"^\| \*\*(Specs|Development method|Default effort mode)\*\* \|.*$",
+            anchor = re.search(r"^\|\s*\*\*(Specs|Development method|Default effort mode)\*\*\s*\|.*$",
                                text, re.M)
             new = text[:anchor.end()] + "\n" + row + text[anchor.end():] if anchor else text
         if new != text:
-            charter.write_text(new, encoding="utf-8")
+            atomic_write_text(ensure_inside(target, charter), new)
             print("  update         %s (Slop filter: %s)" % (charter.relative_to(target), flag))
         elif not SLOP_ROW.search(new):
             print("  warning        no Risk defaults table in %s; add a `| **Slop filter** | "
                   "`%s` |` row by hand" % (charter.relative_to(target), flag))
         text = new
-    found = re.search(r"^\| \*\*Slop filter\*\* \| `(off|on|strict)` \|", text, re.M)
+    found = re.search(r"^\|\s*\*\*Slop filter\*\*\s*\|\s*`(off|on|strict)`\s*\|", text, re.M)
     mode = flag or (found.group(1) if found else "off")
     if mode == "off":
         return {}
@@ -4493,12 +4498,12 @@ def upgrade(target, o):
         return 1
     prefix = o.prefix
     charter = target / docs / "project" / "charter.md"
-    if charter.exists() and re.search(r"^\| \*\*Operating mode\*\* \|.*Beast",
+    if charter.exists() and re.search(r"^\|\s*\*\*Operating mode\*\*\s*\|.*Beast",
                                       charter.read_text(encoding="utf-8", errors="replace"), re.M):
         print("  warning        legacy Beast mode is ambiguous; choose Default effort mode "
               "and Acquisition profile in %s" % charter.relative_to(target))
     if not prefix and charter.exists():
-        m = re.search(r"^\| \*\*Work item prefix\*\* \| `([A-Z]{2,4})`",
+        m = re.search(r"^\|\s*\*\*Work item prefix\*\*\s*\|\s*`([A-Z]{2,4})`",
                       charter.read_text(encoding="utf-8", errors="replace"), re.M)
         if m:
             prefix = m.group(1)
@@ -4963,16 +4968,16 @@ def uninstall(target, o):
             backup_dir = target / ".ai-sdlc" / "backups" / ("%s-%d" % (stem, suffix))
             suffix += 1
         for rel in shared:
-            dest = backup_dir / rel
+            dest = ensure_inside(backup_dir, backup_dir / rel)
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(target / rel), str(dest))
+            shutil.copy2(str(ensure_inside(target, target / rel)), str(dest))
         print("  backup         %s (%d files)" % (backup_dir.relative_to(target).as_posix(),
                                                   len(shared)))
     try:
         for rel in sorted(rewrites):
-            atomic_write_text(target / rel, rewrites[rel][0])
+            atomic_write_text(ensure_inside(target, target / rel), rewrites[rel][0])
         for rel in remove + own + [rel for rel, _ in deletes]:
-            path = target / rel
+            path = ensure_inside(target, target / rel)
             if path.is_file():
                 path.unlink()
             parent = path.parent
@@ -5171,7 +5176,7 @@ def charter_blanks(target, docs):
         return []
     rows = []
     for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-        m = re.match(r"^\| \*\*(.+?)\*\* \|\s*(_\(.*\)_)?\s*\|\s*$", line)
+        m = re.match(r"^\|\s*\*\*(.+?)\*\*\s*\|\s*(_\(.*\)_)?\s*\|\s*$", line)
         if m:
             rows.append((n, m.group(1)))
     return rows

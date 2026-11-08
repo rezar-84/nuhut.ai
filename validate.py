@@ -301,9 +301,11 @@ def single_viewer(errors):
     node_bin = shutil.which("node")
     if node_bin:
         for idx, block in enumerate(re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)):
-            tmp_js = Path(tempfile.mktemp(suffix=".js", prefix="sdlc-view-"))
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".js",
+                                             prefix="sdlc-view-", delete=False) as tf:
+                tf.write(block)
+                tmp_js = Path(tf.name)
             try:
-                tmp_js.write_text(block, encoding="utf-8")
                 proc = subprocess.run([node_bin, "--check", str(tmp_js)],
                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                       universal_newlines=True)

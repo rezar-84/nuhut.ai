@@ -1,6 +1,6 @@
 # Skills
 
-Twenty-three skills that make the process fire on its own. The `/sdlc-*` slash commands in
+Twenty-four skills that make the process fire on its own. The `/sdlc-*` slash commands in
 `../claude-commands/` wait to be typed; these are **model-invoked** — the agent reads the
 `description` in each `SKILL.md` frontmatter and loads the skill when the situation it
 describes appears. The two are complements, not duplicates: the commands drive the loop,
@@ -17,6 +17,7 @@ window.
 | `sdlc-evidence-check` | always |
 | `sdlc-charter-audit` | always |
 | `sdlc-adr` | always |
+| `sdlc-test-first` | always |
 | `sdlc-doctor` | always |
 | `sdlc-spec` | opt-in: the charter's Specs row is `on` |
 | `sdlc-slop-filter` | opt-in: the charter's Slop filter row is `on` or `strict` |

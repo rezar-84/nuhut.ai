@@ -4,6 +4,11 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **`sdlc-test-first` skill.** The loop said when to test and a hook could lock a
+  reproducing test, but no skill covered how to write tests first. It sets out the
+  red, green, refactor cycle, which cases to write, pinning untested code before a
+  refactor, what does not count as a test, and ends on `sdlc.py bite`. Installed always.
+
 - **Git: staying in step with the remote, and conflicts.** The kit had branch, commit
   and approval rules but said nothing about fetching, how a branch takes in new commits,
   or what to do with a conflict.

@@ -170,7 +170,8 @@
 
   function exportHtml() {
     var title = (M.project || "nuhut").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    var doc = "<!doctype html>\n" + document.documentElement.outerHTML;
+    var raw = document.documentElement.outerHTML.replace(/"action_token"\s*:\s*"[^"]*"/g, '"action_token":null');
+    var doc = "<!doctype html>\n" + raw;
     downloadFile(title + "-dashboard.html", doc, "text/html;charset=utf-8");
   }
 

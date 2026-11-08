@@ -1410,6 +1410,8 @@ REVIEW_HARNESSES = {
 
 
 def item_diff(project, item, base=None):
+    if base and str(base).startswith("-"):
+        return None, "base %r is not a valid git ref" % base
     commits = item_commits(project, item)
     if not commits and not base:
         return None, "no commit names %s; pass --base to review the working tree" % item
@@ -1795,6 +1797,8 @@ BITE_DIR = os.path.join(".ai-sdlc", "bite")
 
 def bite_files(project, base):
     """Product files that differ between <base> and the working tree."""
+    if not base or str(base).startswith("-"):
+        return []
     names = set(project.git("diff", "--name-only", base).splitlines())
     names |= set(project.git("ls-files", "--others", "--exclude-standard").splitlines())
     docs = project.docs.rstrip("/") + "/"
@@ -1816,8 +1820,11 @@ def bite_restore(project):
             folder = os.path.dirname(target)
             if folder and not os.path.isdir(folder):
                 os.makedirs(folder)
-            shutil.copy2(project.path(os.path.join(state["backup"], item["path"])), target)
-        elif os.path.exists(target):
+            if os.path.lexists(target) and os.path.islink(target):
+                os.remove(target)
+            shutil.copy2(project.path(os.path.join(state["backup"], item["path"])), target,
+                         follow_symlinks=False)
+        elif os.path.lexists(target):
             os.remove(target)
         restored.append(item["path"])
     shutil.rmtree(project.path(state["backup"]), ignore_errors=True)
@@ -1836,7 +1843,7 @@ def bite(project, command, base=None, timeout=1800):
         return None, "not a git repository with a commit"
     if base is None:
         base = "HEAD" if bite_files(project, "HEAD") else "HEAD~1"
-    if not project.git("rev-parse", "--verify", "--quiet", base + "^{commit}").strip():
+    if str(base).startswith("-") or not project.git("rev-parse", "--verify", "--quiet", base + "^{commit}").strip():
         return None, "base %r is not a commit" % base
     files = bite_files(project, base)
     if not files:
@@ -1854,19 +1861,19 @@ def bite(project, command, base=None, timeout=1800):
     with_change = run()
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = os.path.join(BITE_DIR, stamp)
-    os.makedirs(project.path(backup))
+    os.makedirs(project.path(backup), exist_ok=True)
     ignore = project.path(os.path.join(BITE_DIR, ".gitignore"))
     if not os.path.exists(ignore):
         with open(ignore, "w", encoding="utf-8") as handle:
             handle.write("*\n!.gitignore\n")
     state = {"base": base, "backup": backup, "command": command, "files": []}
     for rel in files:
-        existed = os.path.exists(project.path(rel))
+        existed = os.path.lexists(project.path(rel))
         if existed:
             dest = project.path(os.path.join(backup, rel))
             if not os.path.isdir(os.path.dirname(dest)):
                 os.makedirs(os.path.dirname(dest))
-            shutil.copy2(project.path(rel), dest)
+            shutil.copy2(project.path(rel), dest, follow_symlinks=False)
         state["files"].append({"path": rel, "existed": existed})
     with open(project.path(os.path.join(BITE_DIR, "active.json")), "w", encoding="utf-8") as handle:
         json.dump(state, handle, indent=2)
@@ -1881,9 +1888,17 @@ def bite(project, command, base=None, timeout=1800):
             if original.returncode == 0:
                 if not os.path.isdir(os.path.dirname(target) or "."):
                     os.makedirs(os.path.dirname(target))
+                if os.path.islink(target):
+                    os.remove(target)
                 with open(target, "wb") as handle:
                     handle.write(original.stdout)
-            elif os.path.exists(target):
+                ls_tree = project.git("ls-tree", base, "--", rel).strip()
+                if ls_tree.startswith("100755"):
+                    try:
+                        os.chmod(target, 0o755)
+                    except OSError:
+                        pass
+            elif os.path.lexists(target):
                 os.remove(target)
         without_change = run()
     finally:
@@ -2102,6 +2117,9 @@ def plan_check(project, item, base=None):
         return None, ("%s has no backticked paths under \"## Files that change\", so "
                       "there is nothing to compare the diff with." % rel)
     base = base or default_branch(project) or "main"
+    if str(base).startswith("-"):
+        return None, ("base %r is not a git ref here. Pass --base, or fill the charter's "
+                      "Default branch row." % base)
     cache = getattr(project, "_build_cache", None)
     ref_key = ("ref", base)
     if cache is not None and ref_key in cache:
@@ -2490,8 +2508,9 @@ def _set_check_row(text, stage, command):
     """Update a `| `checks.<stage>` | ... |` row in charter.md."""
     lines = text.splitlines()
     target = "`checks.%s`" % stage
-    val_str = "absent" if command.strip().lower() == "absent" else (
-        "`%s`" % command.strip().replace("|", "\\|") if command.strip() else ""
+    clean_cmd = re.sub(r"[\r\n]+", " ", str(command or "").strip()).replace("`", "")
+    val_str = "absent" if clean_cmd.lower() == "absent" else (
+        "`%s`" % clean_cmd.replace("|", "\\|") if clean_cmd else ""
     )
     for idx, line in enumerate(lines):
         cells = split_row(line)
@@ -2720,12 +2739,23 @@ def fix_kit(project, action="all", opts=None):
         check_pointer(project, ptr_findings)
         target_rel = opts.get("file") or "CLAUDE.md"
         if ptr_findings.items or action == "wire-pointer":
+            allowed_pointers = set(POINTER_FILES) | set(
+                r for r in (project.profile.get("harnesses") or []) if isinstance(r, str)
+            )
+            root_real = os.path.realpath(project.root)
             targets = [target_rel]
             for rel in project.profile.get("harnesses") or []:
                 if isinstance(rel, str) and rel not in targets:
                     targets.append(rel)
             for rel in targets:
+                if not isinstance(rel, str) or rel.startswith(("/", "\\")) or ".." in rel.split("/"):
+                    continue
+                if rel not in allowed_pointers and not (rel.startswith(".cursor/rules/") and rel.endswith(".mdc")):
+                    continue
                 fpath = project.path(rel)
+                if not (os.path.realpath(fpath) == root_real
+                        or os.path.realpath(fpath).startswith(root_real + os.sep)):
+                    continue
                 existing = read(fpath)
                 if "AGENTS.md" not in existing:
                     parent = os.path.dirname(fpath)
@@ -3469,7 +3499,7 @@ def main(argv):
         if not since:
             sys.stderr.write("log: give --since <ref>, or --id <item>\n")
             return 2
-        if not project.git("rev-parse", "--verify", "--quiet", since + "^{commit}").strip():
+        if str(since).startswith("-") or not project.git("rev-parse", "--verify", "--quiet", since + "^{commit}").strip():
             sys.stderr.write("log: %r is not a commit\n" % since)
             return 2
         lines, orphans = log_entries(project, since)

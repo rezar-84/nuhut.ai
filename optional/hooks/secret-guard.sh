@@ -30,6 +30,16 @@ if git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
 else
   diff=$(git diff --cached --unified=0 2>/dev/null)
 fi
+if printf '%s' "$cmd" | grep -Eq 'git[[:space:]]+add'; then
+  untracked=$(git ls-files --others --exclude-standard 2>/dev/null)
+  if [ -n "$untracked" ]; then
+    extra=$(printf '%s\n' "$untracked" | while IFS= read -r uf; do
+      [ -f "$uf" ] && sed 's/^/+/' "$uf" 2>/dev/null
+    done)
+    diff="${diff}${diff:+
+}${extra}"
+  fi
+fi
 [ -n "$diff" ] || exit 0
 
 added=$(printf '%s\n' "$diff" | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -v 'EXAMPLE')

@@ -338,7 +338,7 @@
           text: "▶ Run in Project",
           on: { click: function () {
             closeDrawer();
-            THREAD_STATE.selectedId = id;
+            THREAD_STATE.selected = id;
             THREAD_STATE.cmdTab = "recommended";
             go("threads/" + id);
             setTimeout(function () {
@@ -355,7 +355,7 @@
             if (navigator.clipboard && navigator.clipboard.writeText) {
               navigator.clipboard.writeText(drawerNext.cmd).then(function () {
                 b.textContent = "✓ Copied!";
-                showKitToast("Copied: " + drawerNext.cmd, false);
+                showToast("Copied CLI Command", drawerNext.cmd);
                 setTimeout(function () { b.textContent = "⧉ Copy CLI Command"; }, 1800);
               });
             }
@@ -367,7 +367,7 @@
           text: "Thread ↗",
           on: { click: function () {
             closeDrawer();
-            THREAD_STATE.selectedId = id;
+            THREAD_STATE.selected = id;
             go("threads/" + id);
           } }
         })
