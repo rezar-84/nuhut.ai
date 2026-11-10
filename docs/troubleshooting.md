@@ -100,6 +100,12 @@ Their status is one the board has no column for. Common words (Planned, Pending,
 On hold, Cancelled …) are mapped automatically. The note above the board names the rest;
 use the kit's statuses for those rows.
 
+**`/sdlc-*` commands appear on one device or tool, but are missing on another**
+Three things cause this:
+1. The project was installed with the default (`--harness claude`), so `.claude/commands/` exists in the repo, but `.agents/skills/` (which Antigravity, Cursor, Codex, Gemini CLI, and Copilot read for their `/` menus) was not created. Run `python3 .ai-sdlc/bin/sdlc.py fix shared-skills` inside the project (or `./install.sh <project> --upgrade --harness all`), then commit `.agents/skills/`.
+2. `.claude/` or `.agents/` was ignored by `.gitignore` or your global gitignore on the first machine, so `git pull` on the second machine did not bring the commands down (`sdlc.py doctor` warns when this happens). Track `.claude/commands/`, `.claude/skills/`, and `.agents/skills/` in git.
+3. The first machine had the global Claude Code plugin installed (`/plugin install ai-sdlc@ai-sdlc`) without committing `.claude/commands/` to the repo. Either commit `.claude/commands/` and `.agents/skills/` to the project, or install the global plugin on the second machine too.
+
 **Something else**
 Run `python3 .ai-sdlc/bin/sdlc.py doctor` and `python3 .ai-sdlc/bin/sdlc.py fix all`
 (safe repairs only), and check `--help` on the command involved. Then open an issue with

@@ -173,13 +173,14 @@ by a backlog item to fix it.
 
 ## `.claude/` — commands and skills
 
-Outside this tree, but installed with it. `.claude/commands/` holds the six `/sdlc-*`
+Outside this tree, but installed with it. `.claude/commands/` holds the `/sdlc-*`
 slash commands that drive the loop when you type them: `/sdlc-plan`, `/sdlc-build`,
-`/sdlc-verify`, `/sdlc-review`, `/sdlc-log`, and `/sdlc-doctor` — which audits these
-documents rather than the code, for the gaps and staleness that nothing else announces.
-On a tool whose `/` menu lists skills instead (Antigravity, Codex, Cursor, Gemini CLI),
-the first five are installed as skills of the same name under `.agents/skills/`;
-`sdlc-doctor` is already a skill. The table in `CARD.md` says what each name runs.
+`/sdlc-verify`, `/sdlc-review`, `/sdlc-finish`, `/sdlc-log`, and `/sdlc-doctor` — which
+audits these documents rather than the code, for the gaps and staleness that nothing else
+announces. On a tool whose `/` menu lists skills instead (Antigravity, Codex, Cursor,
+Gemini CLI), the loop steps are installed as skills of the same name under
+`.agents/skills/` (or added later with `sdlc.py fix shared-skills`); `sdlc-doctor` is
+already a skill. The table in `CARD.md` says what each name runs.
 
 `.claude/skills/` holds the skills chosen for this project. They are model-invoked: an
 agent loads one when the situation its description names appears — a request with no work

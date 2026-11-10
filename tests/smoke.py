@@ -543,6 +543,54 @@ def test_harness_wiring():
           p.returncode == 0 and "no instruction file names AGENTS.md" not in doc_out, doc_out)
     shutil.rmtree(d, ignore_errors=True)
 
+    # Local sdlc.py fix shared-skills materialises .agents/skills/ on a Claude-only install,
+    # and --upgrade --harness adds harnesses and shared skills later.
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-harness-fix-shared-"))
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "HRN", "-y"])
+    check("default install has no .agents/skills", not os.path.exists(os.path.join(d, ".agents")))
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    p = subprocess.run([sys.executable, script, "fix", "shared-skills"], cwd=d,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("sdlc.py fix shared-skills materialises .agents/skills/",
+          p.returncode == 0 and "synced" in p.stdout
+          and all(os.path.isfile(os.path.join(d, ".agents", "skills", n, "SKILL.md")) for n in loop)
+          and os.path.isfile(os.path.join(d, ".agents", "skills", "sdlc-doctor", "SKILL.md")), p.stdout)
+    manifest = json.loads(read(d, ".ai-sdlc/manifest.json"))
+    check("shared-skills records SHA-256 digests in manifest.json",
+          all(".agents/skills/%s/SKILL.md" % n in manifest.get("files", {}) for n in loop)
+          and ".agents/skills/sdlc-doctor/SKILL.md" in manifest.get("files", {}))
+    code, out = run([d, "HRN", "--upgrade"])
+    check("subsequent --upgrade treats fix shared-skills files as clean kit-managed files",
+          code == 0 and "Already up to date" in out and "--adopt" not in out, out[-300:])
+    p = subprocess.run([sys.executable, script, "lens", "--json"], cwd=d,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    lens_data = json.loads(p.stdout) if p.returncode == 0 else {}
+    check("lens does not warn about kit skills mirrored across .claude/skills and .agents/skills",
+          not any("is defined 2 times" in x.get("title", "")
+                  for x in (lens_data.get("agents") or {}).get("issues", [])),
+          str((lens_data.get("agents") or {}).get("issues")))
+
+    # Doctor warns when .claude/commands or .agents/skills is git-ignored in a tracked repo.
+    subprocess.call(["git", "add", "AGENTS.md"], cwd=d)
+    write(d, ".gitignore", ".agents/skills/\n")
+    p = subprocess.run([sys.executable, script, "doctor"], cwd=d,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("doctor warns when .agents/skills is git-ignored while AGENTS.md is tracked",
+          "git-ignored" in p.stdout and ".agents/skills" in p.stdout, p.stdout[-400:])
+    shutil.rmtree(d, ignore_errors=True)
+
+    # --upgrade --harness adds harnesses and .agents/skills/ to an existing Claude-only install.
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-harness-upgrade-"))
+    run([d, "HRN", "-y"])
+    code, out = run([d, "HRN", "--upgrade", "--harness", "all"])
+    check("--upgrade --harness all wires pointers and creates .agents/skills/",
+          code == 0 and os.path.isfile(os.path.join(d, "GEMINI.md"))
+          and os.path.isfile(os.path.join(d, ".cursor", "rules", "agents.mdc"))
+          and all(os.path.isfile(os.path.join(d, ".agents", "skills", n, "SKILL.md")) for n in loop),
+          out[-400:])
+    shutil.rmtree(d, ignore_errors=True)
+
 
 def test_profiles():
     print("documentation profiles")

@@ -4,6 +4,23 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Cross-device and multi-tool `/sdlc-*` parity (`sdlc.py fix shared-skills` and `--upgrade --harness`).**
+  - `python3 .ai-sdlc/bin/sdlc.py fix shared-skills` materialises or syncs `.agents/skills/`
+    (the 6 loop skills generated from `.claude/commands/sdlc-*.md` plus the project's
+    installed kit skills from `.claude/skills/`) and records their SHA-256 checksums in
+    `.ai-sdlc/manifest.json`, so Antigravity, Cursor, Codex, Gemini CLI and Copilot get the
+    `/sdlc-*` loop without needing the external installer. Also available in the viewer's
+    Kit Control panel.
+  - `./install.sh <project> --upgrade --harness <list|all>` now wires newly requested
+    harness pointer files and populates `.agents/skills/` on an existing Claude-only install;
+    `--harness all` also includes `AGENTS.md`-native tools (`antigravity`, `codex`, etc.).
+  - `sdlc.py doctor` warns when `.claude/commands`, `.claude/skills`, or `.agents/skills`
+    is git-ignored in a repository where `AGENTS.md` is tracked, or when `.agents/skills/`
+    is missing loop or mirrored kit skills.
+  - `sdlc.py lens` recognises kit skills mirrored across `.claude/skills/` and
+    `.agents/skills/` as a single cross-harness skill instead of warning about duplicates
+    or double-counting token estimates.
+
 - **`sdlc-test-first` skill.** The loop said when to test and a hook could lock a
   reproducing test, but no skill covered how to write tests first. It sets out the
   red, green, refactor cycle, which cases to write, pinning untested code before a

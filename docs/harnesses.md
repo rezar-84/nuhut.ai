@@ -20,8 +20,8 @@ What each layer of the kit needs from the tool:
 | --- | --- | --- |
 | Contract, process, roles, templates, card | yes | yes |
 | Runtime (`doctor`, `verify`, `plan-check`, `view`, `metrics`) | yes | yes — it is a shell command |
-| Skills | `.claude/skills/` | `.agents/skills/`, the cross-client location of the [Agent Skills](https://agentskills.io) standard; installed when `--harness` names any tool other than claude |
-| Loop commands (`sdlc-plan`, `-build`, `-verify`, `-review`, `-log`, `-doctor`) | `/` commands in `.claude/commands/` | skills of the same name in `.agents/skills/`, so they appear in a `/` menu that lists skills (Antigravity); `CARD.md` names what each runs on any tool |
+| Skills | `.claude/skills/` | `.agents/skills/`, the cross-client location of the [Agent Skills](https://agentskills.io) standard; installed when `--harness` names any tool other than claude, or added locally with `sdlc.py fix shared-skills` |
+| Loop commands (`sdlc-plan`, `-build`, `-verify`, `-review`, `-finish`, `-log`, `-doctor`) | `/` commands in `.claude/commands/` | skills of the same name in `.agents/skills/`, so they appear in a `/` menu that lists skills (Antigravity, Cursor, Codex, Gemini CLI, Copilot); `CARD.md` names what each runs on any tool |
 | Tool-call hooks (`--hooks`) | yes | Gemini CLI: all six rules; Cursor: the three shell rules; both through `.claude/hooks/adapter.sh`. Other tools: no |
 | Git hooks (`--git-hooks`) | yes | yes — git runs them for every agent and every human |
 | CI (`--scaffold-ci`) | yes | yes — the doctor runs strictly before the quality commands |
@@ -29,6 +29,13 @@ What each layer of the kit needs from the tool:
 ```sh
 ./install.sh /path/to/project ACME -y --harness claude,cursor,copilot
 ```
+
+To add cross-tool skills (`.agents/skills/`) to an existing Claude-only install on any machine without re-running the installer:
+
+```sh
+python3 .ai-sdlc/bin/sdlc.py fix shared-skills
+```
+Or from the kit checkout: `./install.sh /path/to/project --upgrade --harness all`.
 
 **If nothing points at `AGENTS.md`, the kit is installed and inert** — and nothing about
 the repository looks wrong. The installer warns when it wires nothing, and

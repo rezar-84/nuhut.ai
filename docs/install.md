@@ -376,7 +376,9 @@ copies. A plain `--upgrade` never does this on its own, and says when it is need
 
 The upgrade report names the kit skills the project does not have. `--upgrade` never adds
 one. To add the ones that fit, run the guided setup again (`./install.sh
-/path/to/your-project --full`): it adds only missing files.
+/path/to/your-project --full`): it adds only missing files. To add another AI tool or
+`.agents/skills/` to an existing Claude-only install, pass `--harness <list|all>` with
+`--upgrade` (or run `python3 .ai-sdlc/bin/sdlc.py fix shared-skills` inside the project).
 
 `--upgrade` manages `docs/README.md`, `docs/process/`, `docs/roles/`, `docs/templates/`,
 `docs/platforms/`, the `/sdlc-*` commands, and any kit skill the project already has. It verifies their recorded checksums first and

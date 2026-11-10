@@ -1014,11 +1014,12 @@ def parse_args(argv):
             if i + 1 >= len(argv):
                 bad_value("--harness requires a comma-separated list", "harnesses")
             names = [x.strip().lower() for x in argv[i + 1].split(",") if x.strip()]
-            if "all" in names:
-                names = sorted(HARNESS_ALIASES)
+            had_all = "all" in names
+            if had_all:
+                names = sorted(set(HARNESS_ALIASES) | set(HARNESS_NATIVE))
             native = [x for x in names if x in HARNESS_NATIVE]
             unknown = [x for x in names if x not in HARNESS_ALIASES and x not in HARNESS_NATIVE]
-            if native:
+            if native and not had_all:
                 sys.stderr.write(
                     "%s reads AGENTS.md directly and needs no pointer file\n"
                     % ", ".join(native))
@@ -2923,7 +2924,7 @@ def installed_profile(target):
     return value if value in ("full", "compact") else "full"
 
 
-def managed_source_texts(target, docs, ctx, profile="full"):
+def managed_source_texts(target, docs, ctx, profile="full", shared_skills=False):
     """Return portable kit-owned destination paths and their rendered content."""
     planned = {}
     for name in ("README.md", "CARD.md"):
@@ -2954,21 +2955,32 @@ def managed_source_texts(target, docs, ctx, profile="full"):
         for src in kit_commands:
             planned[(Path(".claude") / "commands" / src.name).as_posix()] = substitute(
                 src.read_text(encoding="utf-8"), ctx)
+    claude_skills_root = Path(target) / ".claude" / "skills"
+    shared_root = Path(target) / ".agents" / "skills"
     for skills_rel in (Path(".claude") / "skills", Path(".agents") / "skills"):
         skills_root = Path(target) / skills_rel
-        if not skills_root.is_dir():
+        if not skills_root.is_dir() and not (shared_skills and skills_rel == Path(".agents") / "skills"):
             continue
         for base in sorted((SRC / "optional" / "skills").iterdir()):
-            if not base.is_dir() or not (skills_root / base.name).is_dir():
+            if not base.is_dir():
+                continue
+            installed_here = (skills_root / base.name).is_dir() or (
+                shared_skills and skills_rel == Path(".agents") / "skills"
+                and (claude_skills_root / base.name).is_dir()
+            )
+            if not installed_here:
                 continue
             for src in sorted(base.rglob("*")):
                 if src.is_file():
                     rel = skills_rel / base.name / src.relative_to(base)
                     planned[rel.as_posix()] = substitute(src.read_text(encoding="utf-8"), ctx)
-    shared_root = Path(target) / ".agents" / "skills"
     kit_skill_names = {p.name for p in (SRC / "optional" / "skills").iterdir() if p.is_dir()}
-    if shared_root.is_dir() and any((shared_root / n / "SKILL.md").is_file()
-                                    for n in kit_skill_names | set(LOOP_SKILLS)):
+    want_loop_skills = (
+        (shared_root.is_dir() and any((shared_root / n / "SKILL.md").is_file()
+                                      for n in kit_skill_names | set(LOOP_SKILLS)))
+        or (shared_skills and has_commands)
+    )
+    if want_loop_skills:
         for name in LOOP_SKILLS:
             planned[".agents/skills/%s/SKILL.md" % name] = substitute(command_skill_text(name), ctx)
     git_hooks_root = Path(target) / ".ai-sdlc" / "git-hooks"
@@ -4533,7 +4545,8 @@ def upgrade(target, o):
     previous = load_manifest(target)
     previous_files = previous.get("files", {}) if previous else {}
     o.profile = installed_profile(target)
-    planned = managed_source_texts(target, docs, inst.ctx, o.profile)
+    planned = managed_source_texts(target, docs, inst.ctx, o.profile,
+                                   shared_skills=inst.shared_skills)
     planned.update(slop_filter_upgrade(target, charter, o, inst.ctx))
     if o.profile == "compact":
         print("Compact profile: the numbered process/ documents stay uninstalled.")
@@ -4729,6 +4742,17 @@ def upgrade(target, o):
                 print("  remove         %s (obsolete managed file)" % rel)
         hashes = dict((rel, sha256_text(content)) for rel, content in planned.items())
         write_manifest(target, docs, hashes, regions)
+        if o.harnesses is not None or getattr(o, "native_harnesses", []):
+            inst.wire_harnesses()
+            if inst.wired:
+                prof_path = target / PROFILE_REL
+                try:
+                    pdata = json.loads(prof_path.read_text(encoding="utf-8")) if prof_path.is_file() else None
+                except ValueError:
+                    pdata = None
+                if isinstance(pdata, dict):
+                    pdata["harnesses"] = sorted(set(pdata.get("harnesses") or []) | set(inst.wired))
+                    atomic_write_text(prof_path, json.dumps(pdata, indent=2, sort_keys=True) + "\n")
         refresh_profile(target)
         if o.finish_guard:
             added = merge_finish_guard(target)

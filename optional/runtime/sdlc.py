@@ -43,6 +43,25 @@ STAGES = ("format", "lint", "typecheck", "complexity", "infra", "unit", "mutatio
 POINTER_FILES = ("CLAUDE.md", "GEMINI.md", "AGENT.md", "CONVENTIONS.md",
                  ".github/copilot-instructions.md", ".cursorrules",
                  ".windsurfrules", ".clinerules", ".roo/rules/agents.md")
+LOOP_SKILLS = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-finish", "sdlc-log")
+LOOP_SKILL_WHEN = {
+    "sdlc-plan": "Use when the user invokes /sdlc-plan or asks to plan, frame or scope a "
+                 "change, or when a new request needs a tracked work item and a reviewed "
+                 "plan before any code is written.",
+    "sdlc-build": "Use only when the user invokes /sdlc-build or explicitly asks to build "
+                  "or implement a plan that is already approved. Never on your own "
+                  "initiative: building without an approved plan is what this loop exists "
+                  "to prevent.",
+    "sdlc-verify": "Use when the user invokes /sdlc-verify or asks to run the checks, and "
+                   "before claiming that anything passes, works or is done.",
+    "sdlc-review": "Use when the user invokes /sdlc-review or asks for a review of a plan "
+                   "or a change, and when a plan or a diff reaches a review gate.",
+    "sdlc-finish": "Use when the user invokes /sdlc-finish or asks to finish, close or wrap "
+                   "up a work item that is built, and when the finish guard names an item "
+                   "this session left open.",
+    "sdlc-log": "Use when the user invokes /sdlc-log or asks to close, log or wrap up a "
+                "work item that is built, verified and reviewed.",
+}
 EFFORT = ("Lean", "Normal", "Beast")
 ACQUISITION = ("Standard", "Advanced")
 DEV_METHOD = ("Item", "Epic")
@@ -379,6 +398,9 @@ FIX_HINTS = (
     ("claims", r"still claimed", "tool", SDLC + " release {item}"),
     ("claims", r"", "owner", "Decide which agent keeps {item}; the other releases it"),
     ("specs", r"not applied", "tool", SDLC + " spec apply {item} --write"),
+    ("harnesses", r"git-ignored", "owner", "Remove {where} from .gitignore or your global "
+     "gitignore so commands and skills travel to other devices on git pull"),
+    ("harnesses", r"", "tool", SDLC + " fix shared-skills"),
 )
 
 
@@ -407,7 +429,7 @@ def check_placeholders(project, out):
     # Only what the kit installs: .claude/ also holds worktrees and caches that can be
     # gigabytes of somebody else's files.
     for base in (project.docs, "AGENTS.md", ".claude/commands", ".claude/skills",
-                 ".claude/hooks", ".claude/settings.json"):
+                 ".claude/hooks", ".claude/settings.json", ".agents/skills"):
         top = project.path(base)
         paths = [top] if os.path.isfile(top) else []
         for folder, dirs, names in os.walk(top):
@@ -442,6 +464,82 @@ def check_pointer(project, out):
         if isinstance(rel, str) and rel not in pointing and os.path.isfile(project.path(rel)):
             out.add("fail", "contract", rel,
                     "was wired to AGENTS.md at install and no longer mentions it")
+
+
+def command_to_skill_text(name, cmd_text):
+    """Rewrite an installed .claude/commands/<name>.md into an Agent Skills SKILL.md."""
+    m = re.match(r"^---\n(.*?)\n---\n", cmd_text, re.S)
+    meta, body = {}, cmd_text
+    if m:
+        body = cmd_text[m.end():]
+        for line in m.group(1).splitlines():
+            key, _, value = line.partition(":")
+            meta[key.strip()] = value.strip().strip('"')
+    hint = meta.get("argument-hint", "")
+    body = body.replace(
+        "$ARGUMENTS",
+        "the request given with this skill: the text after its name, or the request in the "
+        "conversation that called for it" + (" (expected: `%s`)" % hint if hint else "") + ".")
+    body = re.sub(r"`/(sdlc-[a-z-]+)`", r"the `\1` skill", body)
+    description = "%s. %s" % (meta.get("description", name).rstrip("."),
+                              LOOP_SKILL_WHEN.get(name, ""))
+    return ("---\nname: %s\ndescription: %s\n---\n\n"
+            "<!-- Generated from the kit's optional/claude-commands/%s.md by install.py. "
+            "Kit-managed: change the kit, not this file. -->\n%s"
+            % (name, json.dumps(description, ensure_ascii=False), name, body))
+
+
+def check_harness_parity(project, out):
+    """Warn when .agents/skills/ is missing loop skills or kit skills for a project that
+    wired non-Claude harnesses, or when .claude/commands, .claude/skills or .agents/skills
+    is git-ignored in a repository where AGENTS.md is tracked."""
+    non_claude_pointers = [rel for rel in POINTER_FILES if rel != "CLAUDE.md"
+                           and os.path.isfile(project.path(rel))
+                           and "AGENTS.md" in read(project.path(rel))]
+    rules_dir = project.path(".cursor/rules")
+    if os.path.isdir(rules_dir):
+        for name in sorted(os.listdir(rules_dir)):
+            if name.endswith(".mdc") and "AGENTS.md" in read(os.path.join(rules_dir, name)):
+                non_claude_pointers.append(os.path.join(".cursor/rules", name))
+    shared_dir = project.path(".agents/skills")
+    cmds_dir = project.path(".claude/commands")
+    has_commands = os.path.isdir(cmds_dir) and any(
+        os.path.isfile(os.path.join(cmds_dir, n + ".md")) for n in LOOP_SKILLS
+    )
+    if (os.path.isdir(shared_dir) or non_claude_pointers) and has_commands:
+        missing_loop = [n for n in LOOP_SKILLS
+                        if os.path.isfile(os.path.join(cmds_dir, n + ".md"))
+                        and not os.path.isfile(os.path.join(shared_dir, n, "SKILL.md"))]
+        if missing_loop:
+            out.add("warn", "harnesses", ".agents/skills",
+                    "missing loop skill(s) for non-Claude tools: %s" % ", ".join(missing_loop))
+        claude_skills = project.path(".claude/skills")
+        if os.path.isdir(claude_skills):
+            missing_kit = [n for n in sorted(os.listdir(claude_skills))
+                           if n.startswith("sdlc-")
+                           and os.path.isfile(os.path.join(claude_skills, n, "SKILL.md"))
+                           and not os.path.isfile(os.path.join(shared_dir, n, "SKILL.md"))]
+            if missing_kit:
+                out.add("warn", "harnesses", ".agents/skills",
+                        "kit skill(s) in .claude/skills/ not mirrored to .agents/skills/: %s"
+                        % ", ".join(missing_kit))
+
+    if os.path.exists(project.path(".git")) and project.git("ls-files", "--error-unmatch", "AGENTS.md"):
+        check_paths = [rel for rel in (".claude/commands", ".claude/skills", ".agents/skills")
+                       if os.path.isdir(project.path(rel))]
+        if check_paths:
+            try:
+                proc = subprocess.run(("git", "check-ignore") + tuple(check_paths),
+                                      cwd=project.root, stdout=subprocess.PIPE,
+                                      stderr=subprocess.DEVNULL, universal_newlines=True)
+                ignored = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+            except OSError:
+                ignored = []
+            for rel in ignored:
+                if not project.git("ls-files", rel).strip():
+                    out.add("warn", "harnesses", rel,
+                            "%s is git-ignored while AGENTS.md is tracked, so /sdlc-* commands "
+                            "and skills will be missing on other devices after git pull" % rel)
 
 
 def check_charter(project, out):
@@ -984,6 +1082,7 @@ def doctor(project, today=None):
         check_verified_claims(project, out)
         check_placeholders(project, out)
         check_pointer(project, out)
+        check_harness_parity(project, out)
         check_charter(project, out)
         check_staleness(project, out, today)
         check_stack_versions(project, out, today)
@@ -2381,6 +2480,9 @@ def kit_status(project):
     check_profile(project, prof_findings)
     ptr_findings = Findings()
     check_pointer(project, ptr_findings)
+    hrn_findings = Findings()
+    check_harness_parity(project, hrn_findings)
+    shared_skill_findings = [f for f in hrn_findings.items if f["where"] == ".agents/skills"]
 
     fixable = []
     if prof_findings.items:
@@ -2396,6 +2498,13 @@ def kit_status(project):
             "title": "Wire CLAUDE.md pointer to AGENTS.md",
             "detail": ptr_findings.items[0]["message"],
             "level": "fail",
+        })
+    if shared_skill_findings:
+        fixable.append({
+            "id": "shared-skills",
+            "title": "Materialise / sync cross-tool skills (.agents/skills/)",
+            "detail": "; ".join(f["message"] for f in shared_skill_findings),
+            "level": "warn",
         })
     if bite_active:
         fixable.append({
@@ -2725,6 +2834,85 @@ def configure_kit(project, changes):
     return {"applied": applied, "kit": kit_status(project)}, None
 
 
+def sync_shared_skills(project):
+    """Materialise or sync .agents/skills/ from .claude/commands/ and .claude/skills/,
+    updating .ai-sdlc/manifest.json without overwriting user-modified files."""
+    manifest_path = project.path(".ai-sdlc/manifest.json")
+    manifest = dict(project.manifest) if project.manifest else {}
+    managed = dict(manifest.get("files") or {})
+    written = []
+
+    def can_write(rel, dest):
+        if not os.path.isfile(dest):
+            return True
+        if rel not in managed:
+            return False
+        try:
+            with open(dest, "rb") as handle:
+                return hashlib.sha256(handle.read()).hexdigest() == managed[rel]
+        except (IOError, OSError):
+            return False
+
+    def write_managed(rel, dest, content_bytes):
+        digest = hashlib.sha256(content_bytes).hexdigest()
+        if os.path.isfile(dest):
+            try:
+                with open(dest, "rb") as handle:
+                    if handle.read() == content_bytes:
+                        if managed.get(rel) != digest:
+                            managed[rel] = digest
+                            written.append(rel)
+                        return
+            except (IOError, OSError):
+                pass
+        if not can_write(rel, dest):
+            return
+        parent = os.path.dirname(dest)
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent)
+        with open(dest, "wb") as handle:
+            handle.write(content_bytes)
+        managed[rel] = digest
+        written.append(rel)
+
+    cmds_dir = project.path(".claude/commands")
+    if os.path.isdir(cmds_dir):
+        for name in LOOP_SKILLS:
+            src_cmd = os.path.join(cmds_dir, name + ".md")
+            if not os.path.isfile(src_cmd):
+                continue
+            skill_text = command_to_skill_text(name, read(src_cmd))
+            rel = ".agents/skills/%s/SKILL.md" % name
+            write_managed(rel, project.path(rel), skill_text.encode("utf-8"))
+
+    claude_skills = project.path(".claude/skills")
+    if os.path.isdir(claude_skills):
+        for name in sorted(os.listdir(claude_skills)):
+            src_skill_dir = os.path.join(claude_skills, name)
+            if not name.startswith("sdlc-") or not os.path.isdir(src_skill_dir):
+                continue
+            for folder, _, files in os.walk(src_skill_dir):
+                for fname in sorted(files):
+                    src_file = os.path.join(folder, fname)
+                    sub_rel = os.path.relpath(src_file, src_skill_dir).replace(os.sep, "/")
+                    claude_rel = ".claude/skills/%s/%s" % (name, sub_rel)
+                    if managed and claude_rel not in managed:
+                        continue
+                    rel = ".agents/skills/%s/%s" % (name, sub_rel)
+                    try:
+                        with open(src_file, "rb") as handle:
+                            raw = handle.read()
+                    except (IOError, OSError):
+                        continue
+                    write_managed(rel, project.path(rel), raw)
+
+    if written and os.path.isfile(manifest_path):
+        manifest["files"] = dict(sorted(managed.items()))
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    return written
+
+
 def fix_kit(project, action="all", opts=None):
     """Run safe, non-fabricating mechanical repairs on the kit setup."""
     opts = opts or {}
@@ -2771,6 +2959,15 @@ def fix_kit(project, action="all", opts=None):
         if os.path.isfile(project.path(os.path.join(BITE_DIR, "active.json"))):
             restored = bite_restore(project)
             repaired.append("restored bite backup (%d file(s))" % len(restored))
+
+    if action == "shared-skills" or action == "all":
+        hrn_findings = Findings()
+        check_harness_parity(project, hrn_findings)
+        need_shared = any(f["where"] == ".agents/skills" for f in hrn_findings.items)
+        if action == "shared-skills" or need_shared:
+            synced = sync_shared_skills(project)
+            if synced:
+                repaired.append("synced %d cross-tool skill file(s) in .agents/skills/" % len(synced))
 
     if action == "unlock-tests" or (action == "all" and opts.get("unlock_tests")):
         lock_path = project.path(".ai-sdlc/test-lock.txt")
@@ -3063,7 +3260,7 @@ EXAMPLES = {
     "bite": ["bite npm test", "bite --restore"],
     "config": ["config                   # show the constraints", "config --effort Lean --independent-review tier1",
                "config --specs on", "config --slop-filter strict", "config --set-check unit='npm test'"],
-    "fix": ["fix all", "fix wire-pointer", "fix rotate-worklog          # preview",
+    "fix": ["fix all", "fix shared-skills", "fix wire-pointer", "fix rotate-worklog          # preview",
             "fix normalise-status --apply", "fix link-evidence --apply"],
     "lens": ["lens", "lens --area build", "lens --user --json"],
     "audit": ["audit", "audit --strict           # exit 1 on a critical or high vulnerability"],
@@ -3212,8 +3409,8 @@ def main(argv):
     cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
     fx = sub.add_parser("fix", help="run safe mechanical repairs on kit setup")
     fx.add_argument("action", nargs="?", default="all",
-                    choices=("all", "sync-profile", "wire-pointer", "restore-bite", "unlock-tests",
-                             "rotate-worklog", "normalise-status", "link-evidence"),
+                    choices=("all", "sync-profile", "wire-pointer", "shared-skills", "restore-bite",
+                             "unlock-tests", "rotate-worklog", "normalise-status", "link-evidence"),
                     help="repair action to run (default: all, the setup repairs). The three "
                     "record repairs preview unless --apply")
     fx.add_argument("--apply", action="store_true", help="record repairs: write the change")

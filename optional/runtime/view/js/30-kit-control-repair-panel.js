@@ -238,6 +238,7 @@
     var repairActions = [
       { id: "sync-profile", label: "Sync .ai-sdlc/profile.json with charter.md", cmd: "python3 .ai-sdlc/bin/sdlc.py fix sync-profile" },
       { id: "wire-pointer", label: "Wire CLAUDE.md pointer to AGENTS.md", cmd: "python3 .ai-sdlc/bin/sdlc.py fix wire-pointer" },
+      { id: "shared-skills", label: "Materialise / sync cross-tool skills (.agents/skills/)", cmd: "python3 .ai-sdlc/bin/sdlc.py fix shared-skills" },
       { id: "restore-bite", label: "Restore interrupted `sdlc.py bite` backup", cmd: "python3 .ai-sdlc/bin/sdlc.py fix restore-bite" },
       { id: "unlock-tests", label: "Unlock reproducing tests in .ai-sdlc/test-lock.txt", cmd: "python3 .ai-sdlc/bin/sdlc.py fix unlock-tests" }
     ];

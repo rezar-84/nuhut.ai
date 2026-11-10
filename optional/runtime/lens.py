@@ -690,8 +690,20 @@ def agents(project, kit, include_user=False):
         if i["kind"] in ("skill", "command", "subagent", "mcp"):
             names.setdefault((i["kind"], i["name"].split(":")[-1]), []).append(i)
     issues = []
+    mirrored_skills = set()
     for (kind, name), group in sorted(names.items()):
         if len(group) > 1:
+            is_kit_mirror = (
+                kind == "skill" and len(group) == 2
+                and all(g.get("owner") == "kit" and g.get("source") == "project" for g in group)
+                and set(g["path"].split("/")[0] for g in group) == set((".claude", ".agents"))
+            )
+            if is_kit_mirror:
+                for i in group:
+                    i["state"] = "ok"
+                    if i["path"].startswith(".agents/"):
+                        mirrored_skills.add(i["path"])
+                continue
             for i in group:
                 i["state"] = "duplicate"
             issues.append({"level": "warn", "title": "%s %s is defined %d times" % (kind, name, len(group)),
@@ -705,7 +717,8 @@ def agents(project, kit, include_user=False):
     missing = [rel for rel in managed if not os.path.exists(project.path(rel))]
     if missing:
         issues.append({"level": "warn", "title": "%d kit file(s) missing" % len(missing), "detail": ", ".join(missing[:5])})
-    always_words = sum(len(i["description"].split()) for i in items if i["kind"] == "skill")
+    always_words = sum(len(i["description"].split()) for i in items
+                       if i["kind"] == "skill" and i["path"] not in mirrored_skills)
     counts = {}
     for i in items:
         counts.setdefault(i["kind"], {}).setdefault(i["source"], 0)
