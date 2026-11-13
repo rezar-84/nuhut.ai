@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "architect",
-  "status": "In progress",
+  "status": "Parked",
   "depends": [
     "NUHT-001"
   ],
@@ -15,8 +15,8 @@
   "completed": "",
   "summary": "",
   "approvers": [],
-  "waiting_on": "",
-  "park_reason": "",
+  "waiting_on": "rezar-84",
+  "park_reason": "merge approval (Tier 1)",
   "unblock_by": "",
   "later_when": "",
   "dropped_reason": ""

@@ -190,11 +190,11 @@ def waivers(rt, project, item):
 
 
 def worklog_entry(project, item):
-    """The text of the worklog entry headed by <item> (shard first, then worklog.md), or ''."""
+    """The text of the worklog entry headed by <item> (shard first, then worklog/archive), or ''."""
     shard_text = shards.load_worklog_shard(project, item)
     if shard_text:
         return shard_text
-    text = project.records("worklog.md")
+    text = project.worklog_texts() if hasattr(project, "worklog_texts") else project.records("worklog.md")
     for entry in re.split(r"(?m)^(?=## |- [0-9]{4}-[0-9]{2}-[0-9]{2} · )", text):
         if re.match(r"^(?:## |- [0-9-]+ · )(?:[^\n]*[ ,&/])?%s\b" % re.escape(item), entry):
             return entry
@@ -482,7 +482,7 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     if entry and TODO in entry and _has_notes(notes) and not dry_run:
         if _replace_worklog_todos(project, item, notes):
             entry = worklog_entry(project, item)
-    logged = bool(entry) or item in rt.ids_in(project.worklog_texts(), project.prefix, set([item]))
+    logged = bool(entry)
     if entry and TODO in entry:
         owe("log      the worklog entry still has %s parts: write them, then run "
                      "finish again" % TODO)

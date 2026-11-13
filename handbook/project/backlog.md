@@ -36,8 +36,6 @@ is prioritised.
 
 | ID | Task | Tier | Owner role | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
-| NUHT-001 | M1: Control-plane security hardening, unified Python hook engine, runtime bug fixes & contract reconciliation | 1 | security |  | In progress |
-| NUHT-002 | M2: Sharded zero-conflict store, git-ref leases, Tier 2 parallel scope globs, universal --json & cached doctor | 1 | architect | NUHT-001 | In progress |
 
 ## Next
 
@@ -45,7 +43,6 @@ Agreed, not started. Ordered by priority.
 
 | ID | Task | Tier | Owner role | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
-| NUHT-003 | M3: Multi-worker headless dispatcher (dispatch.py), self-healing defect policy & effort-modes benchmark suite | 1 | architect | NUHT-002 | Ready |
 
 ## Blocked
 
@@ -63,6 +60,9 @@ proceed. See "Waiting on a human" in `../process/00-operating-model.md`.
 
 | ID | Task | Tier | Owner role | Depends on | Status | Waiting on whom | For what decision | Since |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| NUHT-003 | M3: Multi-worker headless dispatcher (dispatch.py), self-healing defect policy & effort-modes benchmark suite | 1 | architect | NUHT-002 | Parked | rezar-84 | merge approval (Tier 1) | 2026-11-13 |
+| NUHT-002 | M2: Sharded zero-conflict store, git-ref leases, Tier 2 parallel scope globs, universal --json & cached doctor | 1 | architect | NUHT-001 | Parked | rezar-84 | merge approval (Tier 1) | 2026-11-13 |
+| NUHT-001 | M1: Control-plane security hardening, unified Python hook engine, runtime bug fixes & contract reconciliation | 1 | security |  | Parked | rezar-84 | merge approval (Tier 1) | 2026-11-13 |
 
 ## Later
 
