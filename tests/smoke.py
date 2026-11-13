@@ -3632,7 +3632,8 @@ def test_upgrade_to_41():
               all(os.path.isfile(os.path.join(d, "docs", rel)) for rel in ("templates/spec.md", "templates/spec-change.md", "process/15-specs.md")))
         after = read(d, "docs/project/charter.md").splitlines()
         added = [l for l in after if l not in charter_before.splitlines()]
-        new_rows = ("| **Specs** |", "| **Slop filter** |", "| **Updating a branch** |", "| **Finish guard** |", "| **Allowed in records** |")
+        new_rows = ("| **Specs** |", "| **Slop filter** |", "| **Updating a branch** |",
+                    "| **Finish guard** |", "| **Allowed in records** |", "| **Discovered defects** |")
         check("project records keep every line; the charter only gains the new rows",
               all(l in after for l in charter_before.splitlines()) and len(added) == len(new_rows)
               and all(any(l.startswith(r) for l in added) for r in new_rows)

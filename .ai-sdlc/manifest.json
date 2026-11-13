@@ -20,7 +20,7 @@
     ".ai-sdlc/bin/finish.py": "9bd332d90c9b6d1384f0191c1ba3bfe9191e8a7f00dd9143675127a9d2054267",
     ".ai-sdlc/bin/hooks.py": "9c0442e8ab9c8676ca40c2c1bf90e02cfb06056fd021479a6602a1de5b171c7c",
     ".ai-sdlc/bin/lens.py": "577f3aabb5934858478aeb61fcb829bd37a59fa6a8afecd38df44a30da6b937a",
-    ".ai-sdlc/bin/sdlc.py": "fbe35cd6af46fe905bd01e383addc2e67e32a5791a7f9c0a316fd024a73b759b",
+    ".ai-sdlc/bin/sdlc.py": "a53d3aa423fe6fb9f7f0cd578525ef3f59c45bed3bd75d9f1b65e770c282930d",
     ".ai-sdlc/bin/shards.py": "8ea5ac87cdfdd64ff9d22dca0d841d3912196adc6c153efc670e72dfa5d4a3e7",
     ".ai-sdlc/bin/slop.py": "a159f431f5b55b60b36eb466972059b3bf8fae89f95058161219135182921bb8",
     ".ai-sdlc/bin/specs.py": "c3aa48de93e869ccb4e85efac370d0f210245475259bff3cf3f421976bdd9503",

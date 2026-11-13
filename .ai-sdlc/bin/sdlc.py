@@ -186,7 +186,8 @@ def charter_commands(text):
             cell = spans[0]
         else:
             cell = cell.replace("`", "")
-        commands[match.group(1)] = "absent" if cell.lower() == "absent" else cell
+        is_absent = bool(re.match(r"^absent(?:\s*$|\s+[-—:]|\s*[:(\[])", cell.strip(), re.I))
+        commands[match.group(1)] = "absent" if is_absent else cell
     return commands
 
 
