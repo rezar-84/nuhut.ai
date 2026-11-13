@@ -1,0 +1,9 @@
+# One shell glob per line. An edit to a matching path is denied.
+# Seeded empty on purpose: only this project knows which files a
+# managed platform owns, which are generated, and which another
+# agent holds. Until there is a line here the hook does nothing.
+#
+# e.g.  .replit
+#       replit.nix
+#       package-lock.json
+#       **/generated/**

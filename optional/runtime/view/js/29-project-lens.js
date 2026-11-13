@@ -121,7 +121,7 @@
     fn(L);
   }
   function auditBtn() {
-    return LIVE && M.action_token ? el("button", { cls: "btn", text: "Run dependency audit", title: "python3 .ai-sdlc/bin/sdlc.py audit", on: { click: function () {
+    return LIVE && M.live_actions ? el("button", { cls: "btn", text: "Run dependency audit", title: "python3 .ai-sdlc/bin/sdlc.py audit", on: { click: function () {
       runKitCmd({ subcommand: "audit" }, "python3 .ai-sdlc/bin/sdlc.py audit", "audit");
       setTimeout(function () { loadLens(true); }, 1500);
     } } }) : el("button", { cls: "btn", text: "Copy audit command", on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py audit", "audit"); } } });

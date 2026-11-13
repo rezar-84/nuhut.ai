@@ -214,12 +214,13 @@ def dependencies(project):
         else:
             continue
         # A workspace package shares the lockfile of the nearest ancestor that has one.
-        lock, here = [], os.path.dirname(path)
+        lock, here = [], os.path.realpath(os.path.dirname(path))
+        root_real = os.path.realpath(project.root)
         while not lock:
-            lock = [os.path.relpath(os.path.join(here, f), project.root).replace(os.sep, "/")
+            lock = [os.path.relpath(os.path.join(here, f), root_real).replace(os.sep, "/")
                     for f in LOCKFILES.get(kind, ())
                     if os.path.exists(os.path.join(here, f))]
-            if os.path.abspath(here) == os.path.abspath(project.root) or len(here) <= len(project.root):
+            if here == root_real or not here.startswith(root_real + os.sep):
                 break
             here = os.path.dirname(here)
         manifests.append({"path": rel, "kind": kind, "count": len(deps), "lockfile": lock[0] if lock else "",

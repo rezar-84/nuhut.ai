@@ -52,9 +52,10 @@ becomes a restore-from-backup.
 
 ## Tier and evidence
 
-A schema addition is Tier 2. A migration or deletion of existing data, a backfill, or
-anything on a PII, payments, or authorisation table is **Tier 1**: plan, review, ADR
-where the shape is a decision, human approval, rollback plan.
+All stored-data schema changes (including additive columns/tables on persisted production
+stores), data migrations, deletions, backfills, or anything touching PII, payments, or
+authorisation tables are **Tier 1** (`AGENTS.md` §2): written plan, active-role design and
+ship review, ADR where the shape is a decision, human approval, and rollback plan.
 
 Verification is: ran forward on a realistic copy, ran the reverse, checked row counts and
 a sample of values before and after, and timed it at production scale. Report the timing

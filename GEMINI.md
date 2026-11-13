@@ -1,0 +1,3 @@
+# Project instructions
+
+Read and follow `AGENTS.md` in this directory. It is the operating contract for this repository and it takes precedence over habit.

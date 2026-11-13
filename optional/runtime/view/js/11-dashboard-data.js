@@ -80,12 +80,12 @@
     ]));
   }
   function runVerifyBtn() {
-    return LIVE && M.action_token ? el("button", { cls: "btn", text: "Run verify", title: "python3 .ai-sdlc/bin/sdlc.py verify --parallel", on: { click: function () {
+    return LIVE && M.live_actions ? el("button", { cls: "btn", text: "Run verify", title: "python3 .ai-sdlc/bin/sdlc.py verify --parallel", on: { click: function () {
       runKitCmd({ subcommand: "verify" }, "python3 .ai-sdlc/bin/sdlc.py verify --parallel", "verify");
     } } }) : el("button", { cls: "btn", text: "Copy verify command", on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py verify --parallel", "verify"); } } });
   }
   function runDoctorBtn() {
-    return LIVE && M.action_token ? el("button", { cls: "btn", text: "Run doctor", title: "python3 .ai-sdlc/bin/sdlc.py doctor", on: { click: function () {
+    return LIVE && M.live_actions ? el("button", { cls: "btn", text: "Run doctor", title: "python3 .ai-sdlc/bin/sdlc.py doctor", on: { click: function () {
       runKitCmd({ subcommand: "doctor" }, "python3 .ai-sdlc/bin/sdlc.py doctor", "doctor");
     } } }) : el("button", { cls: "btn", text: "Copy doctor command", on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py doctor", "doctor"); } } });
   }

@@ -70,29 +70,67 @@ TIER_RULES = ("Standard", "Strict")
 WORKLOG_ROTATE_LINES = 1000
 DEFAULT_STALENESS_DAYS = 90
 KNOWN_MISTAKES_LINES = 30
-# High-confidence credential shapes, the same set the secret-guard hook denies at commit.
-SECRET_PATTERNS = (
-    ("private key", r"-----BEGIN ([A-Z]+ )?PRIVATE KEY-----[\s\S]*?-----END ([A-Z]+ )?PRIVATE KEY-----"),
-    ("AWS access key", r"(AKIA|ASIA)[0-9A-Z]{16}"),
-    ("GitHub token", r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}"),
-    ("GitLab token", r"glpat-[A-Za-z0-9_-]{20,}"),
-    ("Slack token", r"xox[abposr]-[A-Za-z0-9-]{10,}"),
-    ("Stripe live key", r"(sk|rk)_live_[A-Za-z0-9]{20,}"),
-    ("Anthropic API key", r"sk-ant-[A-Za-z0-9_-]{20,}"),
-    ("OpenAI API key", r"sk-(proj-)?[A-Za-z0-9_-]{40,}"),
-    ("Google API key", r"AIza[0-9A-Za-z_-]{35}"),
-)
-# A URL that embeds a password, with placeholder passwords and example hosts excluded.
-URL_PASSWORD = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://([^/\s:@]+):([^/\s@<>{}$]{4,})@([^/\s]*)")
-URL_PASSWORD_PLACEHOLDER = re.compile(
-    r"^(password|passwd|pass|secret|changeme|x{4,}|\*+)$", re.IGNORECASE)
-EXAMPLE_HOST = re.compile(r"(^|\.)(example\.(com|org|net)|invalid)$", re.IGNORECASE)
-# Personal-data shapes: lower confidence than credentials, so `doctor` warns.
-EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})")
-CARD_SHAPE = re.compile(r"(?<![0-9])[0-9]{4}(?:[ -][0-9]{4}){3}(?![0-9])")
-NATIONAL_ID_SHAPE = re.compile(r"(?<![0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?![0-9])")
+sys.dont_write_bytecode = True
+_RUNTIME_DIR = os.path.dirname(os.path.abspath(__file__))
+if _RUNTIME_DIR not in sys.path:
+    sys.path.insert(0, _RUNTIME_DIR)
+import hooks as _hooks_mod  # noqa: E402
+
+SECRET_PATTERNS = _hooks_mod.SECRET_PATTERNS
+URL_PASSWORD = _hooks_mod.URL_PASSWORD
+URL_PASSWORD_PLACEHOLDER = _hooks_mod.URL_PASSWORD_PLACEHOLDER
+EXAMPLE_HOST = _hooks_mod.EXAMPLE_HOST
+EMAIL = _hooks_mod.EMAIL
+CARD_SHAPE = _hooks_mod.CARD_SHAPE
+NATIONAL_ID_SHAPE = _hooks_mod.NATIONAL_ID_SHAPE
 PLACEHOLDER = re.compile(r"[{][{][A-Z][A-Z0-9_]*[}][}]")
 UNFILLED = re.compile(r"_\([^)]*\)_")
+
+AGENT_SESSION_ENVS = (
+    "CLAUDECODE",
+    "CLAUDE_PROJECT_DIR",
+    "GEMINI_CLI",
+    "GEMINI_PROJECT_DIR",
+    "CURSOR_PROJECT_DIR",
+    "CODEX_SANDBOX",
+    "ANTIGRAVITY_AGENT",
+    "NUHUT_DISPATCH_WORKER",
+)
+
+
+def _run_isolated(cmd_or_args, cwd, timeout, shell=False, input_text=None, stdout=None, stderr=None, env=None):
+    """Run a child command in its own POSIX process group so timeouts kill grandchildren too."""
+    kwargs = dict(
+        cwd=cwd,
+        shell=shell,
+        stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE if stdout is None else stdout,
+        stderr=subprocess.PIPE if stderr is None else stderr,
+    )
+    if env is not None:
+        kwargs["env"] = env
+    if os.name == "posix":
+        kwargs["start_new_session"] = True
+    proc = subprocess.Popen(cmd_or_args, **kwargs)
+    try:
+        in_bytes = input_text.encode("utf-8") if isinstance(input_text, str) else input_text
+        out_b, err_b = proc.communicate(input=in_bytes, timeout=timeout)
+        return proc.returncode, out_b or b"", err_b or b"", False
+    except subprocess.TimeoutExpired:
+        if os.name == "posix":
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except OSError:
+                pass
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        try:
+            proc.communicate(timeout=2)
+        except Exception:
+            pass
+        return None, b"", b"", True
 
 
 # ---------------------------------------------------------------- reading
@@ -282,7 +320,7 @@ def age_days(value, today):
 
 class Project(object):
     def __init__(self, root):
-        self.root = os.path.abspath(root)
+        self.root = os.path.realpath(root)
         self.profile = self.json(".ai-sdlc/profile.json")
         self.manifest = self.json(".ai-sdlc/manifest.json")
         self.docs = self.profile.get("docs_dir") or self.manifest.get("docs_dir") or "docs"
@@ -863,38 +901,8 @@ def check_rollback(project, out, today):
                     "window is %d" % (days, window))
 
 
-def redact(text):
-    """Mask credential shapes in captured output. Returns (text, count)."""
-    count = 0
-    for kind, pattern in SECRET_PATTERNS:
-        text, n = re.subn(pattern, "[redacted: %s]" % kind, text)
-        count += n
-    return text, count
-
-
-def sensitive_kinds(line):
-    """(credential kinds, personal-data kinds) in one line. Kinds only, never values.
-    A line containing EXAMPLE is a deliberate fixture."""
-    if "EXAMPLE" in line:
-        return [], []
-    secrets = [kind for kind, pattern in SECRET_PATTERNS if re.search(pattern, line)]
-    for _user, password, host in URL_PASSWORD.findall(line):
-        if not URL_PASSWORD_PLACEHOLDER.match(password) and not EXAMPLE_HOST.search(host):
-            secrets.append("URL with embedded password")
-            break
-    personal = []
-    for match in EMAIL.finditer(line):
-        local, domain = match.group(0).split("@", 1)[0], match.group(1)
-        if (EXAMPLE_HOST.search(domain) or domain.lower() == "users.noreply.github.com"
-                or local.lower() in ("noreply", "no-reply")):
-            continue
-        personal.append("email address")
-        break
-    if CARD_SHAPE.search(line):
-        personal.append("card-number shape")
-    if NATIONAL_ID_SHAPE.search(line):
-        personal.append("national-ID shape")
-    return secrets, personal
+redact = _hooks_mod.redact
+sensitive_kinds = _hooks_mod.sensitive_kinds
 
 
 def check_sensitive(project, out):
@@ -1053,13 +1061,17 @@ def check_dependencies(project, out):
 
 
 def check_hook_dependency(project, out):
-    """The hooks stay silent unless they deny, so a missing jq -- which makes every hook
-    allow every call -- is reported here instead."""
+    """Check that installed hooks have their runtime engine (or legacy jq when un-upgraded)."""
     hooks = project.path(os.path.join(".claude", "hooks"))
-    if os.path.isdir(hooks) and any(n.endswith(".sh") for n in os.listdir(hooks)) \
-            and shutil.which("jq") is None:
+    if not os.path.isdir(hooks) or not any(n.endswith(".sh") for n in os.listdir(hooks)):
+        return
+    lib_text = read(os.path.join(hooks, "lib.sh"))
+    if "command -v jq" in lib_text and shutil.which("jq") is None:
         out.add("warn", "hooks", ".claude/hooks",
-                "installed, but jq is not on PATH, so every hook allows every call")
+                "legacy shell hooks installed without jq on PATH; run install.py --upgrade to switch to stdlib hooks.py")
+    elif "hooks.py" in lib_text and not os.path.isfile(project.path(".ai-sdlc/bin/hooks.py")):
+        out.add("fail", "hooks", ".ai-sdlc/bin/hooks.py",
+                "hooks delegate to .ai-sdlc/bin/hooks.py, which is missing; run install.py --upgrade")
 
 
 def check_bite_leftover(project, out):
@@ -1216,13 +1228,18 @@ def print_findings(items, show_accepted=False):
 
 def evidence_dir(project, suffix=""):
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base = project.path(os.path.join(".ai-sdlc", "evidence", stamp + suffix))
+    parent = project.path(os.path.join(".ai-sdlc", "evidence"))
+    os.makedirs(parent, exist_ok=True)
+    base = os.path.join(parent, stamp + suffix)
     path, n = base, 1
-    while os.path.exists(path):
-        n += 1
-        path = "%s-%d" % (base, n)
-    os.makedirs(path)
-    ignore = project.path(os.path.join(".ai-sdlc", "evidence", ".gitignore"))
+    while True:
+        try:
+            os.makedirs(path, exist_ok=False)
+            break
+        except FileExistsError:
+            n += 1
+            path = "%s-%d" % (base, n)
+    ignore = os.path.join(parent, ".gitignore")
     if not os.path.exists(ignore):
         # Evidence is local proof for the session that ran it, not a project record.
         with open(ignore, "w", encoding="utf-8") as handle:
@@ -1247,13 +1264,10 @@ def verify(project, selected, timeout, parallel=False, item=None):
         log = os.path.join(folder, stage + ".log")
         started = time.time()
         with open(log, "wb") as handle:
-            try:
-                code = subprocess.run(command, shell=True, cwd=project.root,
-                                      stdin=subprocess.DEVNULL, stdout=handle,
-                                      stderr=subprocess.STDOUT, timeout=timeout).returncode
-                timed_out = False
-            except subprocess.TimeoutExpired:
-                code, timed_out = None, True
+            code, _, _, timed_out = _run_isolated(
+                command, cwd=project.root, timeout=timeout, shell=True,
+                stdout=handle, stderr=subprocess.STDOUT,
+            )
         with open(log, "rb") as handle:
             raw = handle.read().decode("utf-8", "replace")
         clean, masked = redact(raw)
@@ -1569,27 +1583,28 @@ def review(project, item, role, by, model=None, stage="ship", base=None, timeout
         return None, None, error
     tier = item_tier(project, item)
     prompt = review_prompt(project, item, role, tier, diff)
-    try:
-        if command:
-            proc = subprocess.run(command, shell=True, cwd=project.root, input=prompt,
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  universal_newlines=True, timeout=timeout)
-        else:
-            args, flag = REVIEW_HARNESSES[by]
-            args = [part.replace("{prompt}", prompt) for part in args]
-            if model:
-                args += [flag, model]
-            proc = subprocess.run(args, cwd=project.root, stdin=subprocess.DEVNULL,
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  universal_newlines=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
+    if command:
+        rc, out_b, err_b, timed_out = _run_isolated(
+            command, cwd=project.root, timeout=timeout, shell=True, input_text=prompt
+        )
+    else:
+        args, flag = REVIEW_HARNESSES[by]
+        args = [part.replace("{prompt}", prompt) for part in args]
+        if model:
+            args += [flag, model]
+        rc, out_b, err_b, timed_out = _run_isolated(
+            args, cwd=project.root, timeout=timeout, shell=False
+        )
+    if timed_out:
         return None, None, "the reviewer did not answer within %ds" % timeout
-    if proc.returncode != 0 or not proc.stdout.strip():
+    stdout_str = out_b.decode("utf-8", "replace")
+    stderr_str = err_b.decode("utf-8", "replace")
+    if rc != 0 or not stdout_str.strip():
         return None, None, "the reviewer failed (exit %s): %s" % (
-            proc.returncode, (proc.stderr or proc.stdout).strip()[-400:])
+            rc, (stderr_str or stdout_str).strip()[-400:])
     reviewer_model = model or "unknown (the harness default)"
     if harness == "cmd":
-        m = re.search(r"^Model:\s*(\S+)", proc.stdout, re.M)
+        m = re.search(r"^Model:\s*(\S+)", stdout_str, re.M)
         reviewer_model = model or (m.group(1) if m else "unknown")
     author_agent, author_model = item_author(project, item)
     family_reviewer = model_family(reviewer_model if reviewer_model != "unknown (the harness default)"
@@ -1598,16 +1613,9 @@ def review(project, item, role, by, model=None, stage="ship", base=None, timeout
     family_author = model_family(author_model or author_agent or "")
     independent = (family_reviewer not in ("unknown",) and family_author != "unknown"
                    and family_reviewer != family_author)
-    verdict = re.search(r"^Verdict:\s*(Pass with conditions|Pass|Block)", proc.stdout, re.M)
+    verdict = re.search(r"^Verdict:\s*(Pass with conditions|Pass|Block)", stdout_str, re.M)
     folder = project.path(os.path.join(project.docs, "project", "reviews"))
-    if not os.path.isdir(folder):
-        os.makedirs(folder)
-    name = "%s-%s-%s.md" % (item, stage, role)
-    path = os.path.join(folder, name)
-    n = 1
-    while os.path.exists(path):
-        n += 1
-        path = os.path.join(folder, "%s-%s-%s-%d.md" % (item, stage, role, n))
+    os.makedirs(folder, exist_ok=True)
     record = {
         "item": item, "stage": stage, "role": role, "tier": tier,
         "reviewer_agent": harness if harness != "cmd" else "cmd:" + command.split()[0],
@@ -1629,8 +1637,17 @@ def review(project, item, role, by, model=None, stage="ship", base=None, timeout
                record["independence"] + ("" if independent else
                                           " (same model family as the author, or unknown; "
                                           "it cannot clear a gate)"),
-               role, proc.stdout.strip()))
-    with open(path, "w", encoding="utf-8") as handle:
+               role, stdout_str.strip()))
+    path = os.path.join(folder, "%s-%s-%s.md" % (item, stage, role))
+    n = 1
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            break
+        except FileExistsError:
+            n += 1
+            path = os.path.join(folder, "%s-%s-%s-%d.md" % (item, stage, role, n))
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(text)
     return os.path.relpath(path, project.root), record, None
 
@@ -1917,8 +1934,8 @@ def bite_restore(project):
         target = project.path(item["path"])
         if item["existed"]:
             folder = os.path.dirname(target)
-            if folder and not os.path.isdir(folder):
-                os.makedirs(folder)
+            if folder:
+                os.makedirs(folder, exist_ok=True)
             if os.path.lexists(target) and os.path.islink(target):
                 os.remove(target)
             shutil.copy2(project.path(os.path.join(state["backup"], item["path"])), target,
@@ -1931,7 +1948,7 @@ def bite_restore(project):
     return restored
 
 
-def bite(project, command, base=None, timeout=1800):
+def bite(project, command, base=None, timeout=1800, item=None):
     """Does the test command catch the change? Run it on the working tree, then with the
     product files put back to <base> (tests stay as they are), then restore. It bites
     when it passes with the change and fails without it. Returns (result, error)."""
@@ -1949,13 +1966,14 @@ def bite(project, command, base=None, timeout=1800):
         return None, ("no product change between %s and the working tree to revert "
                       "(test files and the kit's own paths are left alone)" % base)
 
+    bite_env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+
     def run():
-        try:
-            return subprocess.run(command, shell=True, cwd=project.root, stdin=subprocess.DEVNULL,
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                  timeout=timeout).returncode
-        except subprocess.TimeoutExpired:
-            return None
+        rc, _, _, timed_out = _run_isolated(
+            command, cwd=project.root, timeout=timeout, shell=True,
+            stderr=subprocess.STDOUT, env=bite_env
+        )
+        return None if timed_out else rc
 
     with_change = run()
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -1970,8 +1988,7 @@ def bite(project, command, base=None, timeout=1800):
         existed = os.path.lexists(project.path(rel))
         if existed:
             dest = project.path(os.path.join(backup, rel))
-            if not os.path.isdir(os.path.dirname(dest)):
-                os.makedirs(os.path.dirname(dest))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
             shutil.copy2(project.path(rel), dest, follow_symlinks=False)
         state["files"].append({"path": rel, "existed": existed})
     with open(project.path(os.path.join(BITE_DIR, "active.json")), "w", encoding="utf-8") as handle:
@@ -1985,8 +2002,8 @@ def bite(project, command, base=None, timeout=1800):
                                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             target = project.path(rel)
             if original.returncode == 0:
-                if not os.path.isdir(os.path.dirname(target) or "."):
-                    os.makedirs(os.path.dirname(target))
+                if os.path.dirname(target):
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
                 if os.path.islink(target):
                     os.remove(target)
                 with open(target, "wb") as handle:
@@ -2014,11 +2031,14 @@ def bite(project, command, base=None, timeout=1800):
     folder = evidence_dir(project, "-bite")
     with open(os.path.join(folder, "bite.json"), "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2)
-    ledger_append(project, [{"time": result["generated"], "commit": result["git_head"],
-                             "dirty": result["dirty"], "stage": "bite", "command": command,
-                             "exit_code": 0 if result["bites"] else 1,
-                             "result": "Verified: %s" % ("pass" if result["bites"] else "fail"),
-                             "output_sha256": "", "run": os.path.basename(folder)}])
+    row = {"time": result["generated"], "commit": result["git_head"],
+           "dirty": result["dirty"], "stage": "bite", "command": command,
+           "exit_code": 0 if result["bites"] else 1,
+           "result": "Verified: %s" % ("pass" if result["bites"] else "fail"),
+           "output_sha256": "", "run": os.path.basename(folder)}
+    if item:
+        row["item"] = item
+    ledger_append(project, [row])
     result["evidence"] = os.path.relpath(folder, project.root)
     return result, None
 
@@ -2665,8 +2685,8 @@ def sync_profile(project, extra=None):
             else:
                 data[k] = v
     folder = os.path.dirname(profile_path)
-    if not os.path.isdir(folder):
-        os.makedirs(folder)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
     with open(profile_path, "w", encoding="utf-8") as handle:
         handle.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
     project.__init__(project.root)
@@ -2787,8 +2807,8 @@ def configure_kit(project, changes):
 
     if changes.get("specs") in ("on", "off"):
         text = _set_charter_row(text, "Specs", "`%s`" % changes["specs"])
-        if changes["specs"] == "on" and not os.path.isdir(project.path(os.path.join(project.docs, "project", "specs", "changes"))):
-            os.makedirs(project.path(os.path.join(project.docs, "project", "specs", "changes")))
+        if changes["specs"] == "on":
+            os.makedirs(project.path(os.path.join(project.docs, "project", "specs", "changes")), exist_ok=True)
         applied.append("Specs=%s" % changes["specs"])
 
     if changes.get("dev_method"):
@@ -2824,8 +2844,8 @@ def configure_kit(project, changes):
 
     charter_full = project.path(project.charter_path)
     charter_dir = os.path.dirname(charter_full)
-    if charter_dir and not os.path.isdir(charter_dir):
-        os.makedirs(charter_dir)
+    if charter_dir:
+        os.makedirs(charter_dir, exist_ok=True)
     if text:
         with open(charter_full, "w", encoding="utf-8") as handle:
             handle.write(text)
@@ -2868,8 +2888,8 @@ def sync_shared_skills(project):
         if not can_write(rel, dest):
             return
         parent = os.path.dirname(dest)
-        if parent and not os.path.isdir(parent):
-            os.makedirs(parent)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(dest, "wb") as handle:
             handle.write(content_bytes)
         managed[rel] = digest
@@ -2947,8 +2967,8 @@ def fix_kit(project, action="all", opts=None):
                 existing = read(fpath)
                 if "AGENTS.md" not in existing:
                     parent = os.path.dirname(fpath)
-                    if parent and not os.path.isdir(parent):
-                        os.makedirs(parent)
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
                     pointer_line = "\nRead and follow [AGENTS.md](AGENTS.md).\n" if existing else \
                         "Read and follow [AGENTS.md](AGENTS.md).\n"
                     with open(fpath, "w", encoding="utf-8") as handle:
@@ -3122,12 +3142,14 @@ def run_audit(project, lens_mod, opts):
         return 2
     folder = evidence_dir(project, "-audit")
     started = time.time()
-    try:
-        proc = subprocess.run(cmd, shell=True, cwd=project.root, stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=opts.timeout)
-        out, err, code = proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace"), proc.returncode
-    except subprocess.TimeoutExpired:
+    code, out_b, err_b, timed_out = _run_isolated(
+        cmd, cwd=project.root, timeout=opts.timeout, shell=True
+    )
+    if timed_out:
         out, err, code = "", "timed out after %ds" % opts.timeout, None
+    else:
+        out = out_b.decode("utf-8", "replace")
+        err = err_b.decode("utf-8", "replace")
     vulns = lens_mod.parse_audit(parser, out) if out else None
     clean, _ = redact(out + ("\n" + err if err else ""))
     with open(os.path.join(folder, "audit.log"), "w", encoding="utf-8") as handle:
@@ -3311,12 +3333,20 @@ def main(argv):
                      help="run independent verification stages concurrently")
     ver.add_argument("--item", help="the work item this run verifies; the ledger rows name it")
     fin = sub.add_parser("finish", help="close a work item: check its evidence and reviews, "
-                         "draft the worklog entry, set Done (Tier 1: Parked)")
+                         "draft the worklog entry, set Done (Tier 1 / Strict Tier 2: Parked)")
     fin.add_argument("item", help="work item ID")
     fin.add_argument("--waive", choices=("verify",), help="record that the checks could not "
                      "run (not at Tier 1); needs --by and --reason")
     fin.add_argument("--by", help="who decided the waiver")
     fin.add_argument("--reason", help="why the checks cannot run")
+    fin.add_argument("--why", help="single-shot worklog reasoning and rejected alternatives")
+    fin.add_argument("--not-done", dest="not_done", help="deferred work with follow-up IDs, or 'nothing deferred'")
+    fin.add_argument("--discovered", help="discovered bugs, stale docs, or 'nothing'")
+    fin.add_argument("--decisions", help="durable decisions and ADRs, or 'none'")
+    fin.add_argument("--assumptions", help="assumptions relied upon, or 'none'")
+    fin.add_argument("--plan", help="Tier 2 plan summary when not in plans/<ID>.md")
+    fin.add_argument("--reviews", help="reviews summary when not in reviews/<ID>*.md")
+    fin.add_argument("--from-json", dest="from_json", help="JSON file (or '-' for stdin) supplying worklog fields")
     fin.add_argument("--dry-run", action="store_true", help="say what it would do; write nothing")
     gd = sub.add_parser("guard", help="the finish guard, run by the agent tool's session hooks")
     gd.add_argument("event", choices=("start", "stop"))
@@ -3373,6 +3403,7 @@ def main(argv):
     rv.add_argument("--timeout", type=int, default=1800)
     bt = sub.add_parser("bite", help="check that a test command fails without the change "
                         "and passes with it")
+    bt.add_argument("--item", help="the work item this bite verifies; the ledger row names it")
     bt.add_argument("test_command", nargs=argparse.REMAINDER,
                     help="the test command, e.g. python3 -m unittest discover -s tests")
     bt.add_argument("--base", help="ref to revert product files to (default: HEAD when "
@@ -3457,6 +3488,8 @@ def main(argv):
     cl.add_argument("--json", action="store_true")
     rl = sub.add_parser("release", help="free a claimed item")
     rl.add_argument("item")
+    rl.add_argument("--agent", help="assert caller identity before releasing")
+    rl.add_argument("--force", action="store_true", help="override agent/host ownership check")
     rl.add_argument("--remove-worktree", action="store_true", help="also remove its worktree (refused when dirty)")
     cs = sub.add_parser("claims", help="list active claims")
     cs.add_argument("--json", action="store_true")
@@ -3506,9 +3539,25 @@ def main(argv):
             return code
         if opts.waive and not (opts.by and opts.reason):
             parser.error("--waive verify needs --by <name> and --reason \"...\"")
+        notes = {}
+        if getattr(opts, "from_json", None):
+            try:
+                raw_j = sys.stdin.read() if opts.from_json == "-" else read(opts.from_json)
+                parsed_j = json.loads(raw_j or "{}")
+                if not isinstance(parsed_j, dict):
+                    parser.error("--from-json must contain a JSON object")
+                for nk in ("why", "not_done", "discovered", "decisions", "assumptions", "plan", "reviews"):
+                    if parsed_j.get(nk) is not None:
+                        notes[nk] = str(parsed_j[nk])
+            except ValueError as exc:
+                parser.error("invalid --from-json payload: %s" % exc)
+        for nk in ("why", "not_done", "discovered", "decisions", "assumptions", "plan", "reviews"):
+            cli_v = getattr(opts, nk, None)
+            if cli_v is not None:
+                notes[nk] = cli_v
         lines, code = finish_mod.finish(sys.modules[__name__], project, opts.item,
                                         opts.by if opts.waive else None, opts.reason,
-                                        opts.dry_run)
+                                        opts.dry_run, notes=notes or None)
         print("\n".join(lines))
         return code
     if opts.command == "sync":
@@ -3539,7 +3588,9 @@ def main(argv):
             results, unread = [("<stdin>", found, count)], []
         else:
             if opts.paths:
-                files = slop_mod.collect(opts.paths, os.getcwd())
+                cwd_real = os.path.realpath(os.getcwd())
+                base_dir = project.root if opts.root else cwd_real
+                files = slop_mod.collect(opts.paths, base_dir)
             else:
                 files = slop_mod.changed_prose(project.root)
                 if files is None:
@@ -3631,7 +3682,11 @@ def main(argv):
                       "python3 .ai-sdlc/bin/sdlc.py release %s" % record["id"])
             return 0
         if opts.command == "release":
-            record, error = claims_mod.release(project, opts.item, opts.remove_worktree)
+            record, error = claims_mod.release(
+                project, opts.item, opts.remove_worktree,
+                agent=getattr(opts, "agent", None),
+                force=getattr(opts, "force", False),
+            )
             if error:
                 sys.stderr.write("release: %s\n" % error)
                 return 1
@@ -3738,7 +3793,7 @@ def main(argv):
             command = command[3:]
         if not command:
             parser.error("bite needs a test command")
-        result, error = bite(project, command, opts.base, opts.timeout)
+        result, error = bite(project, command, opts.base, opts.timeout, item=opts.item)
         if error:
             sys.stderr.write("bite: %s\n" % error)
             return 2
@@ -3820,6 +3875,13 @@ def main(argv):
             print("(preview: add --apply to write it)")
         return 0
     if opts.command == "fix":
+        if (opts.action == "unlock-tests" or opts.unlock_tests) and not os.environ.get("AI_SDLC_APPROVAL"):
+            if any(os.environ.get(k) for k in AGENT_SESSION_ENVS):
+                sys.stderr.write(
+                    "fix: unlocking reproducing tests from an agent session requires human approval "
+                    "(AI_SDLC_APPROVAL=<ticket>) or verified completion via `sdlc.py finish <ID>`\n"
+                )
+                return 1
         res = fix_kit(project, opts.action, {"unlock_tests": opts.unlock_tests})
         if opts.json:
             print(json.dumps(res, indent=2))

@@ -676,7 +676,12 @@ def test_hooks():
         o, _ = p.communicate(json.dumps(payload).encode())
         return o.decode("utf-8", "replace")
 
-    if shutil.which("jq"):
+    if True:  # hooks run via Python 3 stdlib (.ai-sdlc/bin/hooks.py); jq is no longer required
+        bad_p = subprocess.Popen(["sh", os.path.join(d, ".claude", "hooks", "work-item-id.sh")],
+                                 cwd=d, env=dict(os.environ, CLAUDE_PROJECT_DIR=d),
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        bad_out = bad_p.communicate(b"{not-valid-json")[0].decode("utf-8", "replace")
+        check("malformed hook JSON fails closed with deny", '"permissionDecision":"deny"' in bad_out, bad_out)
         out = fire("work-item-id.sh", {"tool_input": {"command": 'git commit -m "fix"'}})
         check("a commit with no ID is denied", '"permissionDecision":"deny"' in out, out)
         out = fire("work-item-id.sh", {"tool_input": {"command": 'git commit -m "HKT-9 fix"'}})
@@ -789,8 +794,43 @@ def test_hooks():
         check("a MultiEdit is scanned", '"permissionDecision":"deny"' in out, out)
         check("a denial is one line", len([l for l in out.splitlines() if l.strip()]) == 1
               and "\\n" not in out, out)
-    else:
-        check("jq present for hook behaviour tests", True, "skipped: jq not installed")
+
+        # Symlinked directory resolution on newly created test files
+        os.makedirs(os.path.join(d, "tests"), exist_ok=True)
+        link_dir = os.path.join(d, "linked_tests")
+        if not os.path.exists(link_dir):
+            os.symlink(os.path.join(d, "tests"), link_dir)
+        out = fire("test-lock.sh", {"tool_input": {"file_path": "linked_tests/q_new_locked.py"}})
+        check("a symlinked directory does not bypass test-lock on a new file",
+              '"permissionDecision":"deny"' in out, out)
+
+        # Built-in test-lock / unlock-tests protection in approval-gate
+        out = fire("approval-gate.sh", {"tool_input": {"command": "echo 'tests/repro.py' >> .ai-sdlc/test-lock.txt"}})
+        check("appending a new test lock via >> is allowed", "deny" not in out, out)
+        out = fire("approval-gate.sh", {"tool_input": {"command": ": > .ai-sdlc/test-lock.txt"}})
+        check("truncating test-lock.txt from shell is denied", '"permissionDecision":"deny"' in out, out)
+        out = fire("approval-gate.sh", {"tool_input": {"command": "python3 .ai-sdlc/bin/sdlc.py fix unlock-tests --apply"}})
+        check("unapproved unlock-tests CLI call from shell is denied", '"permissionDecision":"deny"' in out, out)
+        out = fire("approval-gate.sh", {"tool_input": {"command": "python3 .ai-sdlc/bin/sdlc.py fix unlock-tests --apply"}},
+                   AI_SDLC_APPROVAL="CHG-99")
+        check("approved unlock-tests CLI call passes approval-gate", out.strip() == "", out)
+
+        # Linked git worktree secret-guard check
+        subprocess.call(git + ["commit", "-qm", "HKT-1 init", "--no-verify"], cwd=d)
+        wt_hook = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-hook-wt-"))
+        shutil.rmtree(wt_hook, ignore_errors=True)
+        subprocess.call(git + ["worktree", "add", "-q", "-b", "feat/HKT-2-wt", wt_hook], cwd=d)
+        try:
+            write(wt_hook, "wt_secret.py", "S = 'AKIA" + "ZYXWVUTSRQPONMLK'\n")
+            subprocess.call(git + ["add", "wt_secret.py"], cwd=wt_hook)
+            out = fire("secret-guard.sh", {"tool_input": {"command": 'git -C "%s" commit -m "HKT-2 wt"' % wt_hook}})
+            check("secret-guard inspects git -C worktree staged diff", '"permissionDecision":"deny"' in out, out)
+            out = fire("secret-guard.sh", {"tool_input": {"command": 'cd "%s" && git commit -m "HKT-2 wt"' % wt_hook}})
+            check("secret-guard inspects cd <worktree> && git commit staged diff",
+                  '"permissionDecision":"deny"' in out, out)
+        finally:
+            subprocess.call(git + ["worktree", "remove", "--force", wt_hook], cwd=d)
+            shutil.rmtree(wt_hook, ignore_errors=True)
 
     profile = json.loads(read(d, ".ai-sdlc/profile.json"))
     profile["facts"]["marker_from_setup"] = True
@@ -1308,6 +1348,11 @@ def test_view():
         check("the live page is served with the model inside",
               code == 200 and "VWX-2" in page and "/*NUHUT_MODEL*/" not in page, str(code))
         check("the live page is never cached", headers.get("Cache-Control") == "no-store", str(headers))
+        set_cookie = headers.get("Set-Cookie") or headers.get("set-cookie") or ""
+        m_cookie = _re.search(r"nuhut_session=([0-9a-f]+)", set_cookie)
+        token = m_cookie.group(1) if m_cookie else ""
+        check("GET / sets an HttpOnly SameSite=Strict session cookie",
+              len(token) == 32 and "HttpOnly" in set_cookie and "SameSite=Strict" in set_cookie, set_cookie)
         code, v1, _ = get("/version")
         code, body, _ = get("/model.json")
         check("the model endpoint carries the same version",
@@ -1324,22 +1369,35 @@ def test_view():
         code, _, _ = get("/../../AGENTS.md")
         check("nothing but the page, version and model is served", code == 404, str(code))
 
-        # Test POST /api/config and /api/fix with session token protection
+        # Test POST /api/config and /api/fix with HttpOnly cookie + Origin CSRF protection
         live_model = json.loads(body)
-        token = live_model.get("action_token", "")
-        check("live model carries an action token", len(token) == 32, token)
+        check("live model advertises live_actions without exposing action_token",
+              live_model.get("live_actions") is True and "action_token" not in live_model,
+              str(list(live_model.keys())))
 
-        def post(path, payload, tok=token):
+        def post(path, payload, tok=token, origin="http://127.0.0.1:%d" % port):
             c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
             raw = json.dumps(payload).encode("utf-8")
             hdrs = {"Host": "127.0.0.1:%d" % port, "Content-Type": "application/json",
-                    "Content-Length": str(len(raw)), "X-Action-Token": tok}
+                    "Content-Length": str(len(raw))}
+            if tok is not None:
+                hdrs["Cookie"] = "nuhut_session=%s" % tok
+            if origin is not None:
+                hdrs["Origin"] = origin
             c.request("POST", path, body=raw, headers=hdrs)
             r = c.getresponse()
             return r.status, r.read().decode("utf-8", "replace")
 
         code_bad, _ = post("/api/config", {"effort": "Lean"}, tok="wrong")
-        check("POST without valid action token is refused", code_bad == 403, str(code_bad))
+        check("POST without valid session cookie is refused", code_bad == 403, str(code_bad))
+        code_bad_origin, _ = post("/api/config", {"effort": "Lean"}, origin="http://evil.example")
+        check("POST with cross-origin Origin header is refused", code_bad_origin == 403, str(code_bad_origin))
+        code_no_origin, _ = post("/api/config", {"effort": "Lean"}, origin=None)
+        check("POST without Origin header is refused", code_no_origin == 403, str(code_no_origin))
+        code_nondict, _ = post("/api/config", ["not", "a", "dict"])
+        check("POST with non-object JSON payload returns 400", code_nondict == 400, str(code_nondict))
+        code_checks, _ = post("/api/config", {"checks": {"unit": "echo pwned"}})
+        check("POST /api/config refuses checks.* shell command mutations", code_checks == 403, str(code_checks))
         code_cfg, out_cfg = post("/api/config", {"token_saving": "on"})
         check("POST /api/config enables token-saving mode",
               code_cfg == 200 and json.loads(out_cfg).get("ok") is True, out_cfg)
@@ -2597,9 +2655,6 @@ def test_review_fixes():
           and installer.normalize_prefix("AB\n") == "AB"
           and installer.validate_prefix(None, "acme1")[0] is False)
 
-    if not shutil.which("jq"):
-        check("jq present for hook review tests", True, "skipped: jq not installed")
-        return
     d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-hooks2-"))
     code, out = run([d, "HKT", "-y", "--hooks"])
 
@@ -2641,6 +2696,10 @@ def test_review_fixes():
     subprocess.call(git + ["add", "cfg.py"], cwd=d)
     out = fire("secret-guard.sh", 'git commit -m "HKT-1 cfg"')
     check("a real-shaped OpenAI key is still denied", '"permissionDecision":"deny"' in out, out)
+    write(d, "cfg.py", "KEY = 'sk-svcacct-" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0'\n")
+    subprocess.call(git + ["add", "cfg.py"], cwd=d)
+    out = fire("secret-guard.sh", 'git commit -m "HKT-1 cfg"')
+    check("an OpenAI service-account key is denied", '"permissionDecision":"deny"' in out, out)
     subprocess.call(git + ["commit", "-qm", "HKT-1 base", "--no-verify"], cwd=d)
     write(d, "notes.md", "AKIA" + "ABCDEFGHIJKLMNOP\n")
     for cmd in ('git commit -asm "HKT-1 x"', '  git commit -am "HKT-1 x"',
@@ -3153,7 +3212,8 @@ def test_claims():
     check("an item without a plan is listed as plan first", [x["id"] for x in par.get("plan_first", [])] == ["CLX-7"], out[:300])
     code, out = sdlc(repo, "claim", "CLX-1", "--agent", "agent-a", "--mark")
     wt = os.path.join(d, "repo-CLX-1")
-    check("claim creates the branch and its own worktree", code == 0 and os.path.isdir(wt) and "CLX-1-login-form" in out, out)
+    check("claim creates the branch and its own worktree",
+          code == 0 and os.path.isdir(wt) and "feat/CLX-1-login-form" in out, out)
     check("--mark sets the row to In progress in the main worktree",
           re.search(r"\| CLX-1 \|.*\|\s*In progress\s*\|", read(repo, "docs/project/backlog.md")) is not None)
     code, out = sdlc(repo, "claim", "CLX-1", "--agent", "agent-b", "--no-worktree")
@@ -3183,10 +3243,15 @@ def test_claims():
     check("doctor flags a claim on a finished item", "claim CLX-2" in out and "still claimed" in out, out[-600:])
     code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree")
     check("release frees the claim and removes a clean worktree", code == 0 and not os.path.isdir(wt), out)
+    code_wrong, out_wrong = sdlc(repo, "release", "CLX-2", "--agent", "agent-other")
+    check("release refuses another agent's claim without --force",
+          code_wrong == 1 and "claimed by agent-c" in out_wrong, out_wrong)
     code, out = sdlc(repo, "view", "--json")
     model = json.loads(out) if code == 0 else {}
     check("the viewer model carries claims and the parallel report",
           [c["id"] for c in model.get("claims", [])] == ["CLX-2"] and "groups" in model.get("parallel", {}), out[:300])
+    code_force, out_force = sdlc(repo, "release", "CLX-2", "--agent", "agent-other", "--force")
+    check("release --force overrides agent ownership check", code_force == 0, out_force)
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -3235,6 +3300,24 @@ def test_specs():
     code, out = sdlc("spec", "apply", "SPX-2", "--write")
     check("a MODIFIED name that does not exist is refused, nothing written", code == 1 and "not found" in out
           and os.path.exists(os.path.join(d, "docs/project/specs/changes/SPX-2.md")), out)
+    # Test RENAMED requirements + missing trailing EOF newline + path traversal rejection
+    write(d, "docs/project/specs/login.md", read(d, "docs/project/specs/login.md").rstrip("\n"))
+    write(d, "docs/project/specs/changes/SPX-3.md",
+          "Capability: `login`\n\n## RENAMED Requirements\n\n"
+          "- FROM: `### Requirement: Two-factor`\n"
+          "- TO: `### Requirement: Multi-factor`\n\n"
+          "## MODIFIED Requirements\n\n### Requirement: Multi-factor\nThe system MUST ask for a second factor.\n\n"
+          "#### Scenario: code\n- **WHEN** a password matches\n- **THEN** a second factor is requested")
+    code_ren, out_ren = sdlc("spec", "apply", "SPX-3", "--write")
+    spec_ren = read(d, "docs/project/specs/login.md")
+    check("spec apply handles RENAMED + MODIFIED even without trailing EOF newline",
+          code_ren == 0 and "### Requirement: Multi-factor" in spec_ren
+          and "### Requirement: Two-factor" not in spec_ren and "second factor" in spec_ren, out_ren + spec_ren[-300:])
+    write(d, "docs/project/specs/changes/SPX-BAD.md",
+          "Capability: `../outside`\n\n## ADDED Requirements\n\n### Requirement: Bad\nSHALL fail.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n")
+    code_trav, out_trav = sdlc("spec", "apply", "SPX-BAD", "--write")
+    check("spec apply rejects capability path traversal", code_trav == 1, out_trav)
+    os.remove(os.path.join(d, "docs/project/specs/changes/SPX-BAD.md"))
     backlog = read(d, "docs/project/backlog.md")
     head, sep, tail = backlog.partition("## Done")
     t1, s2, t2 = tail.partition("| --- |")
@@ -3369,7 +3452,7 @@ def test_sync():
         return p.returncode, p.stdout
 
     remote, a, b = (os.path.join(base, n) for n in ("remote.git", "a", "b"))
-    git(base, "init", "-q", "--bare", remote)
+    git(base, "init", "-q", "--bare", "-b", "main", remote)
     git(base, "clone", "-q", remote, a)
     git(a, "checkout", "-q", "-b", "main")
     run([a, "SYN", "-y"])
@@ -3859,6 +3942,65 @@ def test_finish():
         "| **Finish guard** | `on` · `off`", "| **Finish guard** | `off`"))
     code, out, err = sdlc("guard", "stop", stdin='{"session_id": "t2"}')
     check("the charter's Finish guard row turns the guard off", code == 0 and not err, err)
+
+    # Single-shot finish (--why), Strict Tier 2 Parked, defect test-lock auto-release & unlock-tests guard
+    backlog = read(d, "docs/project/backlog.md")
+    i = backlog.index("## Now")
+    j = backlog.index("\n", backlog.index("| --- ", i)) + 1
+    extra_rows = (
+        "| FIN-5 | Defect with locked repro | 2 | qa | | In progress |\n"
+        "| FIN-6 | Strict Tier 2 change | 2 | qa | | In progress |\n"
+    )
+    write(d, "docs/project/backlog.md", backlog[:j] + extra_rows + backlog[j:])
+    write(d, "docs/project/defects/FIN-5.md", "# Defect FIN-5\n")
+    write(d, "src/bug5.py", "VAL = 0\n")
+    os.makedirs(os.path.join(d, "tests"), exist_ok=True)
+    write(d, "tests/test_fin5.py", "import sys\nsys.path.insert(0, 'src')\nimport bug5\nsys.exit(0 if bug5.VAL == 1 else 1)\n")
+    write(d, ".ai-sdlc/test-lock.txt", "tests/test_fin5.py\n")
+    commit("test(FIN-5): repro")
+    write(d, "src/bug5.py", "VAL = 1\n")
+    commit("fix(FIN-5): fix defect")
+    code_bt, out_bt, err_bt = sdlc("bite", "--item", "FIN-5", sys.executable, "tests/test_fin5.py")
+    check("bite --item FIN-5 proves the locked test catches the defect", code_bt == 0, out_bt + err_bt)
+    sdlc("verify", "--item", "FIN-5")
+    code_ss, out_ss, _ = sdlc("finish", "FIN-5", "--why", "Fixed root cause in parser.")
+    fin5_entry = read(d, "docs/project/worklog.md").split("## FIN-5")[1].split("\n## ")[0] if "## FIN-5" in read(d, "docs/project/worklog.md") else ""
+    check("single-shot finish --why closes FIN-5 in one pass without TODO(finish)",
+          code_ss == 0 and "set Done" in out_ss and fin5_entry and "TODO(finish)" not in fin5_entry, out_ss + fin5_entry)
+    check("verified defect finish auto-releases the item's locked test",
+          "tests/test_fin5.py" not in read(d, ".ai-sdlc/test-lock.txt"), read(d, ".ai-sdlc/test-lock.txt"))
+
+    # Strict tier rules park Tier 2 for human approval
+    write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
+        "| **Tier rules** | `Standard` · `Strict`", "| **Tier rules** | `Strict`"))
+    write(d, "src/f6.txt", "strict\n")
+    commit("feat(FIN-6): strict change")
+    sdlc("verify", "--item", "FIN-6")
+    write(d, "docs/project/reviews/FIN-6-ship-qa.md", "# Ship review\n\nPass.\n")
+    code_st, out_st, _ = sdlc("finish", "FIN-6", "--why", "Strict tier 2 verification.")
+    backlog_st = read(d, "docs/project/backlog.md")
+    check("Strict tier rules park a finished Tier 2 item for human approval",
+          code_st == 0 and "Parked" in out_st
+          and re.search(r"\| FIN-6 \|[^\n]*\| Parked \|", backlog_st[backlog_st.index("## Parked"):]) is not None, out_st)
+
+    # Agent session env guard on unlock-tests
+    write(d, ".ai-sdlc/test-lock.txt", "tests/locked_again.py\n")
+    agent_env = dict(os.environ, CLAUDECODE="1")
+    agent_env.pop("AI_SDLC_APPROVAL", None)
+    p_blk = subprocess.run([sys.executable, script, "fix", "unlock-tests", "--apply"], cwd=d, env=agent_env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("fix unlock-tests refuses inside an agent session without AI_SDLC_APPROVAL",
+          p_blk.returncode == 1 and "AI_SDLC_APPROVAL" in p_blk.stdout and "locked_again.py" in read(d, ".ai-sdlc/test-lock.txt"),
+          p_blk.stdout)
+    human_env = dict(os.environ)
+    for k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_PROJECT_DIR", "GEMINI_CLI",
+              "GEMINI_PROJECT_DIR", "CODEX_SANDBOX", "CODEX_CI", "CURSOR_AGENT",
+              "CURSOR_TRACE_ID", "AIDER", "ANTIGRAVITY_AGENT"):
+        human_env.pop(k, None)
+    p_ok = subprocess.run([sys.executable, script, "fix", "unlock-tests", "--apply"], cwd=d, env=human_env,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("fix unlock-tests succeeds for a direct human CLI run",
+          p_ok.returncode == 0 and "locked_again.py" not in read(d, ".ai-sdlc/test-lock.txt"), p_ok.stdout)
 
 
 def main():

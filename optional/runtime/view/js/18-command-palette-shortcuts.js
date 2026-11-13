@@ -365,7 +365,7 @@
       if (e.key === "r" && THREAD_STATE.selected && ITEMS[THREAD_STATE.selected]) {
         e.preventDefault();
         var dx = diagnoseNextAction(ITEMS[THREAD_STATE.selected]);
-        if (LIVE && M.action_token && dx.runPayload) runKitCmd(dx.runPayload, dx.cmd, dx.label);
+        if (LIVE && M.live_actions && dx.runPayload) runKitCmd(dx.runPayload, dx.cmd, dx.label);
         else copyCmd(dx.cmd, dx.label);
         return;
       }

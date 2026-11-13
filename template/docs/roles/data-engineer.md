@@ -98,8 +98,10 @@ or migration itself, and the diff.
 - [ ] Row counts, distributions, and null rates before and after are compared against the
       baseline. "The job succeeded" is not evidence that the data is right.
 - [ ] A sample of real output was read by a human who knows what the numbers should look
-      like. Automated checks find the failures you anticipated; only reading finds the
-      others.
+      like — or, in an unattended session, inspected via deterministic summary assertions
+      (bounds, quantiles, key cardinalities, and sample rows recorded in the review) with
+      human sample review noted as `Not run` until sign-off. Automated checks find the
+      failures you anticipated; reading actual rows finds the others.
 - [ ] The reverse path was executed, not merely written, for anything that rewrote
       history.
 - [ ] Lineage is updated: what this reads, what it writes, what now depends on it.

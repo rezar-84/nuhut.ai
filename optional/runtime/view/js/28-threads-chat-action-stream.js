@@ -406,7 +406,7 @@
 
     // Row 3: Live Monospace Command Preview Box + Explicit Run / Copy Buttons
     var actionBtns = [];
-    if (LIVE && M.action_token && activeSpec.runPayload) {
+    if (LIVE && M.live_actions && activeSpec.runPayload) {
       actionBtns.push(el("button", {
         cls: "cmd-btn run-btn",
         disabled: TERMINAL_STATE.running ? "disabled" : null,
@@ -418,7 +418,7 @@
       }));
     }
     actionBtns.push(el("button", {
-      cls: "cmd-btn " + (LIVE && M.action_token && activeSpec.runPayload ? "" : "primary"),
+      cls: "cmd-btn " + (LIVE && M.live_actions && activeSpec.runPayload ? "" : "primary"),
       text: "⧉ Copy CLI Command",
       title: "Copy `" + activeSpec.cmd + "` to clipboard",
       on: { click: function (e) {

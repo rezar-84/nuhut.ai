@@ -1,0 +1,60 @@
+---
+name: sdlc-review
+description: "Run a multi-role review of the current changes (or a named artifact). Use when the user invokes /sdlc-review or asks for a review of a plan or a change, and when a plan or a diff reaches a review gate."
+---
+
+<!-- Generated from the kit's optional/claude-commands/sdlc-review.md by install.py. Kit-managed: change the kit, not this file. -->
+
+Run a role review per `handbook/process/02-role-reviews.md` on:
+
+the request given with this skill: the text after its name, or the request in the conversation that called for it (expected: `[optional: a path, commit range, plan file, or work item ID]`).
+
+(If no argument is given, review the uncommitted and unpushed changes on the current
+branch.)
+
+1. **Establish what you are reviewing.** Read the actual diff and the surrounding code.
+   Run the thing if it runs. State the commit range or files you examined.
+
+2. **Conformance pass first** (Tier 1 and 2, ship review). Ask whether the diff does what
+   the plan and the acceptance criteria said, and nothing else. For Tier 1, run
+   `python3 .ai-sdlc/bin/sdlc.py plan-check <ID>` and quote its output, then decide for
+   each gap whether it is a plan that should have been updated or an unreviewed change.
+   Walk each acceptance criterion to its code and test. Severities are in
+   `02-role-reviews.md`, "The conformance pass".
+
+3. **Select roles** by change surface and tier, using the table in
+   `handbook/process/02-role-reviews.md` and the active roster in
+   `handbook/project/charter.md`. Include the charter's project-specific role checks. Do not
+   review with every role reflexively, and do not skip a role whose surface was touched.
+   Apply the work item's effort mode: Lean uses the minimum applicable set in a single
+   combined review pass (and skips spawning a second agent when the charter's
+   `Independent review required for` row is `none`), Normal uses the standard set, and
+   Beast adds only roles materially adjacent to the change.
+
+4. **For each role**, work through its playbook in `handbook/roles/` against the real
+   artifact. Produce:
+   - **Checked:** what you examined and how — required even when there are no findings.
+   - **Not checked:** what this review does not cover. Never imply coverage you lack.
+   - **Findings:** severity (S0–S4 per `handbook/process/04-quality-gates.md`), location as
+     `file:line`, what is wrong, what goes wrong because of it, and what would fix it.
+   - **Verdict:** derived from the worst severity, per the table in `02-role-reviews.md`.
+     You rate the finding; the ladder decides the verdict. At most five S4 findings per
+     review; give the rest as a count.
+
+5. **Look hardest at what the change did not touch but should have** — the missing
+   migration, the untouched test, the second code path with the same bug, the document
+   the change just made wrong.
+
+6. **Avoid the anti-patterns** listed at the end of `02-role-reviews.md`, which you
+   should have open while reviewing.
+
+7. **Record** to `handbook/project/reviews/NUHT-###-<design|ship>.md` using
+   `handbook/templates/role-review.md` for Tier 1; summarise in the response for Tier 2.
+
+**A finding seen before.** If this review raises a finding an earlier review or
+postmortem already raised, the correction becomes one line under "Known agent mistakes" in
+`AGENTS.md` section 9, in the same change. The second occurrence is the signal. The first
+is noise.
+
+On a Block, stop and escalate with the finding, the options, and a recommendation
+(`02-role-reviews.md`, "On a Block").

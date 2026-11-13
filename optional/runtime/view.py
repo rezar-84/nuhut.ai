@@ -16,9 +16,11 @@ This file must never contain two opening braces in a row (see sdlc.py).
 
 import datetime
 import hashlib
+import hmac
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -894,8 +896,7 @@ def save_run(rt, project, record):
     """Keep one command the live page ran, redacted, under the git-ignored runs folder,
     so the cockpit can show it after the response is gone. Only the newest MAX_RUNS stay."""
     folder = runs_folder(project)
-    if not os.path.isdir(folder):
-        os.makedirs(folder)
+    os.makedirs(folder, exist_ok=True)
     ignore = os.path.join(folder, ".gitignore")
     if not os.path.exists(ignore):
         with open(ignore, "w", encoding="utf-8") as handle:
@@ -1269,7 +1270,7 @@ class Live(object):
             if self.lens_full is not None:
                 model["lens"] = lens_summary(self.lens_full)
             model["live_interval"] = self.interval
-            model["action_token"] = self.token
+            model["live_actions"] = True
             new_json = json.dumps(model, ensure_ascii=False,
                                   separators=(",", ":")).encode("utf-8")
             new_page = render(model, self.template).encode("utf-8")
@@ -1297,6 +1298,43 @@ def _parse_host(raw_host):
     return raw.split(":", 1)[0]
 
 
+def _session_cookie(raw_cookie):
+    for part in (raw_cookie or "").split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            if k.strip() == "nuhut_session":
+                return v.strip()
+    return ""
+
+
+def _valid_origin(raw_origin, port):
+    origin = (raw_origin or "").strip().lower().rstrip("/")
+    if not origin:
+        return False
+    allowed = (
+        "http://127.0.0.1:%d" % port,
+        "http://localhost:%d" % port,
+        "http://[::1]:%d" % port,
+    )
+    return origin in allowed
+
+
+def _kill_proc_tree(proc):
+    if os.name == "posix":
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.communicate(timeout=2)
+    except Exception:
+        pass
+
+
 def serve(rt, project, template, opts):
     try:
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1314,7 +1352,7 @@ def serve(rt, project, template, opts):
     class Handler(BaseHTTPRequestHandler):
         server_version = "nuhut-view"
 
-        def _send(self, code, body, ctype):
+        def _send(self, code, body, ctype, extra_headers=()):
             try:
                 self.send_response(code)
                 self.send_header("Content-Type", ctype)
@@ -1322,6 +1360,8 @@ def serve(rt, project, template, opts):
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Referrer-Policy", "no-referrer")
+                for hk, hv in extra_headers:
+                    self.send_header(hk, hv)
                 self.end_headers()
                 if self.command != "HEAD":
                     self.wfile.write(body)
@@ -1337,7 +1377,9 @@ def serve(rt, project, template, opts):
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
                 live.refresh()
-                return self._send(200, live.page, "text/html; charset=utf-8")
+                cookie = "nuhut_session=%s; HttpOnly; SameSite=Strict; Path=/" % live.token
+                return self._send(200, live.page, "text/html; charset=utf-8",
+                                  extra_headers=(("Set-Cookie", cookie),))
             if path == "/version":
                 return self._send(200, (live.refresh() or "").encode("utf-8"),
                                   "text/plain; charset=utf-8")
@@ -1370,8 +1412,13 @@ def serve(rt, project, template, opts):
             host = _parse_host(self.headers.get("Host"))
             if host not in ("127.0.0.1", "localhost", "::1"):
                 return self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
-            if self.headers.get("X-Action-Token") != live.token:
-                return self._send(403, b'{"ok":false,"error":"invalid action token"}\n',
+            port = self.server.server_address[1]
+            if not _valid_origin(self.headers.get("Origin"), port):
+                return self._send(403, b'{"ok":false,"error":"invalid or missing Origin"}\n',
+                                  "application/json; charset=utf-8")
+            cookie_tok = _session_cookie(self.headers.get("Cookie"))
+            if not cookie_tok or not hmac.compare_digest(cookie_tok, live.token):
+                return self._send(403, b'{"ok":false,"error":"invalid or missing session cookie"}\n',
                                   "application/json; charset=utf-8")
             path = self.path.split("?", 1)[0]
             if path not in ("/api/config", "/api/fix", "/api/run"):
@@ -1383,7 +1430,16 @@ def serve(rt, project, template, opts):
             except ValueError:
                 return self._send(400, b'{"ok":false,"error":"invalid json"}\n',
                                   "application/json; charset=utf-8")
+            if not isinstance(payload, dict):
+                return self._send(400, b'{"ok":false,"error":"json payload must be an object"}\n',
+                                  "application/json; charset=utf-8")
             if path == "/api/config":
+                if "checks" in payload and payload["checks"] is not None:
+                    return self._send(
+                        403,
+                        b'{"ok":false,"error":"checks commands cannot be modified over HTTP; run sdlc.py config --set-check in a terminal"}\n',
+                        "application/json; charset=utf-8",
+                    )
                 with live.lock:
                     res, err = rt.configure_kit(live.project, payload)
                     if err:
@@ -1478,19 +1534,26 @@ def serve(rt, project, template, opts):
                         cmd_args.extend(["--agent", ag])
                 sdlc_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sdlc.py")
                 t0 = time.time()
+                proc = None
                 try:
-                    proc = subprocess.Popen(
-                        [sys.executable, sdlc_bin] + cmd_args,
+                    popen_kw = dict(
                         cwd=live.project.root,
                         stdin=subprocess.DEVNULL,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                     )
+                    if os.name == "posix":
+                        popen_kw["start_new_session"] = True
+                    proc = subprocess.Popen(
+                        [sys.executable, sdlc_bin] + cmd_args,
+                        **popen_kw
+                    )
                     out_bytes, _ = proc.communicate(timeout=120)
                     exit_code = proc.returncode
                     output_text = out_bytes.decode("utf-8", "replace")
                 except subprocess.TimeoutExpired:
-                    proc.kill()
+                    if proc is not None:
+                        _kill_proc_tree(proc)
                     exit_code = 124
                     output_text = "Command timed out after 120s.\n"
                 except Exception as exc:
@@ -1869,8 +1932,7 @@ def run(rt, project, opts):
     # A static page carries the lens's counts and worst findings only, never user-level items.
     model["lens"] = lens_summary(lens_report(rt, project, model, include_user=False))
     out_dir = project.path(os.path.join(".ai-sdlc", "view"))
-    if not os.path.isdir(out_dir):
-        os.makedirs(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
     ignore = os.path.join(out_dir, ".gitignore")
     if not os.path.exists(ignore):
         # The page copies the records' contents; it is a view, not a record.

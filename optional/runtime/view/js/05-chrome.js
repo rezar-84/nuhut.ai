@@ -206,12 +206,12 @@
     var prevKit = JSON.parse(JSON.stringify(M.kit || {}));
     // Always update the UI immediately so toggles feel responsive in both Live and Static modes
     applyOptimisticKitChange(endpoint, payload);
-    if (LIVE && M.action_token) {
+    if (LIVE && M.live_actions) {
       fetch(endpoint.replace(/^\//, ""), {
         method: "POST",
+        credentials: "same-origin",
         headers: {
-          "Content-Type": "application/json",
-          "X-Action-Token": M.action_token
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(payload || {})
       }).then(function (r) {
@@ -272,7 +272,7 @@
   }
 
   function runKitCmd(runPayload, fallbackCmd, desc) {
-    if (LIVE && M.action_token && runPayload && runPayload.subcommand) {
+    if (LIVE && M.live_actions && runPayload && runPayload.subcommand) {
       TERMINAL_STATE.running = true;
       TERMINAL_STATE.cmd = fallbackCmd;
       TERMINAL_STATE.output = "Running `" + fallbackCmd + "` in project root…";
@@ -283,9 +283,9 @@
       paintActivityBar();
       fetch("api/run", {
         method: "POST",
+        credentials: "same-origin",
         headers: {
-          "Content-Type": "application/json",
-          "X-Action-Token": M.action_token
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(runPayload)
       }).then(function (r) {

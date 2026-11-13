@@ -98,6 +98,9 @@ surface or add irrelevant reviews for appearance.
 | A conversion path, funnel step, form, pricing, or CTA | cro-analyst |
 | Authentication, authorisation, secrets, input handling, sessions, isolation | security |
 | Build, deploy, infra, config, observability, backups | devops-sre |
+| Pipelines, schemas, ingestion, ETL/ELT, backfills, lineage, data contracts | data-engineer |
+| Models, prompts, retrieval, embeddings, inference parameters, evaluation sets | ml-engineer |
+| Hot paths, query plans, payload/bundle budgets, caching, latency/throughput | performance-engineer |
 | Any behaviour with acceptance criteria | qa |
 | Personal data, tracking, consent, retention, terms, claims about the business | privacy-legal |
 

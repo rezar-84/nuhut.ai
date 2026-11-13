@@ -86,13 +86,18 @@ technologies, and the running interface.
 
 - [ ] Run an automated checker — and know that it finds perhaps a third of real issues.
       Passing it is a floor, not a result.
-- [ ] Navigate the entire flow with the keyboard alone. Complete the task. If you cannot,
-      that is the finding.
-- [ ] Traverse it with a screen reader. Does the announced experience make sense in
-      order, or is it a list of unlabelled elements?
-- [ ] Zoom to 200% and reflow to a narrow viewport.
-- [ ] Check contrast on the actual rendered result, in every theme, including focus
-      indicators, placeholders, disabled states, and text over images.
+- [ ] Navigate the entire flow with the keyboard alone (via a real browser or headless
+      Playwright/DOM focus-order automation). Complete the task. If you cannot, that is
+      the finding.
+- [ ] Traverse it with a screen reader, or in an unattended session inspect the rendered
+      accessibility tree (`ariaSnapshot` / axe tree) and record real assistive-tech
+      traversal as `Not run` until human sign-off. Does the announced experience make
+      sense in order, or is it a list of unlabelled elements?
+- [ ] Zoom to 200% and reflow to a narrow viewport (or assert headless viewport reflow
+      with zero horizontal-scroll / clipped-control regressions).
+- [ ] Check contrast on the actual rendered result (via computed styles in a real or
+      headless browser), in every theme, including focus indicators, placeholders,
+      disabled states, and text over images.
 - [ ] Test with reduced motion enabled.
 - [ ] Record known limitations honestly rather than claiming conformance you did not
       verify.

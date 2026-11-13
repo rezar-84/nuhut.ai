@@ -174,16 +174,16 @@ repository record carries the tracker ID.
 - **Do not rewrite worklog history.** If an entry was wrong, append a correction that
   references it. The record of a mistaken belief is part of the record.
 - **Archive, do not truncate.** When the worklog gets long, move older entries to
-  `project/worklog-archive/YYYY.md` and leave a pointer. Same for completed backlog
+  `project/worklog-archive/YYYY-partN.md` and leave a pointer. Same for completed backlog
   items: a `Done` archive section keeps the active table short.
-- **Rotate at 1,000 lines**, or at the start of a new quarter if that comes first. Move
-  every closed entry older than the current quarter into
-  `project/worklog-archive/YYYY-Qn.md`, keep the last few in place for continuity, and
-  leave a dated pointer line naming the archive file.
+- **Rotate at 1,000 lines** (`sdlc.py fix rotate-worklog --apply`), or at the start of a
+  new quarter if that comes first. Move closed entries beyond the most recent active slice
+  into `project/worklog-archive/YYYY-partN.md`, keep the latest entries in place for
+  continuity, and leave a dated pointer line naming the archive file.
 
-  This threshold exists because nothing else enforces one. `worklog.md` is on the
-  always-read list for every Tier 1 and Tier 2 change, so it grows until it is the
-  largest file each session loads, and the growth is invisible to the person adding one
+  This threshold exists because nothing else enforces one. Whenever an agent or reviewer
+  opens `worklog.md` to trace prior context, an unrotated file grows until it dominates
+  the session's context window, and the growth is invisible to the person adding one
   entry at a time. Rotating is not tidying — it is the difference between an agent
   reading recent history and an agent spending its context on last year's.
 - **Review the registers at CLOSE.** Backlog, assumptions, and risks are read and

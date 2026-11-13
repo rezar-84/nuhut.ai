@@ -17,10 +17,10 @@ rules also exist as git hooks for every other tool and for humans (`--git-hooks`
 | --- | --- | --- |
 | `work-item-id.sh` | `git commit` | Denies a commit whose message carries no `<PREFIX>-###`. `AGENTS.md` §6 requires the ID in the branch, the commit and the worklog; this is the one of the three a machine can check. |
 | `protected-paths.sh` | `Write` / `Edit` | Denies an edit to a path listed in `.ai-sdlc/protected.txt` — the charter's platform-owned files, generated files, or anything else single-writer. Does nothing until that file has entries. |
-| `test-lock.sh` | `Write` / `Edit` | Denies an edit to a reproducing test listed in `.ai-sdlc/test-lock.txt` while its defect is fixed, and an edit to that list itself. `process/05-change-control.md`, "Fixing a defect": the agent appends the lock from the shell after committing the failing test, and a human removes it. |
-| `secret-guard.sh` | `git commit` | Denies a commit whose staged additions contain a provider-shaped credential (private-key header, AWS, GitHub, GitLab, Slack, Stripe live, Anthropic, OpenAI, Google keys). Names the kind and never the value. A line containing `EXAMPLE` is skipped, for deliberate fixtures. |
-| `doc-leak-guard.sh` | `Write` / `Edit` / `MultiEdit` | Denies a write whose content holds a credential shape (the `secret-guard.sh` set, plus a URL with an embedded password), in any file. Warns, and does not deny, when a prose record (`.md`, `.txt`, `.rst`, `.ai-sdlc/`) gains an email address, card-number shape or `NNN-NN-NNNN`. Names the kind and never the value. A line containing `EXAMPLE`, and example.com/.org/.net addresses, are skipped. `process/12-sensitive-data-in-records.md`. |
-| `approval-gate.sh` | `Bash`, and `Write` / `Edit` of its list | Denies a command matching a glob in `.ai-sdlc/gates.txt` (production deploys, `terraform apply`, production migrations: whatever `AGENTS.md` §9 says needs a human), and tells the agent to hand the exact command to a human. It passes when the session was started with `AI_SDLC_APPROVAL=<ticket or ID>`, which the agent cannot set from inside the session. |
+| `test-lock.sh` | `Write` / `Edit` | Denies an edit to a reproducing test listed in `.ai-sdlc/test-lock.txt` while its defect is fixed, and an edit to that list itself. `process/05-change-control.md`, "Fixing a defect": the agent appends the lock from the shell (`>>`) after committing the failing test; `finish` releases the item's lock once `bite` and `verify` pass, or a human removes it. |
+| `secret-guard.sh` | `git commit` | Denies a commit whose staged additions in the target worktree contain a provider-shaped credential (private-key header, AWS, GitHub, GitLab, Slack, Stripe live, Anthropic, OpenAI, Google keys, or embedded URL password). Names the kind and never the value. A line containing `EXAMPLE` is skipped, for deliberate fixtures. |
+| `doc-leak-guard.sh` | `Write` / `Edit` / `MultiEdit` | Denies a write whose content holds a credential shape (the `secret-guard.sh` set, including a URL with an embedded password), in any file. Personal-data shapes in prose records are reported by `sdlc.py doctor`. Names the kind and never the value. A line containing `EXAMPLE`, and example.com/.org/.net addresses, are skipped. `process/12-sensitive-data-in-records.md`. |
+| `approval-gate.sh` | `Bash`, and `Write` / `Edit` of its list | Denies a command matching a glob in `.ai-sdlc/gates.txt` (production deploys, `terraform apply`, production migrations: whatever `AGENTS.md` §9 says needs a human), as well as unapproved shell truncation/unlocks of `.ai-sdlc/test-lock.txt`, `.ai-sdlc/protected.txt`, or `.ai-sdlc/gates.txt`. Passes when the session was started with `AI_SDLC_APPROVAL=<ticket or ID>`. |
 
 All six are **deterministic**. None asks a model whether the rule was followed. The three
 list files are seeded with comments only, so until the project adds a line, the hooks that
@@ -60,12 +60,13 @@ violation is decidable from the tool call itself.**
 
 ## How they hold up
 
-Each hook sources `lib.sh` and runs from the project root, which it gets from the
-harness's `$CLAUDE_PROJECT_DIR`. The installer registers them the same way. A path is
-resolved against the caller's directory, its `.` and `..` segments are collapsed, and
-only then is it compared with a list. Every decision is built by `jq`, so no filename or
-command can break the JSON. A hook that could not produce a decision would allow the
-call, so all three rules are pinned by smoke tests.
+Each `.sh` shim sources `lib.sh` and delegates directly to `.ai-sdlc/bin/hooks.py` (Python 3
+stdlib). Paths are resolved with `os.path.realpath` against the caller's directory —
+collapsing `.` and `..` segments and resolving symlinks on both existing files and parent
+directories of newly created files — before comparing with a guard list. `secret-guard`
+resolves `cd <dir>`, `git -C <dir>`, and linked git worktrees so it always inspects the
+staged diff of the worktree being committed. Every JSON decision is serialized by Python's
+`json` module on a single line.
 
 `--upgrade` keeps installed hooks current and re-anchors older `sh .claude/hooks/…`
 registrations. Hooks from before they were kit-managed are replaced only with `--adopt`,
@@ -73,10 +74,11 @@ like the commands.
 
 ## Requirements and failure mode
 
-The scripts need `jq` and POSIX `sh`. **If `jq` is missing they allow the call** and say
-so once, rather than blocking your work over a missing dependency — they are guard rails
-for an agent, not a security boundary. Anything that must not happen belongs in
-`permissions.deny` in `.claude/settings.json`, which the harness enforces itself.
+The hooks need only POSIX `sh` and `python3` (the same Python 3 stdlib runtime the rest of
+Nuhut uses — **no external `jq` or GNU `sed` required**). If a hook receives malformed JSON
+or hits an unexpected evaluation error, it **fails closed** (`deny`) in the harness's JSON
+format rather than silently allowing the call. Anything that must hold against a hostile or
+sandboxed shell belongs in `permissions.deny` in `.claude/settings.json` as well.
 
 ## The same rules under Gemini CLI and Cursor
 

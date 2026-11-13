@@ -40,7 +40,7 @@ RETIRED_STATE = "dashboard-state.js"
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
-                 "finish.py", "slop.py", "sync.py")
+                 "finish.py", "slop.py", "sync.py", "hooks.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -766,6 +766,8 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      Edited kit files, section 9 of AGENTS.md, the charter, backlog,
                      worklog and the evidence ledger are kept. Shows the plan and
                      asks first; -y skips the question, --dry-run only shows the plan.
+  --self-host        allow installing or upgrading into the kit repository itself when
+                     --docs-dir is not 'docs' (e.g. --docs-dir handbook for dogfooding).
 """
 
 
@@ -775,6 +777,7 @@ class Options(object):
         self.prefix = ""
         self.docs_dir = "docs"
         self.docs_dir_given = False
+        self.self_host = False
         self.upgrade = False
         self.assume_yes = False
         self.want_skills = True
@@ -929,6 +932,8 @@ def parse_args(argv):
             o.upgrade = True
         elif arg == "--uninstall":
             o.uninstall = True
+        elif arg == "--self-host":
+            o.self_host = True
         elif arg in ("-y", "--yes", "--non-interactive"):
             o.assume_yes = True
         elif arg == "--no-skills":
@@ -2833,6 +2838,15 @@ def resolve_target(path, options, term):
             return None
     p = p.resolve()
     if p == SRC:
+        if options.self_host:
+            existing_manifest = load_manifest(p) or {}
+            eff_docs = options.docs_dir if options.docs_dir_given else (
+                existing_manifest.get("docs_dir") or options.docs_dir
+            )
+            if eff_docs and eff_docs != "docs":
+                return p
+            term.err("error: --self-host requires --docs-dir other than 'docs' (e.g. --docs-dir handbook)")
+            return None
         term.err(t("err.is_kit", path=str(SRC)))
         term.err(t("err.give_project"))
         return None

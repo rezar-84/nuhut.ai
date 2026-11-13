@@ -1,52 +1,6 @@
 #!/bin/sh
-# Deny a commit whose staged changes add a credential.
-# AGENTS.md ("Never commit secrets") and {{DOCS_DIR}}/roles/security.md: secrets never enter the
-# repository. Only high-confidence shapes are matched -- provider-prefixed tokens and
-# private-key headers -- so a hit is almost never a false alarm. Generic "password = ..."
-# lines are the security review's job, not this hook's.
-#
-# stdin: the PreToolUse hook payload. stdout: a PreToolUse permission decision.
+# Deny a commit whose staged changes add a credential ({{DOCS_DIR}}/roles/security.md).
 set -u
-. "$(dirname "$0")/lib.sh"
-hook_init secret-guard
-
-payload=$(cat)
-cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')
-
-hook_is_commit "$cmd" || exit 0
-
-# What the commit will contain. `-a`, or a `git add` earlier in the same command, stages
-# tracked changes the index does not hold yet, so look at the whole working tree then.
-# A brand-new file added in the same command is not visible yet: stage it first.
-# Before the first commit there is no HEAD to diff against, and everything to commit is
-# in the index already.
-if git rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
-  # -a may be bundled with other short flags: -am, -asm, -qam.
-  if printf '%s' "$cmd" | grep -Eq '(^|[[:space:]])(-[A-Za-z]*a[A-Za-z]*|--all)([[:space:]]|$)|git[[:space:]]+add'; then
-    diff=$(git diff HEAD --unified=0 2>/dev/null)
-  else
-    diff=$(git diff --cached --unified=0 2>/dev/null)
-  fi
-else
-  diff=$(git diff --cached --unified=0 2>/dev/null)
-fi
-if printf '%s' "$cmd" | grep -Eq 'git[[:space:]]+add'; then
-  untracked=$(git ls-files --others --exclude-standard 2>/dev/null)
-  if [ -n "$untracked" ]; then
-    extra=$(printf '%s\n' "$untracked" | while IFS= read -r uf; do
-      [ -f "$uf" ] && sed 's/^/+/' "$uf" 2>/dev/null
-    done)
-    diff="${diff}${diff:+
-}${extra}"
-  fi
-fi
-[ -n "$diff" ] || exit 0
-
-added=$(printf '%s\n' "$diff" | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -v 'EXAMPLE')
-[ -n "$added" ] || exit 0
-
-found=$(hook_secret_kinds "$added")
-[ -n "$found" ] || exit 0
-
-# The reason names the kind, never the value: the value is what must not travel further.
-hook_deny "no secrets in the repo: the staged changes add a $found; unstage it, keep it in the environment, rotate it if it was pushed (a fixture line containing EXAMPLE passes)."
+here=$(cd "$(dirname "$0")" && pwd)
+. "$here/lib.sh"
+hook_exec "secret-guard" "claude" "$here"

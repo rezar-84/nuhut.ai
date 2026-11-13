@@ -73,6 +73,17 @@ def cross_references(errors):
     for name in sorted(on_disk - readme_roles):
         errors.append("roles/%s.md is missing from the roles README roster" % name)
 
+    role_reviews = (ROOT / "template" / "docs" / "process" / "02-role-reviews.md").read_text(encoding="utf-8")
+    surface_section = charter_section(role_reviews, "Who reviews what")
+    surface_roles = set()
+    for cell in re.findall(r"^\| [^|]+ \| ([a-z, -]+) \|$", surface_section, re.M):
+        for token in cell.split(","):
+            token = token.strip()
+            if token and token != "Roles that must engage":
+                surface_roles.add(token)
+    for name in sorted((on_disk - {"software-engineer"}) - surface_roles):
+        errors.append("roles/%s.md has no surface row in 02-role-reviews.md" % name)
+
     # Templates: on disk, and named in the docs map's "Create when" table.
     tpl_dir = ROOT / "template" / "docs" / "templates"
     tpl_disk = {p.name for p in tpl_dir.glob("*.md")}
@@ -460,7 +471,11 @@ def main():
         if not (ROOT / name).is_file():
             errors.append("missing repository file: %s" % name)
 
-    for name in ("sdlc.py", "view.py", "view.html"):
+    sys.path.insert(0, str(ROOT))
+    import install as _install                         # noqa: E402
+    runtime_names = sorted(set(_install.RUNTIME_FILES) |
+                           {p.name for p in (ROOT / "optional" / "runtime").glob("*.py")})
+    for name in runtime_names:
         runtime = ROOT / "optional" / "runtime" / name
         if not runtime.is_file():
             errors.append("missing runtime file: optional/runtime/%s" % name)

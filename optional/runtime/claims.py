@@ -69,7 +69,7 @@ def is_main_worktree(project):
 
 
 def items(project, view_mod):
-    """{id: {title, status, column, depends, line, section}} from the backlog tables."""
+    """{id: {title, type, status, column, depends, line, section}} from the backlog tables."""
     text = project.records("backlog.md")
     out = {}
     for section, line, row in view_mod.backlog_tables(text):
@@ -78,9 +78,16 @@ def items(project, view_mod):
         if not m:
             continue
         status = view_mod.plain(row.get("Status", ""))
-        out[m.group(0)] = {"title": view_mod.plain(row.get("Task", row.get("Title", ""))), "status": status,
-                           "column": view_mod.column_of(status), "line": line, "section": section,
-                           "depends": [d for d in ID_RE.findall(row.get("Depends on", "")) if d != m.group(0)]}
+        itype = view_mod.plain(row.get("Type", "")).lower()
+        out[m.group(0)] = {
+            "title": view_mod.plain(row.get("Task", row.get("Title", ""))),
+            "type": itype,
+            "status": status,
+            "column": view_mod.column_of(status),
+            "line": line,
+            "section": section,
+            "depends": [d for d in ID_RE.findall(row.get("Depends on", "")) if d != m.group(0)],
+        }
     return out
 
 
@@ -110,6 +117,25 @@ def slug(title):
     return "-".join(s.split("-")[:6])[:40].strip("-") or "work"
 
 
+def _branch_prefix(it):
+    itype = (it.get("type") or "").lower()
+    title = (it.get("title") or "").lower()
+    if itype in ("defect", "bug", "fix", "hotfix") or re.match(r"^(?:fix|bug|defect)\b", title):
+        return "fix"
+    if itype in ("chore", "docs", "refactor", "test"):
+        return itype
+    return "feat"
+
+
+def _existing_item_branch(project, item):
+    refs = _git(project, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()
+    for b in refs:
+        m = re.match(r"^(?:[\w.-]+/)?([A-Z][A-Z0-9]*-[0-9]+)(?:-|$)", b)
+        if m and m.group(1) == item:
+            return b
+    return ""
+
+
 def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark=False, base=None):
     """Returns (record, error)."""
     backlog = items(project, view_mod)
@@ -124,11 +150,11 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
     folder = registry(project)
     if not folder:
         return None, "not a git repository"
-    if not os.path.isdir(folder):
-        os.makedirs(folder)
+    os.makedirs(folder, exist_ok=True)
     if mark and not is_main_worktree(project):
         return None, "--mark edits backlog.md, which only the main worktree (%s) may do" % (main_worktree(project) or "?")
-    branch = "%s-%s" % (item, slug(it["title"]))
+    existing_br = _existing_item_branch(project, item)
+    branch = existing_br or ("%s/%s-%s" % (_branch_prefix(it), item, slug(it["title"])))
     path = None if no_worktree else (worktree or os.path.join(os.path.dirname(main_worktree(project) or project.root),
                                                               "%s-%s" % (os.path.basename(main_worktree(project) or project.root), item)))
     record = {"id": item, "agent": agent, "branch": branch, "worktree": path or "",
@@ -191,12 +217,22 @@ def mark_status(project, item, it, status):
     return True
 
 
-def release(project, item, remove_worktree=False):
-    target = os.path.join(registry(project), item + ".json")
+def release(project, item, remove_worktree=False, agent=None, force=False):
+    reg = registry(project)
+    if not reg:
+        return None, "not a git repository"
+    target = os.path.join(reg, item + ".json")
     if not os.path.exists(target):
         return None, "%s is not claimed" % item
     with open(target, encoding="utf-8") as h:
         record = json.load(h)
+    if not force:
+        held_agent = record.get("agent") or ""
+        held_host = record.get("host") or ""
+        if agent and held_agent and agent != held_agent:
+            return None, "%s is claimed by %s, not %s (pass --force to override)" % (item, held_agent, agent)
+        if held_host and held_host != socket.gethostname():
+            return None, "%s is claimed on host %s (pass --force to override)" % (item, held_host)
     wt = record.get("worktree") or ""
     if remove_worktree and wt and os.path.isdir(wt):
         ok, status = _git_ok(wt, "status", "--porcelain")
@@ -205,7 +241,10 @@ def release(project, item, remove_worktree=False):
         ok, msg = _git_ok(project.root, "worktree", "remove", wt)
         if not ok:
             return None, "git worktree remove failed: %s" % msg
-    os.remove(target)
+    try:
+        os.remove(target)
+    except FileNotFoundError:
+        pass
     return record, None
 
 

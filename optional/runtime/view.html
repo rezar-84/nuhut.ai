@@ -1121,12 +1121,12 @@
     var prevKit = JSON.parse(JSON.stringify(M.kit || {}));
     // Always update the UI immediately so toggles feel responsive in both Live and Static modes
     applyOptimisticKitChange(endpoint, payload);
-    if (LIVE && M.action_token) {
+    if (LIVE && M.live_actions) {
       fetch(endpoint.replace(/^\//, ""), {
         method: "POST",
+        credentials: "same-origin",
         headers: {
-          "Content-Type": "application/json",
-          "X-Action-Token": M.action_token
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(payload || {})
       }).then(function (r) {
@@ -1187,7 +1187,7 @@
   }
 
   function runKitCmd(runPayload, fallbackCmd, desc) {
-    if (LIVE && M.action_token && runPayload && runPayload.subcommand) {
+    if (LIVE && M.live_actions && runPayload && runPayload.subcommand) {
       TERMINAL_STATE.running = true;
       TERMINAL_STATE.cmd = fallbackCmd;
       TERMINAL_STATE.output = "Running `" + fallbackCmd + "` in project root…";
@@ -1198,9 +1198,9 @@
       paintActivityBar();
       fetch("api/run", {
         method: "POST",
+        credentials: "same-origin",
         headers: {
-          "Content-Type": "application/json",
-          "X-Action-Token": M.action_token
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(runPayload)
       }).then(function (r) {
@@ -1876,12 +1876,12 @@
     ]));
   }
   function runVerifyBtn() {
-    return LIVE && M.action_token ? el("button", { cls: "btn", text: "Run verify", title: "python3 .ai-sdlc/bin/sdlc.py verify --parallel", on: { click: function () {
+    return LIVE && M.live_actions ? el("button", { cls: "btn", text: "Run verify", title: "python3 .ai-sdlc/bin/sdlc.py verify --parallel", on: { click: function () {
       runKitCmd({ subcommand: "verify" }, "python3 .ai-sdlc/bin/sdlc.py verify --parallel", "verify");
     } } }) : el("button", { cls: "btn", text: "Copy verify command", on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py verify --parallel", "verify"); } } });
   }
   function runDoctorBtn() {
-    return LIVE && M.action_token ? el("button", { cls: "btn", text: "Run doctor", title: "python3 .ai-sdlc/bin/sdlc.py doctor", on: { click: function () {
+    return LIVE && M.live_actions ? el("button", { cls: "btn", text: "Run doctor", title: "python3 .ai-sdlc/bin/sdlc.py doctor", on: { click: function () {
       runKitCmd({ subcommand: "doctor" }, "python3 .ai-sdlc/bin/sdlc.py doctor", "doctor");
     } } }) : el("button", { cls: "btn", text: "Copy doctor command", on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py doctor", "doctor"); } } });
   }
@@ -2670,7 +2670,7 @@
 
   function exportHtml() {
     var title = (M.project || "nuhut").toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    var raw = document.documentElement.outerHTML.replace(/"action_token"\s*:\s*"[^"]*"/g, '"action_token":null');
+    var raw = document.documentElement.outerHTML.replace(/"live_actions"\s*:\s*true/g, '"live_actions":false');
     var doc = "<!doctype html>\n" + raw;
     downloadFile(title + "-dashboard.html", doc, "text/html;charset=utf-8");
   }
@@ -3206,7 +3206,7 @@
         el("span", { text: drawerNext.cmd })
       ]),
       el("div", { style: "display: flex; align-items: center; gap: 6px; flex-wrap: wrap;" }, [
-        LIVE && M.action_token && drawerNext.runSub ? el("button", {
+        LIVE && M.live_actions && drawerNext.runSub ? el("button", {
           cls: "btn primary",
           style: "font-size: 11px; padding: 4px 10px;",
           text: "▶ Run in Project",
@@ -3221,7 +3221,7 @@
           } }
         }) : null,
         el("button", {
-          cls: "btn" + (!(LIVE && M.action_token && drawerNext.runSub) ? " primary" : ""),
+          cls: "btn" + (!(LIVE && M.live_actions && drawerNext.runSub) ? " primary" : ""),
           style: "font-size: 11px; padding: 4px 10px;",
           text: "⧉ Copy CLI Command",
           on: { click: function (ev) {
@@ -3817,7 +3817,7 @@
       if (e.key === "r" && THREAD_STATE.selected && ITEMS[THREAD_STATE.selected]) {
         e.preventDefault();
         var dx = diagnoseNextAction(ITEMS[THREAD_STATE.selected]);
-        if (LIVE && M.action_token && dx.runPayload) runKitCmd(dx.runPayload, dx.cmd, dx.label);
+        if (LIVE && M.live_actions && dx.runPayload) runKitCmd(dx.runPayload, dx.cmd, dx.label);
         else copyCmd(dx.cmd, dx.label);
         return;
       }
@@ -7427,7 +7427,7 @@
 
     // Row 3: Live Monospace Command Preview Box + Explicit Run / Copy Buttons
     var actionBtns = [];
-    if (LIVE && M.action_token && activeSpec.runPayload) {
+    if (LIVE && M.live_actions && activeSpec.runPayload) {
       actionBtns.push(el("button", {
         cls: "cmd-btn run-btn",
         disabled: TERMINAL_STATE.running ? "disabled" : null,
@@ -7439,7 +7439,7 @@
       }));
     }
     actionBtns.push(el("button", {
-      cls: "cmd-btn " + (LIVE && M.action_token && activeSpec.runPayload ? "" : "primary"),
+      cls: "cmd-btn " + (LIVE && M.live_actions && activeSpec.runPayload ? "" : "primary"),
       text: "⧉ Copy CLI Command",
       title: "Copy `" + activeSpec.cmd + "` to clipboard",
       on: { click: function (e) {
@@ -8087,7 +8087,7 @@
     fn(L);
   }
   function auditBtn() {
-    return LIVE && M.action_token ? el("button", { cls: "btn", text: "Run dependency audit", title: "python3 .ai-sdlc/bin/sdlc.py audit", on: { click: function () {
+    return LIVE && M.live_actions ? el("button", { cls: "btn", text: "Run dependency audit", title: "python3 .ai-sdlc/bin/sdlc.py audit", on: { click: function () {
       runKitCmd({ subcommand: "audit" }, "python3 .ai-sdlc/bin/sdlc.py audit", "audit");
       setTimeout(function () { loadLens(true); }, 1500);
     } } }) : el("button", { cls: "btn", text: "Copy audit command", on: { click: function () { copyCmd("python3 .ai-sdlc/bin/sdlc.py audit", "audit"); } } });
@@ -8321,7 +8321,7 @@
         el("p", { cls: "view-subtitle", text: "Adjust effort level, second-reviewer requirements, and Token-Saving Mode, inspect what is installed, and fix broken kit setup." })
       ]),
       el("div", { style: "display: flex; gap: 6px; align-items: center;" }, [
-        LIVE && M.action_token ? el("button", {
+        LIVE && M.live_actions ? el("button", {
           cls: "cmd-btn run-btn",
           text: "▶ Run Doctor Audit",
           on: { click: function () {
@@ -8581,19 +8581,21 @@
         if (suggested) {
           btns.push(el("button", {
             cls: "cmd-btn primary",
-            text: "Use `" + suggested + "`",
+            text: "Copy `" + suggested + "` cmd",
             on: { click: function () {
-              var ch = {}; ch[st] = suggested;
-              kitApi("/api/config", { checks: ch }, "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=\"" + suggested + "\"", "Set checks." + st);
+              var cmd = "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=\"" + suggested + "\"";
+              copyText(cmd);
+              showToast("CLI Command Copied", "Shell check stages must be configured from your terminal:", cmd);
             } }
           }));
         }
         btns.push(el("button", {
           cls: "cmd-btn",
-          text: "Mark `absent`",
+          text: "Copy `absent` cmd",
           on: { click: function () {
-            var ch = {}; ch[st] = "absent";
-            kitApi("/api/config", { checks: ch }, "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=absent", "Marked checks." + st + " absent");
+            var cmd = "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=absent";
+            copyText(cmd);
+            showToast("CLI Command Copied", "Run in terminal to mark checks." + st + " absent:", cmd);
           } }
         }));
         blankBox.appendChild(el("div", { style: "display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 12px;" }, [

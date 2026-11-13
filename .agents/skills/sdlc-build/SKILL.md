@@ -1,0 +1,48 @@
+---
+name: sdlc-build
+description: "Build an approved plan — implement it to the plan, tests alongside, scoped to its ID. Use only when the user invokes /sdlc-build or explicitly asks to build or implement a plan that is already approved. Never on your own initiative: building without an approved plan is what this loop exists to prevent."
+---
+
+<!-- Generated from the kit's optional/claude-commands/sdlc-build.md by install.py. Kit-managed: change the kit, not this file. -->
+
+Run the BUILD step of the loop in `AGENTS.md` for:
+
+the request given with this skill: the text after its name, or the request in the conversation that called for it (expected: `<work item ID> [optional: the part of the plan to build now]`).
+
+Follow "4. BUILD" in `handbook/process/00-operating-model.md`. This command is the
+step between the `sdlc-plan` skill and the `sdlc-verify` skill; it does not plan and it does not declare
+anything verified.
+
+1. **Find the approved plan, or stop.** Name the work item ID. Read its backlog row and
+   its plan: Tier 1 at `handbook/project/plans/<ID>.md`, Tier 2 in the conversation or
+   the worklog, Tier 3 as its one sentence. If there is no plan, the design review holds a
+   Block, or a Tier 1 plan lacks the approval `handbook/process/05-change-control.md`
+   requires, **do not start**: say which, and run the `sdlc-plan` skill first. Building without a
+   plan is the failure this whole loop exists to prevent.
+
+2. **Check the Definition of Ready** items that depend on the plan
+   (`handbook/process/03-ready-and-done.md`, "Checkable at BUILD"). An unmet item
+   makes the row `Blocked` with the reason, not a guess.
+
+3. **Claim it.** Run `python3 .ai-sdlc/bin/sdlc.py sync --fetch` and deal with any `STOP`
+   line first. Set the backlog row to `In progress`, and work on a branch that carries the
+   ID, started from the default branch as the remote has it
+   (`handbook/process/05-change-control.md`, "Staying in step with the remote").
+
+4. **For a defect, the reproducing test comes first.** Write it, watch it fail for the
+   reported reason, commit it, and lock it as `05-change-control.md`, "Fixing a defect",
+   describes. Then fix the cause, at the boundary where every caller shares it, not only
+   the reported symptom.
+
+5. **Implement to the plan.** Tests alongside, including the failure and rejection paths.
+   Keep to the plan's file list: `python3 .ai-sdlc/bin/sdlc.py plan-check <ID>` shows any
+   drift. If reality forces a deviation, say so and record it in the plan; a plan quietly
+   abandoned mid-build is how untraceable systems are made.
+
+6. **Stay inside the ID.** Anything else you notice becomes a new backlog row, entered
+   as `Parked` ("Work you discovered" in `00-operating-model.md`), never fixed in passing.
+   Update any `project/` record this change falsifies, in the same change.
+
+7. **Stop at the end of BUILD.** Commit with the ID in the message. Report what was built,
+   what deviated from the plan and why, and what is next: the `sdlc-verify` skill. Do not call
+   anything *Verified* here; that word belongs to the step that ran the checks.

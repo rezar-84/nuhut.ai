@@ -289,8 +289,10 @@ def changed_prose(root):
 def scan_paths(files, root):
     """[(relative name, findings, word count)] and the paths that could not be read."""
     results, unread = [], []
+    real_root = os.path.realpath(root)
     for path in files:
-        rel = os.path.relpath(path, root)
+        real_path = os.path.realpath(path)
+        rel = os.path.relpath(real_path, real_root).replace(os.sep, "/")
         rel = path if rel.startswith("..") else rel
         try:
             with open(path, encoding="utf-8", errors="replace") as handle:
