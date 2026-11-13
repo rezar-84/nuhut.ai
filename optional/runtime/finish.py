@@ -8,6 +8,8 @@ import json
 import os
 import re
 
+import shards
+
 SDLC = "python3 .ai-sdlc/bin/sdlc.py"
 TODO = "TODO(finish)"
 CANONICAL = {"Now": "In progress", "Next": "Ready", "Blocked": "Blocked", "Parked": "Parked",
@@ -160,6 +162,9 @@ def release_item_test_locks(rt, project, item, commits, verify_ok, bite_ok):
 
 def resolve_effort(rt, project, item, cells):
     """Resolve effort mode in contract order: item override -> plan override -> charter default -> Normal."""
+    sh = shards.load_item(project, item)
+    if sh and sh.get("effort") in rt.EFFORT:
+        return sh["effort"]
     for cell in cells[2:] if len(cells) > 2 else ():
         cleaned = plain(cell)
         for mode in rt.EFFORT:
@@ -185,7 +190,10 @@ def waivers(rt, project, item):
 
 
 def worklog_entry(project, item):
-    """The text of the worklog.md entry headed by <item>, or ''."""
+    """The text of the worklog entry headed by <item> (shard first, then worklog.md), or ''."""
+    shard_text = shards.load_worklog_shard(project, item)
+    if shard_text:
+        return shard_text
     text = project.records("worklog.md")
     for entry in re.split(r"(?m)^(?=## |- [0-9]{4}-[0-9]{2}-[0-9]{2} · )", text):
         if re.match(r"^(?:## |- [0-9-]+ · )(?:[^\n]*[ ,&/])?%s\b" % re.escape(item), entry):
@@ -193,8 +201,11 @@ def worklog_entry(project, item):
     return ""
 
 
-def insert_worklog(project, block):
-    """Put <block> above the newest worklog entry, as `sdlc.py log --write` does."""
+def insert_worklog(project, block, item=None):
+    """Write <block> to worklog/<item>.md when sharded, else above newest entry in worklog.md."""
+    if item and shards.is_sharded(project, for_write=True):
+        shards.save_worklog_shard(project, item, block)
+        return True
     path = project.path(os.path.join(project.docs, "project", "worklog.md"))
     try:
         with open(path, encoding="utf-8") as handle:
@@ -228,13 +239,8 @@ def _replace_worklog_todos(project, item, notes):
     """Fill remaining TODO(finish) sections in an already-drafted worklog entry using <notes>."""
     if not _has_notes(notes):
         return False
-    path = project.path(os.path.join(project.docs, "project", "worklog.md"))
-    try:
-        with open(path, encoding="utf-8") as handle:
-            text = handle.read()
-    except (IOError, OSError):
-        return False
-    entry = worklog_entry(project, item)
+    shard_text = shards.load_worklog_shard(project, item)
+    entry = shard_text or worklog_entry(project, item)
     if not entry or TODO not in entry:
         return False
     updated = entry
@@ -255,6 +261,15 @@ def _replace_worklog_todos(project, item, notes):
             )
             updated = pat.sub(lambda m: m.group(1) + str(val).strip(), updated, count=1)
     if updated == entry:
+        return False
+    if shard_text:
+        shards.save_worklog_shard(project, item, updated)
+        return True
+    path = project.path(os.path.join(project.docs, "project", "worklog.md"))
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except (IOError, OSError):
         return False
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(text.replace(entry, updated, 1))
@@ -359,9 +374,9 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     or Tier 2 under Strict tier rules: Parked for human approval). Returns (lines, exit code):
     0 finished, 1 something is owed first, 2 the item cannot be found."""
     today = today or datetime.date.today().isoformat()
-    _, lines = backlog_lines(project)
+    backlog_text = project.records("backlog.md")
     found = {}
-    for row_id, status, cells in rt.backlog_rows("\n".join(lines or []), project.prefix,
+    for row_id, status, cells in rt.backlog_rows(backlog_text, project.prefix,
                                                  getattr(project, "legacy_prefixes", None)):
         found.setdefault(row_id, (status, cells))
     if item not in found:
@@ -480,7 +495,7 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
                                          status if already else final, commits, run, waived,
                                          today, notes=notes)
         if not dry_run:
-            insert_worklog(project, block)
+            insert_worklog(project, block, item=item)
         if needs_agent:
             owe("log      %s a worklog entry from git and the ledger: replace each "
                          "%s line (Why, Not done, Discovered...), then run finish again"
@@ -500,7 +515,27 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     else:
         extra = [today]
     if not dry_run:
-        move_row(project, item, final, extra)
+        if shards.is_sharded(project, for_write=True):
+            sh = shards.load_item(project, item) or shards.merged_items(project).get(item) or {
+                "id": item,
+                "title": title,
+                "tier": tier or "2",
+                "owner": plain(cells[3]) if len(cells) > 3 else "software-engineer",
+                "depends": cells[4] if len(cells) > 4 else "",
+                "created": today,
+            }
+            sh["status"] = final
+            sh["updated"] = today
+            if needs_human_gate:
+                sh["waiting_on"] = extra[0]
+                sh["park_reason"] = extra[1]
+            else:
+                sh["completed"] = today
+                sh["waiting_on"] = ""
+                sh["park_reason"] = ""
+            shards.save_item(project, sh, today=today)
+        else:
+            move_row(project, item, final, extra)
         unlocked = release_item_test_locks(
             rt, project, item, commits,
             verify_ok=(run[0] == "pass"),
@@ -683,3 +718,7 @@ def link_evidence(rt, project, apply=False):
     return ["%s %d row(s) from %d run(s) not in the ledger: %s"
             % ("added" if apply else "would add", len(rows), len(runs), ", ".join(runs[:5]) +
                (" ..." if len(runs) > 5 else ""))]
+
+
+def migrate_shards(rt, project, apply=False):
+    return shards.migrate_shards(rt, project, apply=apply)

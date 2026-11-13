@@ -4003,6 +4003,239 @@ def test_finish():
           p_ok.returncode == 0 and "locked_again.py" not in read(d, ".ai-sdlc/test-lock.txt"), p_ok.stdout)
 
 
+def test_shards_and_parallel_worktrees():
+    print("sharded store, Tier 2 touch globs, and 3-way conflict-free worktree merges")
+    d = tempfile.mkdtemp(prefix="sdlc-shards-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", repo])
+    code, out = run([repo, "SHD", "-y"])
+    check("sharded test repo installs", code == 0, out[-300:])
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(cwd, *args):
+        s_path = os.path.join(cwd, ".ai-sdlc", "bin", "sdlc.py")
+        p = subprocess.run([sys.executable, s_path] + list(args), cwd=cwd,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    # Configure unit check so verify runs cleanly in every worktree.
+    sdlc(repo, "config", "--set-check", "unit=python3 -c 'print(1)'")
+    for s in ("lint", "typecheck", "integration", "e2e", "a11y", "eval", "build", "scan", "format"):
+        sdlc(repo, "config", "--set-check", "%s=absent" % s)
+
+    # Create sharded items via `sdlc.py item add`: 3 non-overlapping Tier 2, 1 conflicting Tier 2, 1 Tier 1 without plan.
+    for title, tier, touch in (
+        ("Module A", "2", "src/a.py"),
+        ("Module B", "2", "src/b.py"),
+        ("Module C", "2", "src/c.py"),
+        ("Module A extra", "2", "src/a.py"),
+        ("Core schema", "1", "src/schema.py"),
+    ):
+        rc_i, out_i = sdlc(repo, "item", "add", "--title", title, "--tier", tier, "--touch", touch, "--json")
+        check("item add creates %s shard" % title, rc_i == 0 and '"id": "SHD-' in out_i, out_i)
+
+    # Render initial backlog.md & worklog.md on main so worktrees branch from a clean commit.
+    sdlc(repo, "render")
+    for f in ("src/a.py", "src/b.py", "src/c.py"):
+        write(repo, f, "X = 0\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore(SHD-001): initial sharded backlog"], cwd=repo)
+
+    rc_par, out_par = sdlc(repo, "parallel", "--json")
+    par = json.loads(out_par) if rc_par == 0 else {}
+    top_group = set(par.get("groups", [[]])[0]) if par.get("groups") else set()
+    check("Tier 2 items with touch globs schedule together without plans/*.md",
+          {"SHD-001", "SHD-002", "SHD-003"}.issubset(top_group) or len(top_group) >= 3, out_par[:400])
+    check("conflicting touch globs on src/a.py report a conflict",
+          any({c["a"], c["b"]} == {"SHD-001", "SHD-004"} for c in par.get("conflicts", [])), out_par[:400])
+    check("Tier 1 item without plans/<ID>.md stays in plan_first even with touch globs",
+          any(x["id"] == "SHD-005" for x in par.get("plan_first", [])), out_par[:400])
+
+    # Claim SHD-001, SHD-002, SHD-003 into 3 concurrent linked git worktrees.
+    branches = []
+    for item_id, target_file in (("SHD-001", "src/a.py"), ("SHD-002", "src/b.py"), ("SHD-003", "src/c.py")):
+        rc_c, out_c = sdlc(repo, "claim", item_id, "--agent", "worker-" + item_id.lower(), "--json")
+        rec = json.loads(out_c)
+        wt = rec["worktree"]
+        branches.append((item_id, rec["branch"], wt))
+        write(wt, target_file, "X = %r\n" % item_id)
+        rc_v, out_v = sdlc(wt, "verify", "--item", item_id, "--json")
+        v_obj = json.loads(out_v)
+        check("verify --json succeeds in worktree %s" % item_id, rc_v == 0 and v_obj.get("passed") is True, out_v[:300])
+        subprocess.call(["git", "add", "-A"], cwd=wt)
+        subprocess.call(git + ["commit", "-qm", "feat(%s): implement %s\n\nWork-Item: %s\nAgent: test\nModel: test" % (
+            item_id, target_file, item_id)], cwd=wt)
+        rc_f, out_f = sdlc(wt, "finish", item_id, "--why", "Implemented %s cleanly in isolated worktree." % item_id, "--json")
+        f_obj = json.loads(out_f)
+        check("finish --json closes %s inside worktree" % item_id,
+              rc_f == 0 and f_obj.get("finished") is True and f_obj.get("status") == "Done", out_f[:300])
+        # Ensure neither backlog.md nor worklog.md was modified on the worktree branch!
+        wt_diff = subprocess.check_output(["git", "status", "--porcelain"], cwd=wt, universal_newlines=True)
+        check("worktree %s touched only shards and never dirtied backlog.md or worklog.md" % item_id,
+              "backlog.md" not in wt_diff and "worklog.md" not in wt_diff and ("items/%s.json" % item_id) in wt_diff,
+              wt_diff)
+        subprocess.call(["git", "add", "-A"], cwd=wt)
+        subprocess.call(git + ["commit", "-qm", "chore(%s): close shard records\n\nWork-Item: %s" % (item_id, item_id)], cwd=wt)
+
+    # Merge all 3 branches sequentially into main with zero conflicts!
+    for item_id, br, wt in branches:
+        m_rc = subprocess.call(git + ["merge", "--no-edit", "-q", br], cwd=repo)
+        check("branch %s merges into main with zero conflicts" % br, m_rc == 0)
+        subprocess.call(["git", "worktree", "remove", "--force", wt], cwd=repo)
+
+    rc_doc, out_doc = sdlc(repo, "doctor", "--strict")
+    check("doctor --strict passes on merged sharded main before render", rc_doc == 0, out_doc)
+    rc_rc1, out_rc1 = sdlc(repo, "render", "--check", "--json")
+    check("render --check detects summary drift before render", rc_rc1 == 1 and not json.loads(out_rc1)["in_sync"], out_rc1)
+    rc_ren, out_ren = sdlc(repo, "render", "--json")
+    check("render materializes backlog.md and worklog.md", rc_ren == 0, out_ren)
+    rc_rc2, out_rc2 = sdlc(repo, "render", "--check")
+    check("render --check exits 0 after render", rc_rc2 == 0, out_rc2)
+    rendered_wl = read(repo, "docs/project/worklog.md")
+    check("rendered worklog.md contains all 3 merged items",
+          all(i in rendered_wl for i in ("SHD-001", "SHD-002", "SHD-003")), rendered_wl[:400])
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_distributed_git_refs():
+    print("distributed git-ref CAS leases and atomic next-id across clones")
+    d = tempfile.mkdtemp(prefix="sdlc-gitrefs-")
+    origin = os.path.join(d, "origin.git")
+    seed = os.path.join(d, "seed")
+    clone_a = os.path.join(d, "clone_a")
+    clone_b = os.path.join(d, "clone_b")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "--bare", "-b", "main", "-q", origin])
+    os.makedirs(seed)
+    subprocess.call(["git", "init", "-b", "main", "-q", seed])
+    run([seed, "DST", "-y"])
+    seed_script = os.path.join(seed, ".ai-sdlc", "bin", "sdlc.py")
+    subprocess.run([sys.executable, seed_script, "item", "add", "DST-001", "--title", "Distributed job", "--touch", "a.py"],
+                   cwd=seed, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    subprocess.run([sys.executable, seed_script, "render"], cwd=seed, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    subprocess.call(["git", "add", "-A"], cwd=seed)
+    subprocess.call(git + ["commit", "-qm", "chore(DST-001): init"], cwd=seed)
+    subprocess.call(["git", "remote", "add", "origin", origin], cwd=seed)
+    subprocess.call(["git", "push", "-q", "-u", "origin", "main"], cwd=seed)
+
+    subprocess.call(["git", "clone", "-q", origin, clone_a])
+    subprocess.call(["git", "clone", "-q", origin, clone_b])
+
+    def sdlc(cwd, *args):
+        s_path = os.path.join(cwd, ".ai-sdlc", "bin", "sdlc.py")
+        p = subprocess.run([sys.executable, s_path] + list(args), cwd=cwd,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    # Alternating & concurrent next-id --sync-refs across two independent clones.
+    rc1, o1 = sdlc(clone_a, "next-id", "--sync-refs", "--json")
+    rc2, o2 = sdlc(clone_b, "next-id", "--sync-refs", "--json")
+    rc3, o3 = sdlc(clone_a, "next-id", "--sync-refs", "--json")
+    ids = [json.loads(o)["id"] for o in (o1, o2, o3) if o.strip().startswith("{")]
+    check("next-id --sync-refs allocates strictly monotonic IDs across clones",
+          rc1 == 0 and rc2 == 0 and rc3 == 0 and ids == ["DST-002", "DST-003", "DST-004"], str(ids))
+    rc_adr, o_adr = sdlc(clone_b, "next-id", "--kind", "adr", "--sync-refs", "--json")
+    check("next-id --kind adr --sync-refs allocates 4-digit ADR ID",
+          rc_adr == 0 and json.loads(o_adr)["id"] == "0001", o_adr)
+
+    # Distributed claim CAS mutex across clone_a and clone_b.
+    rc_ca, out_ca = sdlc(clone_a, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-a", "--json")
+    check("clone_a acquires remote claim lease on DST-001", rc_ca == 0 and json.loads(out_ca)["agent"] == "worker-a", out_ca)
+    rc_cb, out_cb = sdlc(clone_b, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-b")
+    check("clone_b is refused remote claim on DST-001 held by worker-a",
+          rc_cb == 1 and "worker-a" in out_cb, out_cb)
+    rc_ls, out_ls = sdlc(clone_b, "claims", "--sync-refs", "--json")
+    check("clone_b lists remote claim via claims --sync-refs",
+          rc_ls == 0 and any(c["id"] == "DST-001" and c.get("agent") == "worker-a" for c in json.loads(out_ls)), out_ls)
+    rc_bad_rel, out_bad_rel = sdlc(clone_b, "release", "DST-001", "--sync-refs", "--agent", "worker-b")
+    check("clone_b cannot release worker-a's remote claim without --force",
+          rc_bad_rel == 1 and "worker-a" in out_bad_rel, out_bad_rel)
+    rc_rel, out_rel = sdlc(clone_a, "release", "DST-001", "--sync-refs", "--agent", "worker-a", "--json")
+    check("clone_a releases remote claim cleanly with --json",
+          rc_rel == 0 and json.loads(out_rel)["released"] == "DST-001", out_rel)
+    rc_cb2, out_cb2 = sdlc(clone_b, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-b", "--json")
+    check("clone_b can claim DST-001 once worker-a releases it", rc_cb2 == 0, out_cb2)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_json_and_doctor_cache():
+    import datetime as _dt
+    print("universal --json contract, 4.x shard migration, and incremental doctor cache")
+    d = tempfile.mkdtemp(prefix="sdlc-cache-")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", d])
+    run([d, "JSC", "-y"])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    sdlc("config", "--set-check", "unit=python3 -c 'print(1)'")
+    # Seed a 4.x-style backlog row, commit, verify, and migrate to shards.
+    bl = read(d, "docs/project/backlog.md")
+    head, sep, tail = bl.partition("| --- | --- | --- | --- | --- | --- |\n")
+    write(d, "docs/project/backlog.md", head + sep + "| JSC-001 | Legacy item | 2 | software-engineer | | Ready |\n" + tail)
+    write(d, "app.py", "V = 1\n")
+    subprocess.call(["git", "add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "feat(JSC-001): initial\n\nWork-Item: JSC-001\nAgent: claude-code\nModel: claude-sonnet-4-6"], cwd=d)
+
+    rc_tr, out_tr = sdlc("trailers", "JSC-001", "--agent", "claude", "--model", "sonnet", "--json")
+    check("trailers --json outputs valid JSON", rc_tr == 0 and json.loads(out_tr)["Work-Item"] == "JSC-001", out_tr)
+    rc_lg, out_lg = sdlc("log", "--id", "JSC-001", "--since", "HEAD~0", "--json")
+    # JSC-001 is root commit so test --since against a second commit
+    write(d, "app.py", "V = 2\n")
+    subprocess.call(["git", "add", "app.py"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "feat(JSC-001): update\n\nWork-Item: JSC-001\nAgent: claude-code\nModel: claude-sonnet-4-6"], cwd=d)
+    rc_lg, out_lg = sdlc("log", "--since", "HEAD~1", "--json")
+    check("log --json outputs valid JSON", rc_lg == 0 and len(json.loads(out_lg)["entries"]) == 1, out_lg)
+
+    fake_rev = "cmd:%s -c \"import sys; sys.stdin.read(); print('Model: gpt-5.4\\nVerdict: Pass\\nChecked: diff\\nNot checked: none\\nFindings:\\n| # | Sev | Location | Finding | Consequence | Fix |')\"" % sys.executable
+    rc_rv, out_rv = sdlc("review", "JSC-001", "--role", "qa", "--by", fake_rev, "--json")
+    check("review --json outputs valid JSON record",
+          rc_rv == 0 and json.loads(out_rv)["verdict"] == "Pass" and json.loads(out_rv)["independence"] == "independent",
+          out_rv)
+
+    rc_vf, out_vf = sdlc("verify", "--item", "JSC-001", "--stage", "unit", "--json")
+    check("verify --json outputs valid JSON summary", rc_vf == 0 and json.loads(out_vf)["passed"] is True, out_vf)
+
+    rc_mg, out_mg = sdlc("fix", "migrate-shards", "--apply", "--json")
+    check("fix migrate-shards --apply --json migrates 4.x records into shards",
+          rc_mg == 0 and os.path.isfile(os.path.join(d, "docs/project/items/JSC-001.json"))
+          and not os.path.exists(os.path.join(d, "docs/project/evidence-ledger.jsonl")), out_mg)
+
+    # Populate 120 item shards and verify warm doctor cache hit & invalidation.
+    today_s = _dt.date.today().isoformat()
+    for n in range(2, 122):
+        write(d, "docs/project/items/JSC-%03d.json" % n, json.dumps({
+            "id": "JSC-%03d" % n, "title": "Task %d" % n, "type": "feat", "tier": "2",
+            "owner": "software-engineer", "status": "Ready", "depends": [], "touch": ["src/m%d.py" % n],
+            "created": today_s, "updated": today_s,
+        }))
+    sdlc("doctor", "--json")
+    cache_path = os.path.join(d, ".ai-sdlc", "cache", "doctor.json")
+    check("doctor writes .ai-sdlc/cache/doctor.json", os.path.isfile(cache_path))
+    t0 = time.time()
+    rc_warm, out_warm = sdlc("doctor", "--json")
+    warm_ms = (time.time() - t0) * 1000.0
+    check("warm doctor run with 120 shards completes in <500ms",
+          rc_warm == 0 and warm_ms < 500.0, "took %.1fms" % warm_ms)
+
+    # Mutating a shard invalidates the cache immediately on the next doctor run.
+    write(d, "docs/project/items/JSC-050.json", json.dumps({
+        "id": "JSC-050", "title": "Self cycle", "type": "feat", "tier": "2",
+        "owner": "software-engineer", "status": "Blocked", "depends": ["JSC-050"], "touch": ["src/m50.py"],
+        "created": today_s, "updated": today_s,
+    }))
+    rc_inv, out_inv = sdlc("doctor", "--strict", "--json")
+    check("doctor cache invalidates immediately when a shard file changes",
+          rc_inv == 1 and any("cannot depend on itself" in f["message"] for f in json.loads(out_inv)), out_inv[:300])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -4019,7 +4252,8 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project):
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
+                 test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache):
         test()
     print("")
     if failures:

@@ -237,8 +237,15 @@ def _build_inner(rt, project):
 
     docs_root = os.path.join(project.docs, "project")
     backlog_rel = os.path.join(docs_root, "backlog.md")
-    backlog = rt.read(project.path(backlog_rel))
+    backlog = project.records("backlog.md") if hasattr(project, "records") else rt.read(project.path(backlog_rel))
     rows = backlog_tables(backlog)
+    try:
+        shards_mod = rt.runtime_module("shards")
+        shard_items = shards_mod.load_items(project)
+        wl_shards = shards_mod.load_worklog_shards(project)
+        sharded_mode = shards_mod.has_shards(project)
+    except Exception:
+        shard_items, wl_shards, sharded_mode = {}, [], False
 
     known_ids = set()
     for section, line, row in rows:
@@ -305,27 +312,42 @@ def _build_inner(rt, project):
         status = plain(row.get("Status", ""))
         known = ("ID", "Task", "Tier", "Owner role", "Depends on", "Status")
         item = model["items"].setdefault(raw_id, {"id": raw_id})
+        sh = shard_items.get(raw_id) or {}
         item.update({
-            "title": plain(row.get("Task", "")), "tier": plain(row.get("Tier", "")),
+            "title": sh.get("title") or plain(row.get("Task", "")),
+            "tier": plain(row.get("Tier", "")),
             "owner": plain(row.get("Owner role", "")),
             "depends": id_re.findall(row.get("Depends on", "")),
             "depends_text": plain(row.get("Depends on", "")),
             "status": status, "column": column_of(status), "section": section,
-            "row": "%s:%d" % (backlog_rel, line),
+            "row": ("%s/project/items/%s.json" % (project.docs, raw_id)) if sh else ("%s:%d" % (backlog_rel, line)),
             "extra": dict((k, plain(v)) for k, v in row.items() if k not in known and v),
         })
+        if sh:
+            item["type"] = sh.get("type", "feat")
+            item["touch"] = sh.get("touch", [])
+            item["effort"] = sh.get("effort", "")
         if raw_id not in model["order"]:
             model["order"].append(raw_id)
     model["epics"] = epics(backlog, id_re)
+    model["shards"] = {"enabled": sharded_mode, "items": len(shard_items), "worklogs": len(wl_shards)}
 
-    # Worklog, active then archive.
+    # Worklog: per-item shards first (deduplicated against rendered worklog.md), then active and archive.
+    seen_wl_ids = set()
+    for wl_id, wl_rel, wl_body in wl_shards:
+        for entry in worklog_entries(wl_body, wl_rel, id_re):
+            model["worklog"].append(entry)
+        seen_wl_ids.add(wl_id)
     sources = [os.path.join(docs_root, "worklog.md")]
     archive = project.path(os.path.join(docs_root, "worklog-archive"))
     if os.path.isdir(archive):
         sources += [os.path.join(docs_root, "worklog-archive", n)
                     for n in sorted(os.listdir(archive)) if n.endswith(".md")]
     for rel in sources:
-        model["worklog"].extend(worklog_entries(rt.read(project.path(rel)), rel, id_re))
+        for entry in worklog_entries(rt.read(project.path(rel)), rel, id_re):
+            if entry.get("id") and entry["id"] in seen_wl_ids:
+                continue
+            model["worklog"].append(entry)
 
     # Every markdown record under project/, plus the contract and the card.
     doc_paths = ["AGENTS.md", os.path.join(project.docs, "CARD.md")]

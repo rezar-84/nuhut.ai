@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-003",
+  "title": "M3: Multi-worker headless dispatcher (dispatch.py), self-healing defect policy & effort-modes benchmark suite",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "architect",
+  "status": "Ready",
+  "depends": [
+    "NUHT-002"
+  ],
+  "touch": [],
+  "created": "2026-11-13",
+  "updated": "2026-11-13",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

@@ -36,7 +36,8 @@ is prioritised.
 
 | ID | Task | Tier | Owner role | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
-| NUHT-001 | M1: Control-plane security hardening, unified Python hook engine, runtime bug fixes & contract reconciliation | 1 | security | | In progress |
+| NUHT-001 | M1: Control-plane security hardening, unified Python hook engine, runtime bug fixes & contract reconciliation | 1 | security |  | In progress |
+| NUHT-002 | M2: Sharded zero-conflict store, git-ref leases, Tier 2 parallel scope globs, universal --json & cached doctor | 1 | architect | NUHT-001 | In progress |
 
 ## Next
 
@@ -44,8 +45,7 @@ Agreed, not started. Ordered by priority.
 
 | ID | Task | Tier | Owner role | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
-| NUHT-002 | M2: Sharded zero-conflict store, git-ref leases, Tier 2 parallel scope globs, universal `--json` & cached doctor | 1 | architect | `NUHT-001` | Ready |
-| NUHT-003 | M3: Multi-worker headless dispatcher (`dispatch.py`), self-healing defect policy & effort-modes benchmark suite | 1 | architect | `NUHT-002` | Ready |
+| NUHT-003 | M3: Multi-worker headless dispatcher (dispatch.py), self-healing defect policy & effort-modes benchmark suite | 1 | architect | NUHT-002 | Ready |
 
 ## Blocked
 

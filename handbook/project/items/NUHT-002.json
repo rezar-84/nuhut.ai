@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-002",
+  "title": "M2: Sharded zero-conflict store, git-ref leases, Tier 2 parallel scope globs, universal --json & cached doctor",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "architect",
+  "status": "In progress",
+  "depends": [
+    "NUHT-001"
+  ],
+  "touch": [],
+  "created": "2026-11-13",
+  "updated": "2026-11-13",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

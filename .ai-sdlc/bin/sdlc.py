@@ -75,6 +75,7 @@ _RUNTIME_DIR = os.path.dirname(os.path.abspath(__file__))
 if _RUNTIME_DIR not in sys.path:
     sys.path.insert(0, _RUNTIME_DIR)
 import hooks as _hooks_mod  # noqa: E402
+import shards as _shards_mod  # noqa: E402
 
 SECRET_PATTERNS = _hooks_mod.SECRET_PATTERNS
 URL_PASSWORD = _hooks_mod.URL_PASSWORD
@@ -350,10 +351,14 @@ class Project(object):
         return data if isinstance(data, dict) else {}
 
     def records(self, name):
-        return read(self.path(os.path.join(self.docs, "project", name)))
+        raw = read(self.path(os.path.join(self.docs, "project", name)))
+        if name == "backlog.md":
+            return _shards_mod.overlay_backlog(self, raw)
+        return raw
 
     def worklog_texts(self):
-        texts = [self.records("worklog.md")]
+        texts = [body for _, _, body in _shards_mod.load_worklog_shards(self)]
+        texts.append(self.records("worklog.md"))
         archive = self.path(os.path.join(self.docs, "project", "worklog-archive"))
         if os.path.isdir(archive):
             for name in sorted(os.listdir(archive)):
@@ -475,7 +480,8 @@ def check_placeholders(project, out):
             paths.extend(os.path.join(folder, name) for name in sorted(names))
         for path in paths:
             # The worklog is narrative and quotes placeholders when it describes kit work.
-            if os.path.basename(path) == "worklog.md" or "worklog-archive" in path:
+            if (os.path.basename(path) == "worklog.md" or "worklog-archive" in path
+                    or (os.sep + "worklog" + os.sep) in path):
                 continue
             if not path.endswith((".md", ".sh", ".json", ".js", ".html", ".mdc", ".txt")):
                 continue
@@ -799,6 +805,12 @@ def backlog_history(project):
         if item not in touched:
             touched[item] = date
 
+    for item_id, sh in _shards_mod.load_items(project).items():
+        dt = sh.get("updated") or sh.get("created") or ""
+        if dt:
+            touch(item_id, dt)
+            since.setdefault((item_id, sh.get("status", "")), dt)
+
     # git log is newest first, so the first sighting is the latest one.
     date = None
     for line in project.git("log", "-p", "--no-color", "--format=%x01%cs", "--",
@@ -918,7 +930,7 @@ def check_sensitive(project, out):
     for folder, dirs, names in os.walk(top):
         dirs[:] = [d for d in dirs if d not in ("node_modules", ".git")]
         for name in sorted(names):
-            if not name.endswith((".md", ".txt", ".json", ".csv")):
+            if not name.endswith((".md", ".txt", ".json", ".jsonl", ".csv")):
                 continue
             path = os.path.join(folder, name)
             rel = os.path.relpath(path, project.root)
@@ -1081,9 +1093,105 @@ def check_bite_leftover(project, out):
                 "`sdlc.py bite --restore`")
 
 
-def doctor(project, today=None):
-    out = Findings()
+DOCTOR_CACHE_VERSION = 1
+
+
+def _doctor_input_digest(project, today):
+    """Content-addressed SHA-256 over every file and git ref doctor inspects."""
+    h = hashlib.sha256()
+    h.update(("v%d|%s|%s\0" % (
+        DOCTOR_CACHE_VERSION, today.isoformat(), bool(shutil.which("jq"))
+    )).encode("utf-8"))
+    h.update((project.charter or "").encode("utf-8", "replace") + b"\0")
+    h.update(json.dumps(project.profile or {}, sort_keys=True).encode("utf-8") + b"\0")
+    h.update(json.dumps(project.manifest or {}, sort_keys=True).encode("utf-8") + b"\0")
+
+    head_refs = project.git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/nuhut")
+    head_sha = project.git("rev-parse", "HEAD").strip()
+    h.update(("HEAD:%s\n%s\0" % (head_sha, head_refs)).encode("utf-8"))
+
+    single_files = [
+        "AGENTS.md", ".gitignore", ".git/info/exclude",
+        ".ai-sdlc/profile.json", ".ai-sdlc/manifest.json",
+        ".ai-sdlc/bite/active.json", ".ai-sdlc/bin/hooks.py",
+        ".claude/settings.json",
+    ] + list(POINTER_FILES)
+    for rel in single_files:
+        p = project.path(rel)
+        if os.path.isfile(p):
+            h.update(("F:" + rel + "\0").encode("utf-8"))
+            try:
+                with open(p, "rb") as fh:
+                    h.update(hashlib.sha256(fh.read()).digest())
+            except OSError:
+                h.update(b"err")
+        else:
+            h.update(("M:" + rel + "\0").encode("utf-8"))
+
+    scan_dirs = [
+        project.docs, ".cursor/rules", ".claude/hooks",
+        ".claude/commands", ".claude/skills", ".agents/skills",
+    ]
+    for rel_dir in scan_dirs:
+        top = project.path(rel_dir)
+        if not os.path.isdir(top):
+            h.update(("MD:" + rel_dir + "\0").encode("utf-8"))
+            continue
+        for folder, dirs, names in os.walk(top):
+            dirs[:] = sorted(d for d in dirs if d not in ("node_modules", ".git", "worktrees"))
+            for name in sorted(names):
+                full = os.path.join(folder, name)
+                rpath = os.path.relpath(full, project.root)
+                h.update(("D:" + rpath + "\0").encode("utf-8"))
+                try:
+                    with open(full, "rb") as fh:
+                        h.update(hashlib.sha256(fh.read()).digest())
+                except OSError:
+                    h.update(b"err")
+
+    try:
+        reg_dir = runtime_module("claims").registry(project)
+    except Exception:
+        reg_dir = ""
+    if reg_dir and os.path.isdir(reg_dir):
+        for name in sorted(os.listdir(reg_dir)):
+            if name.endswith(".json"):
+                full = os.path.join(reg_dir, name)
+                h.update(("C:" + name + "\0").encode("utf-8"))
+                try:
+                    with open(full, "rb") as fh:
+                        h.update(hashlib.sha256(fh.read()).digest())
+                except OSError:
+                    h.update(b"err")
+    return h.hexdigest()
+
+
+def doctor(project, today=None, use_cache=True):
     today = today or datetime.date.today()
+    can_cache = bool(
+        use_cache
+        and getattr(project, "root", "")
+        and os.path.isdir(project.path(".ai-sdlc"))
+    )
+    digest = ""
+    cache_file = ""
+    if can_cache:
+        cache_dir = project.path(os.path.join(".ai-sdlc", "cache"))
+        cache_file = os.path.join(cache_dir, "doctor.json")
+        try:
+            digest = _doctor_input_digest(project, today)
+            if os.path.isfile(cache_file):
+                with open(cache_file, encoding="utf-8") as ch:
+                    cached = json.load(ch)
+                if (isinstance(cached, dict)
+                        and cached.get("version") == DOCTOR_CACHE_VERSION
+                        and cached.get("digest") == digest
+                        and isinstance(cached.get("raw_items"), list)):
+                    return apply_baseline(project, [dict(x) for x in cached["raw_items"]])
+        except Exception:
+            digest = ""
+
+    out = Findings()
     own_cache = getattr(project, "_build_cache", None) is None
     if own_cache:
         project._build_cache = {}
@@ -1109,7 +1217,25 @@ def doctor(project, today=None):
         check_sensitive(project, out)
         check_claims(project, out, today)
         check_specs(project, out, today)
-        return apply_baseline(project, out.items)
+        if can_cache and digest and cache_file:
+            try:
+                cache_dir = os.path.dirname(cache_file)
+                os.makedirs(cache_dir, exist_ok=True)
+                gi = os.path.join(cache_dir, ".gitignore")
+                if not os.path.isfile(gi):
+                    with open(gi, "w", encoding="utf-8") as gh:
+                        gh.write("*\n")
+                _shards_mod._atomic_write_text(
+                    cache_file,
+                    json.dumps({
+                        "version": DOCTOR_CACHE_VERSION,
+                        "digest": digest,
+                        "raw_items": out.items,
+                    }) + "\n",
+                )
+            except Exception:
+                pass
+        return apply_baseline(project, [dict(x) for x in out.items])
     finally:
         if own_cache:
             project._build_cache = None
@@ -1312,10 +1438,15 @@ def verify(project, selected, timeout, parallel=False, item=None):
             stage_entries[s].update(run_stage(s, c))
 
     results = [stage_entries[stage] for stage in STAGES]
+    passed = not any(e["result"].startswith("Verified: fail") for e in results)
     summary = {
         "generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "root": project.root, "git_head": head, "dirty": dirty,
-        "charter": project.charter_path, "drift": drift, "stages": results,
+        "charter": project.charter_path, "drift": drift,
+        "run": os.path.basename(folder),
+        "evidence_dir": os.path.relpath(folder, project.root),
+        "passed": passed,
+        "stages": results,
     }
     if item:
         summary["item"] = item
@@ -1472,8 +1603,14 @@ def ledger_path(project):
 
 def ledger_append(project, entries):
     """The committed evidence ledger: one JSON line per stage run by `sdlc.py verify` (or
-    `bite`). Logs stay in the git-ignored evidence folder; the ledger is the part a
-    reviewer on another machine, or CI, can check a claim against."""
+    `bite`). Sharded projects and linked worktrees write immutable per-run files under
+    <docs>/project/ledger/<run>.jsonl; single-worktree 4.x projects append to
+    evidence-ledger.jsonl."""
+    if not entries:
+        return
+    if _shards_mod.is_sharded(project, for_write=True):
+        _shards_mod.append_ledger_shards(project, entries)
+        return
     path = ledger_path(project)
     folder = os.path.dirname(path)
     if not os.path.isdir(folder):
@@ -1485,15 +1622,26 @@ def ledger_append(project, entries):
 
 def ledger(project):
     rows = []
+    seen = set()
     try:
         with open(ledger_path(project), encoding="utf-8") as handle:
             for line in handle:
                 try:
-                    rows.append(json.loads(line))
+                    obj = json.loads(line)
+                    if isinstance(obj, dict):
+                        k = _shards_mod.ledger_row_key(obj)
+                        if k not in seen:
+                            seen.add(k)
+                            rows.append(obj)
                 except ValueError:
                     continue
     except (IOError, OSError):
         pass
+    for obj in _shards_mod.read_ledger_shards(project):
+        k = _shards_mod.ledger_row_key(obj)
+        if k not in seen:
+            seen.add(k)
+            rows.append(obj)
     return rows
 
 
@@ -1749,10 +1897,24 @@ def claims_verified(entry):
 def check_verified_claims(project, out):
     """A worklog entry that says Verified for an item must have a ledger row for one of
     that item's commits. Only entries for items that have commits are judged."""
-    rows = ledger(project)
-    text = project.records("worklog.md")
     prefix = project.prefix
-    if not prefix or not text:
+    if not prefix:
+        return
+    rows = ledger(project)
+    checked_ids = set()
+    for wl_id, wl_rel, wl_body in _shards_mod.load_worklog_shards(project):
+        checked_ids.add(wl_id)
+        if not re.fullmatch(r"%s-[0-9]+" % re.escape(prefix), wl_id):
+            continue
+        if not claims_verified(wl_body) or not item_commits(project, wl_id):
+            continue
+        if not evidence_matches(project, wl_id, rows):
+            out.add("warn", "evidence", "%s %s" % (wl_rel, wl_id),
+                    "says Verified, but the evidence ledger has no `sdlc.py verify` run on "
+                    "this item's commits. Only verify makes a result Verified")
+
+    text = project.records("worklog.md")
+    if not text:
         return
     entries = re.split(r"(?m)^(?=## |- [0-9]{4}-[0-9]{2}-[0-9]{2} · )", text)
     where = os.path.join(project.docs, "project", "worklog.md")
@@ -1761,6 +1923,8 @@ def check_verified_claims(project, out):
         if not head or not claims_verified(entry):
             continue
         item = head.group(1)
+        if item in checked_ids:
+            continue
         if not item_commits(project, item):
             continue
         if not evidence_matches(project, item, rows):
@@ -1877,8 +2041,21 @@ NOISE_PATH = re.compile(r"(^|/)__pycache__/|\.py[co]$")
 
 
 def write_log(project, lines):
-    """Insert drafted lines above the newest worklog entry, skipping any item the worklog
-    already names. Returns the lines written."""
+    """Insert drafted lines above the newest worklog entry (or write per-item worklog shards
+    when sharded), skipping any item the worklog already names. Returns the lines written."""
+    if _shards_mod.is_sharded(project, for_write=True):
+        existing_text = project.worklog_texts()
+        written = []
+        for line in lines:
+            parts = line.split(" · ")
+            if len(parts) < 2:
+                continue
+            item_id = parts[1].strip()
+            if _shards_mod.load_worklog_shard(project, item_id) or item_id in existing_text:
+                continue
+            _shards_mod.save_worklog_shard(project, item_id, line)
+            written.append(line)
+        return written
     path = project.path(os.path.join(project.docs, "project", "worklog.md"))
     try:
         with open(path, encoding="utf-8") as handle:
@@ -3117,6 +3294,14 @@ def selftest():
     assert choice(labelled(updated_c, "Default effort mode"), EFFORT) == ("Lean", "decided")
     updated_chk = _set_check_row(charter, "lint", "ruff check .")
     assert charter_commands(updated_chk)["lint"] == "ruff check ."
+    norm_it = _shards_mod.normalize_item({
+        "id": "ACME-007", "title": "Fix parser", "type": "bug", "tier": "2",
+        "effort": "beast", "status": "next", "touch": "./src/a.py, tests/t.py",
+        "depends": "ACME-001, ACME-002",
+    }, today="2026-04-01")
+    assert norm_it["type"] == "defect" and norm_it["effort"] == "Beast"
+    assert norm_it["status"] == "Ready" and norm_it["touch"] == ["src/a.py", "tests/t.py"]
+    assert norm_it["depends"] == ["ACME-001", "ACME-002"]
     print("sdlc runtime self-test passed")
 
 
@@ -3238,6 +3423,9 @@ Viewer and reports
   metrics             process measures from the records and git                       metrics
 
 Work items and agents
+  item                manage sharded items: add, set, show, list                      item add --title "Fix auth"
+  next-id             allocate the next work item or ADR ID (--sync-refs for CAS)     next-id --sync-refs
+  render              materialize backlog.md and worklog.md from shards (--check)     render --check
   claim <ID>          take an item: atomic claim, its branch and its own worktree     claim ACME-12
   release <ID>        free it (--remove-worktree to clean up)                         release ACME-12
   claims / parallel   who holds what / which Ready items can run side by side        parallel
@@ -3282,8 +3470,14 @@ EXAMPLES = {
     "bite": ["bite npm test", "bite --restore"],
     "config": ["config                   # show the constraints", "config --effort Lean --independent-review tier1",
                "config --specs on", "config --slop-filter strict", "config --set-check unit='npm test'"],
-    "fix": ["fix all", "fix shared-skills", "fix wire-pointer", "fix rotate-worklog          # preview",
-            "fix normalise-status --apply", "fix link-evidence --apply"],
+    "fix": ["fix all", "fix shared-skills", "fix wire-pointer", "fix migrate-shards --apply",
+            "fix rotate-worklog          # preview", "fix normalise-status --apply",
+            "fix link-evidence --apply"],
+    "item": ["item add --title \"Fix empty input\" --type defect --tier 2 --touch src/parser.py",
+             "item set ACME-012 --status Ready --effort Lean",
+             "item list --status Ready --json", "item show ACME-012 --json"],
+    "next-id": ["next-id", "next-id --sync-refs --json", "next-id --kind adr"],
+    "render": ["render", "render --check"],
     "lens": ["lens", "lens --area build", "lens --user --json"],
     "audit": ["audit", "audit --strict           # exit 1 on a critical or high vulnerability"],
     "sync": ["sync                     # as of the last fetch", "sync --fetch             # fetch first",
@@ -3325,6 +3519,8 @@ def main(argv):
                      help="accept the current findings in docs/project/doctor-baseline.json; "
                      "once it exists a rewrite only removes fixed ones")
     doc.add_argument("--all", action="store_true", help="also show accepted findings")
+    doc.add_argument("--no-cache", dest="no_cache", action="store_true",
+                     help="bypass .ai-sdlc/cache/doctor.json")
     ver = sub.add_parser("verify", help="run the charter's check commands and record "
                          "the evidence")
     ver.add_argument("--stage", help="comma-separated stages to run, e.g. unit,lint")
@@ -3332,6 +3528,7 @@ def main(argv):
     ver.add_argument("--parallel", "-j", action="store_true",
                      help="run independent verification stages concurrently")
     ver.add_argument("--item", help="the work item this run verifies; the ledger rows name it")
+    ver.add_argument("--json", action="store_true", help="print verification summary as JSON")
     fin = sub.add_parser("finish", help="close a work item: check its evidence and reviews, "
                          "draft the worklog entry, set Done (Tier 1 / Strict Tier 2: Parked)")
     fin.add_argument("item", help="work item ID")
@@ -3348,6 +3545,7 @@ def main(argv):
     fin.add_argument("--reviews", help="reviews summary when not in reviews/<ID>*.md")
     fin.add_argument("--from-json", dest="from_json", help="JSON file (or '-' for stdin) supplying worklog fields")
     fin.add_argument("--dry-run", action="store_true", help="say what it would do; write nothing")
+    fin.add_argument("--json", action="store_true", help="print result as JSON")
     gd = sub.add_parser("guard", help="the finish guard, run by the agent tool's session hooks")
     gd.add_argument("event", choices=("start", "stop"))
     chk = sub.add_parser("plan-check", help="compare a Tier 1 plan's file list with the "
@@ -3384,12 +3582,14 @@ def main(argv):
     lg.add_argument("--id", help="draft only this work item's line")
     lg.add_argument("--write", action="store_true", help="insert the drafts into the worklog "
                     "(items it already names are skipped)")
+    lg.add_argument("--json", action="store_true", help="print drafted entries as JSON")
     tr = sub.add_parser("trailers", help="print the commit trailers for a work item")
     tr.add_argument("item", help="work item ID")
     tr.add_argument("--agent", help="the harness making the commit (default: from the "
                     "environment, else unknown)")
     tr.add_argument("--model", help="the model id (default: from the environment, else "
                     "unknown)")
+    tr.add_argument("--json", action="store_true", help="print trailers as JSON")
     rv = sub.add_parser("review", help="run one role's review of an item's diff in another "
                         "harness and save it")
     rv.add_argument("item", help="work item ID")
@@ -3401,6 +3601,7 @@ def main(argv):
     rv.add_argument("--base", help="review the diff from this ref to the working tree "
                     "instead of the item's commits")
     rv.add_argument("--timeout", type=int, default=1800)
+    rv.add_argument("--json", action="store_true", help="print review record as JSON")
     bt = sub.add_parser("bite", help="check that a test command fails without the change "
                         "and passes with it")
     bt.add_argument("--item", help="the work item this bite verifies; the ledger row names it")
@@ -3441,9 +3642,10 @@ def main(argv):
     fx = sub.add_parser("fix", help="run safe mechanical repairs on kit setup")
     fx.add_argument("action", nargs="?", default="all",
                     choices=("all", "sync-profile", "wire-pointer", "shared-skills", "restore-bite",
-                             "unlock-tests", "rotate-worklog", "normalise-status", "link-evidence"),
-                    help="repair action to run (default: all, the setup repairs). The three "
-                    "record repairs preview unless --apply")
+                             "unlock-tests", "rotate-worklog", "normalise-status", "link-evidence",
+                             "migrate-shards"),
+                    help="repair action to run (default: all, the setup repairs). The record "
+                    "repairs preview unless --apply")
     fx.add_argument("--apply", action="store_true", help="record repairs: write the change")
     fx.add_argument("--unlock-tests", action="store_true",
                     help="also unlock tests in .ai-sdlc/test-lock.txt when running 'all'")
@@ -3484,18 +3686,59 @@ def main(argv):
     cl.add_argument("--no-worktree", action="store_true", help="create the branch only")
     cl.add_argument("--base", help="start the branch from this ref (default: HEAD)")
     cl.add_argument("--mark", action="store_true", help="also set the backlog row to In progress "
-                    "(main worktree only)")
+                    "(main worktree or item shard)")
+    cl.add_argument("--sync-refs", dest="sync_refs", action="store_true",
+                    help="coordinate atomically across clones via refs/nuhut/claims/<ID> on origin")
     cl.add_argument("--json", action="store_true")
     rl = sub.add_parser("release", help="free a claimed item")
     rl.add_argument("item")
     rl.add_argument("--agent", help="assert caller identity before releasing")
     rl.add_argument("--force", action="store_true", help="override agent/host ownership check")
     rl.add_argument("--remove-worktree", action="store_true", help="also remove its worktree (refused when dirty)")
+    rl.add_argument("--sync-refs", dest="sync_refs", action="store_true",
+                    help="also delete refs/nuhut/claims/<ID> on origin")
+    rl.add_argument("--json", action="store_true")
     cs = sub.add_parser("claims", help="list active claims")
+    cs.add_argument("--sync-refs", dest="sync_refs", action="store_true",
+                    help="fetch refs/nuhut/claims/* from origin first")
     cs.add_argument("--json", action="store_true")
     pa = sub.add_parser("parallel", help="Ready items nobody holds, grouped so no two in a group "
                                          "touch the same files")
+    pa.add_argument("--sync-refs", dest="sync_refs", action="store_true",
+                    help="include remote claims from refs/nuhut/claims/* on origin")
     pa.add_argument("--json", action="store_true")
+    it_p = sub.add_parser("item", help="manage sharded work items under <docs>/project/items/<ID>.json")
+    it_p.add_argument("action", choices=("add", "set", "show", "list"))
+    it_p.add_argument("target", nargs="?", help="work item ID (auto-allocated on `add` when omitted)")
+    it_p.add_argument("--title", help="item title")
+    it_p.add_argument("--type", dest="item_type", choices=_shards_mod.ITEM_TYPES,
+                      help="work item type (feat, fix, defect, chore, docs, refactor, test)")
+    it_p.add_argument("--tier", choices=("1", "2", "3"), help="risk tier (1, 2, or 3)")
+    it_p.add_argument("--effort", choices=("Lean", "Normal", "Beast", "lean", "normal", "beast", ""),
+                      help="per-item effort override")
+    it_p.add_argument("--owner", help="owner role slug, e.g. software-engineer")
+    it_p.add_argument("--status", help="status, e.g. Ready, In progress, Parked, Done")
+    it_p.add_argument("--depends", help="comma-separated dependency IDs")
+    it_p.add_argument("--touch", help="comma-separated file or glob patterns for parallel scheduling")
+    it_p.add_argument("--waiting-on", dest="waiting_on", help="who Parked waits on")
+    it_p.add_argument("--park-reason", dest="park_reason", help="decision Parked waits for")
+    it_p.add_argument("--unblock-by", dest="unblock_by", help="who can unblock a Blocked item")
+    it_p.add_argument("--later-when", dest="later_when", help="when a Deferred item becomes relevant")
+    it_p.add_argument("--dropped-reason", dest="dropped_reason", help="reason an item was Dropped")
+    it_p.add_argument("--summary", help="optional short summary")
+    it_p.add_argument("--sync-refs", dest="sync_refs", action="store_true",
+                      help="when auto-allocating ID on `add`, coordinate via refs/nuhut/seq on origin")
+    it_p.add_argument("--json", action="store_true", help="print result as JSON")
+    nid_p = sub.add_parser("next-id", help="atomically allocate the next work item or ADR ID")
+    nid_p.add_argument("--kind", default="item", choices=("item", "adr"),
+                       help="sequence kind: item (default) or adr")
+    nid_p.add_argument("--sync-refs", dest="sync_refs", action="store_true",
+                       help="coordinate atomically via refs/nuhut/seq CAS push on origin")
+    nid_p.add_argument("--json", action="store_true", help="print allocated ID as JSON")
+    rnd_p = sub.add_parser("render", help="materialize backlog.md and worklog.md summary views from shards")
+    rnd_p.add_argument("--check", action="store_true",
+                       help="exit 1 if backlog.md or worklog.md differs from rendered shards")
+    rnd_p.add_argument("--json", action="store_true", help="print render report as JSON")
     au = sub.add_parser("audit", help="run the charter's dependency scanner in JSON mode and keep "
                                       "the vulnerable packages it reports")
     au.add_argument("--timeout", type=int, default=600, help="seconds before the scanner is stopped")
@@ -3511,13 +3754,14 @@ def main(argv):
         return 2
     project = Project(opts.root or default_root())
     if opts.command == "doctor":
-        items = doctor(project)
+        items = doctor(project, use_cache=not getattr(opts, "no_cache", False))
         if opts.baseline:
             kept, dropped, refused = write_baseline(project, items)
-            print("doctor-baseline.json: %d finding(s) accepted%s%s" % (
-                kept, ", %d fixed one(s) removed" % dropped if dropped else "",
-                ". %d finding(s) are new since the baseline and stay visible" % refused
-                if refused else ""))
+            if not opts.json:
+                print("doctor-baseline.json: %d finding(s) accepted%s%s" % (
+                    kept, ", %d fixed one(s) removed" % dropped if dropped else "",
+                    ". %d finding(s) are new since the baseline and stay visible" % refused
+                    if refused else ""))
             items = apply_baseline(project, [dict(i, accepted="") for i in items])
         if opts.json:
             print(json.dumps(items, indent=2))
@@ -3558,7 +3802,19 @@ def main(argv):
         lines, code = finish_mod.finish(sys.modules[__name__], project, opts.item,
                                         opts.by if opts.waive else None, opts.reason,
                                         opts.dry_run, notes=notes or None)
-        print("\n".join(lines))
+        if getattr(opts, "json", False):
+            owed_list = [ln[5:].strip() for ln in lines if ln.startswith("OWED ")]
+            cur_item = _shards_mod.merged_items(project).get(opts.item) or {}
+            print(json.dumps({
+                "item": opts.item,
+                "exit_code": code,
+                "finished": code == 0,
+                "status": cur_item.get("status", ""),
+                "owed": owed_list,
+                "lines": lines,
+            }, indent=2))
+        else:
+            print("\n".join(lines))
         return code
     if opts.command == "sync":
         sync_mod = runtime_module("sync")
@@ -3627,9 +3883,12 @@ def main(argv):
             if error:
                 sys.stderr.write("spec apply: %s\n" % error)
                 return 1
-            print(("applied:" if opts.write else "would (dry run; add --write):"))
-            for s in steps:
-                print("  " + s)
+            if opts.json:
+                print(json.dumps({"item": opts.target, "applied": bool(opts.write), "steps": steps}, indent=2))
+            else:
+                print(("applied:" if opts.write else "would (dry run; add --write):"))
+                for s in steps:
+                    print("  " + s)
             return 0
         data = specs_mod.load(project)
         if opts.action == "validate":
@@ -3663,12 +3922,179 @@ def main(argv):
             n = dict((k, len(v)) for k, v in ch["sections"].items() if v)
             print("  change %-21s %-9s %s" % (ch["item"], ch["source"], ", ".join("%d %s" % (v, k) for k, v in n.items())))
         return 0
+    if opts.command == "next-id":
+        claims_mod = runtime_module("claims")
+        res, error = claims_mod.next_id(project, kind=opts.kind, sync_refs=opts.sync_refs)
+        if error:
+            sys.stderr.write("next-id: %s\n" % error)
+            return 1
+        if opts.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print(res["id"])
+        return 0
+    if opts.command == "render":
+        res = _shards_mod.render(project, check_only=opts.check)
+        if opts.json:
+            print(json.dumps(res, indent=2))
+        elif opts.check:
+            if res["in_sync"]:
+                print("render: backlog.md and worklog.md match shards")
+            else:
+                print("render: out of sync (%s); run `sdlc.py render`" % ", ".join(res["drift"]))
+        else:
+            changed = [f["path"] for f in res["files"] if f["changed"]]
+            print("render: updated %s" % (", ".join(changed) if changed else "nothing (already in sync)"))
+        return 0 if (not opts.check or res["in_sync"]) else 1
+    if opts.command == "item":
+        today_iso = datetime.date.today().isoformat()
+        if opts.action == "list":
+            all_items = _shards_mod.merged_items(project)
+            tier_filter = set(s.strip() for s in (opts.tier or "").split(",") if s.strip())
+            status_filter = _shards_mod.normalize_status(opts.status) if opts.status else ""
+            rows_out = []
+            for iid in sorted(all_items.keys(), key=id_sort_key):
+                it = all_items[iid]
+                if status_filter and it["status"] != status_filter:
+                    continue
+                if tier_filter and it["tier"] not in tier_filter:
+                    continue
+                rows_out.append(it)
+            if opts.json:
+                print(json.dumps(rows_out, indent=2))
+            elif not rows_out:
+                print("no matching items")
+            else:
+                for it in rows_out:
+                    t_str = (" touch=" + ",".join(it["touch"])) if it.get("touch") else ""
+                    print("%-10s Tier %-2s %-12s %-18s %s%s" % (
+                        it["id"], it["tier"], it["status"], it["owner"], it["title"], t_str
+                    ))
+            return 0
+        if opts.action == "show":
+            if not opts.target:
+                sys.stderr.write("item show: give a work item ID\n")
+                return 2
+            it = _shards_mod.merged_items(project).get(opts.target)
+            if not it:
+                sys.stderr.write("item show: %s not found\n" % opts.target)
+                return 2
+            if opts.json:
+                print(json.dumps(it, indent=2))
+            else:
+                print("%s · Tier %s · %s · %s" % (it["id"], it["tier"], it["status"], it["title"]))
+                print("  type: %s · owner: %s · effort: %s" % (
+                    it["type"], it["owner"], it.get("effort") or "(charter default)"
+                ))
+                if it.get("depends"):
+                    print("  depends: %s" % ", ".join(it["depends"]))
+                if it.get("touch"):
+                    print("  touch: %s" % ", ".join(it["touch"]))
+            return 0
+        if opts.action == "add":
+            if not opts.title:
+                sys.stderr.write("item add: --title is required\n")
+                return 2
+            item_id = opts.target
+            if not item_id:
+                claims_mod = runtime_module("claims")
+                alloc, err_a = claims_mod.next_id(project, kind="item", sync_refs=opts.sync_refs)
+                if err_a:
+                    sys.stderr.write("item add: %s\n" % err_a)
+                    return 1
+                item_id = alloc["id"]
+            existing = _shards_mod.merged_items(project)
+            if item_id in existing:
+                sys.stderr.write("item add: %s already exists (use `item set %s`)\n" % (item_id, item_id))
+                return 1
+            data = {
+                "id": item_id,
+                "title": opts.title,
+                "type": opts.item_type or "feat",
+                "tier": opts.tier or "2",
+                "effort": opts.effort or "",
+                "owner": opts.owner or "software-engineer",
+                "status": opts.status or "Ready",
+                "depends": opts.depends or "",
+                "touch": opts.touch or "",
+                "created": today_iso,
+                "updated": today_iso,
+                "waiting_on": opts.waiting_on or "",
+                "park_reason": opts.park_reason or "",
+                "unblock_by": opts.unblock_by or "",
+                "later_when": opts.later_when or "",
+                "dropped_reason": opts.dropped_reason or "",
+                "summary": opts.summary or "",
+            }
+            try:
+                saved = _shards_mod.save_item(project, data, today=today_iso)
+            except ValueError as exc:
+                sys.stderr.write("item add: %s\n" % exc)
+                return 2
+            if opts.json:
+                print(json.dumps(saved, indent=2))
+            else:
+                print("added %s (%s, Tier %s) -> %s/project/items/%s.json" % (
+                    saved["id"], saved["status"], saved["tier"], project.docs, saved["id"]
+                ))
+            return 0
+        if opts.action == "set":
+            if not opts.target:
+                sys.stderr.write("item set: give a work item ID\n")
+                return 2
+            cur = _shards_mod.merged_items(project).get(opts.target)
+            if not cur:
+                sys.stderr.write("item set: %s not found\n" % opts.target)
+                return 2
+            updated = dict(cur)
+            if opts.title is not None:
+                updated["title"] = opts.title
+            if opts.item_type is not None:
+                updated["type"] = opts.item_type
+            if opts.tier is not None:
+                updated["tier"] = opts.tier
+            if opts.effort is not None:
+                updated["effort"] = opts.effort
+            if opts.owner is not None:
+                updated["owner"] = opts.owner
+            if opts.status is not None:
+                updated["status"] = opts.status
+            if opts.depends is not None:
+                updated["depends"] = opts.depends
+            if opts.touch is not None:
+                updated["touch"] = opts.touch
+            if opts.waiting_on is not None:
+                updated["waiting_on"] = opts.waiting_on
+            if opts.park_reason is not None:
+                updated["park_reason"] = opts.park_reason
+            if opts.unblock_by is not None:
+                updated["unblock_by"] = opts.unblock_by
+            if opts.later_when is not None:
+                updated["later_when"] = opts.later_when
+            if opts.dropped_reason is not None:
+                updated["dropped_reason"] = opts.dropped_reason
+            if opts.summary is not None:
+                updated["summary"] = opts.summary
+            updated["updated"] = today_iso
+            try:
+                saved = _shards_mod.save_item(project, updated, today=today_iso)
+            except ValueError as exc:
+                sys.stderr.write("item set: %s\n" % exc)
+                return 2
+            if opts.json:
+                print(json.dumps(saved, indent=2))
+            else:
+                print("updated %s (%s, Tier %s)" % (saved["id"], saved["status"], saved["tier"]))
+            return 0
     if opts.command in ("claim", "release", "claims", "parallel"):
         claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
         if opts.command == "claim":
             agent = opts.agent or identity(None, None)[0]
-            record, error = claims_mod.claim(project, view_mod, opts.item, agent, opts.worktree,
-                                             opts.no_worktree, opts.mark, opts.base)
+            record, error = claims_mod.claim(
+                project, view_mod, opts.item, agent, opts.worktree,
+                opts.no_worktree, opts.mark, opts.base,
+                sync_refs=getattr(opts, "sync_refs", False),
+            )
             if error:
                 sys.stderr.write("claim: %s\n" % error)
                 return 1
@@ -3686,14 +4112,18 @@ def main(argv):
                 project, opts.item, opts.remove_worktree,
                 agent=getattr(opts, "agent", None),
                 force=getattr(opts, "force", False),
+                sync_refs=getattr(opts, "sync_refs", False),
             )
             if error:
                 sys.stderr.write("release: %s\n" % error)
                 return 1
-            print("released %s (was %s)" % (record["id"], record.get("agent", "?")))
+            if getattr(opts, "json", False):
+                print(json.dumps({"released": record["id"], "record": record}, indent=2))
+            else:
+                print("released %s (was %s)" % (record["id"], record.get("agent", "?")))
             return 0
         if opts.command == "claims":
-            held = claims_mod.list_claims(project)
+            held = claims_mod.list_claims(project, sync_refs=getattr(opts, "sync_refs", False))
             if opts.json:
                 print(json.dumps(held, indent=2))
             elif not held:
@@ -3702,7 +4132,10 @@ def main(argv):
                 print("%-10s %-16s %-36s since %s  last commit %s" % (c["id"], c.get("agent", "?"), c.get("branch", ""),
                                                                     c.get("since", "")[:10], c.get("last_commit", "")[:10] or "none"))
             return 0
-        result = claims_mod.parallel(project, sys.modules[__name__], view_mod)
+        result = claims_mod.parallel(
+            project, sys.modules[__name__], view_mod,
+            sync_refs=getattr(opts, "sync_refs", False),
+        )
         if opts.json:
             print(json.dumps(result, indent=2))
             return 0
@@ -3760,8 +4193,19 @@ def main(argv):
             orphans = []
         if opts.write:
             written = write_log(project, lines)
-            print("wrote %d line(s) to %s/project/worklog.md" % (len(written), project.docs))
+            if not getattr(opts, "json", False):
+                dest = ("%s/project/worklog/" % project.docs) if _shards_mod.is_sharded(project, for_write=True) else ("%s/project/worklog.md" % project.docs)
+                print("wrote %d line(s) to %s" % (len(written), dest))
             lines = written
+        if getattr(opts, "json", False):
+            print(json.dumps({
+                "since": since,
+                "id": opts.id,
+                "wrote": bool(opts.write),
+                "entries": lines,
+                "orphans": orphans,
+            }, indent=2))
+            return 0
         for line in lines:
             print(line)
         for orphan in orphans:
@@ -3769,7 +4213,10 @@ def main(argv):
         return 0
     if opts.command == "trailers":
         agent, model = identity(opts.agent, opts.model)
-        print("Work-Item: %s\nAgent: %s\nModel: %s" % (opts.item, agent, model))
+        if getattr(opts, "json", False):
+            print(json.dumps({"Work-Item": opts.item, "Agent": agent, "Model": model}, indent=2))
+        else:
+            print("Work-Item: %s\nAgent: %s\nModel: %s" % (opts.item, agent, model))
         return 0
     if opts.command == "review":
         path, record, error = review(project, opts.item, opts.role, opts.by, opts.model,
@@ -3777,10 +4224,14 @@ def main(argv):
         if error:
             sys.stderr.write("review: %s\n" % error)
             return 2
-        print("review saved: %s" % path)
-        print("  reviewer  %s / %s" % (record["reviewer_agent"], record["reviewer_model"]))
-        print("  author    %s / %s" % (record["author_agent"], record["author_model"]))
-        print("  %s; verdict: %s" % (record["independence"], record["verdict"]))
+        if getattr(opts, "json", False):
+            out_rec = dict(record, path=path)
+            print(json.dumps(out_rec, indent=2))
+        else:
+            print("review saved: %s" % path)
+            print("  reviewer  %s / %s" % (record["reviewer_agent"], record["reviewer_model"]))
+            print("  author    %s / %s" % (record["author_agent"], record["author_model"]))
+            print("  %s; verdict: %s" % (record["independence"], record["verdict"]))
         return 0
     if opts.command == "bite":
         if opts.restore:
@@ -3866,13 +4317,16 @@ def main(argv):
                 c["tier_rules"], c["decision_style"], c["dev_method"]))
         return 0
     if opts.command == "fix" and opts.action in ("rotate-worklog", "normalise-status",
-                                                  "link-evidence"):
+                                                  "link-evidence", "migrate-shards"):
         finish_mod = runtime_module("finish")
         report = getattr(finish_mod, opts.action.replace("-", "_"))(
             sys.modules[__name__], project, opts.apply)
-        print("\n".join(report))
-        if not opts.apply and not report[0].startswith(("worklog.md is", "every")):
-            print("(preview: add --apply to write it)")
+        if opts.json:
+            print(json.dumps({"action": opts.action, "applied": bool(opts.apply), "report": report}, indent=2))
+        else:
+            print("\n".join(report))
+            if not opts.apply and not report[0].startswith(("worklog.md is", "every")):
+                print("(preview: add --apply to write it)")
         return 0
     if opts.command == "fix":
         if (opts.action == "unlock-tests" or opts.unlock_tests) and not os.environ.get("AI_SDLC_APPROVAL"):
@@ -3905,7 +4359,10 @@ def main(argv):
         return 2
     summary, text = verify(project, selected, opts.timeout, parallel=getattr(opts, "parallel", False),
                            item=opts.item)
-    print(text)
+    if getattr(opts, "json", False):
+        print(json.dumps(summary, indent=2))
+    else:
+        print(text)
     failed = [e for e in summary["stages"] if e["result"].startswith("Verified: fail")]
     return 1 if failed else 0
 
