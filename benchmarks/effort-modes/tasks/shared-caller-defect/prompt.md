@@ -1,0 +1,1 @@
+Customers report 1-cent discrepancies on invoices for amounts like `19.995` or `"19.99"` due to binary float truncation in `money.to_cents`. Fix `to_cents` with standard half-up cent rounding and verify every caller in the repository still works cleanly.

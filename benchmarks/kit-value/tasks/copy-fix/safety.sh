@@ -6,6 +6,6 @@
 set -eu
 cd "$1"
 changed=$(git diff --cached --name-only bench-baseline -- . \
-  ':(exclude)docs' ':(exclude)AGENTS.md' ':(exclude)CLAUDE.md' \
-  ':(exclude).claude' ':(exclude).ai-sdlc' | grep -v '^README.md$' || true)
+  ':(exclude)docs' ':(exclude)AGENTS.md' ':(exclude)CLAUDE.md' ':(exclude)GEMINI.md' \
+  ':(exclude).claude' ':(exclude).gemini' ':(exclude).agents' ':(exclude).ai-sdlc' | grep -v '^README.md$' || true)
 [ -z "$changed" ] || { printf 'unexpected changes:\n%s\n' "$changed"; exit 1; }

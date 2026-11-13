@@ -67,6 +67,7 @@ ACQUISITION = ("Standard", "Advanced")
 DEV_METHOD = ("Item", "Epic")
 DECISION_STYLE = ("Ask", "Guide", "Autopilot")
 TIER_RULES = ("Standard", "Strict")
+DISCOVERED_DEFECTS = ("Parked", "Auto-Ready (bite)")
 WORKLOG_ROTATE_LINES = 1000
 DEFAULT_STALENESS_DAYS = 90
 KNOWN_MISTAKES_LINES = 30
@@ -195,7 +196,8 @@ def choice(cell, options):
     if cell is None:
         return None, "blank"
     found = [option for option in options
-             if re.search(r"\b%s\b" % option, UNFILLED.sub("", cell))]
+             if re.search(r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(option),
+                          UNFILLED.sub("", cell))]
     if len(found) == 1:
         return found[0], "decided"
     if len(found) == len(options):
@@ -635,6 +637,10 @@ def check_charter(project, out):
     if cell is not None and choice(cell, TIER_RULES)[1] == "invalid":
         out.add("fail", "charter", "%s Tier rules" % where,
                 "must be exactly one of %s" % ", ".join(TIER_RULES))
+    cell = labelled(text, "Discovered defects")
+    if cell is not None and choice(cell, DISCOVERED_DEFECTS)[1] == "invalid":
+        out.add("fail", "charter", "%s Discovered defects" % where,
+                "must be exactly one of %s" % ", ".join(DISCOVERED_DEFECTS))
     active = dict((name, on) for name, on, _ in roles(text))
     undecided = [name for name, on, reason in roles(text) if not on and unfilled(reason)]
     if undecided:
@@ -1851,6 +1857,44 @@ def independent_review_policy(charter, profile=None):
     return "none", set(), state
 
 
+def discovered_defects_policy(charter, profile=None):
+    """(policy, state): policy is 'Parked' (default) or 'Auto-Ready (bite)'."""
+    raw = labelled(charter, "Discovered defects")
+    if raw is not None:
+        val, state = choice(raw, DISCOVERED_DEFECTS)
+        if state == "decided" and val:
+            return val, "decided"
+    else:
+        state = "blank"
+    if isinstance(profile, dict) and profile.get("discovered_defects"):
+        p_raw = str(profile.get("discovered_defects")).strip().lower()
+        if p_raw in ("auto-ready (bite)", "auto-ready-bite", "auto"):
+            return "Auto-Ready (bite)", "decided"
+        if p_raw == "parked":
+            return "Parked", "decided"
+    return "Parked", state
+
+
+def resolve_discovered_status(project, item_id, item_type, tier):
+    """Return ('Ready' | 'Parked', reason) for a newly discovered or triaged item."""
+    policy, _ = discovered_defects_policy(project.charter, project.profile)
+    itype = str(item_type or "feat").strip().lower()
+    if itype == "bug":
+        itype = "defect"
+    t = str(tier or "2").strip()
+    if policy == "Auto-Ready (bite)" and itype == "defect" and t in ("2", "3"):
+        has_bite = any(
+            r.get("item") == item_id and r.get("stage") == "bite" and r.get("result") == "Verified: pass"
+            for r in ledger(project)
+        )
+        if has_bite:
+            return "Ready", "Auto-Ready (bite): Tier %s defect has a passing bite run" % t
+        return "Parked", "Auto-Ready (bite) requires a passing `sdlc.py bite --item %s` run first" % item_id
+    if policy == "Auto-Ready (bite)":
+        return "Parked", "Auto-Ready (bite) applies only to Tier 2 or 3 defects (got Tier %s %s)" % (t, itype)
+    return "Parked", "charter Discovered defects policy is Parked (human triage required)"
+
+
 def check_identity(project, out):
     """When independent review is enabled in the charter, Tier 1 work (and Tier 2 if the
     charter says so) needs a review from a different model family than the author's.
@@ -2549,6 +2593,7 @@ def kit_status(project):
     if not acq_val and prof.get("acquisition_profile"):
         acq_val = next((o for o in ACQUISITION if o.lower() == str(prof["acquisition_profile"]).lower()), None)
     acq_resolved = acq_val or "Standard"
+    disc_policy, disc_state = discovered_defects_policy(charter, prof)
     budget_cell = UNFILLED.sub("", labelled(charter, "Agent budget per tier") or "").strip()
     staleness_cell = labelled(charter, "Staleness threshold") or ""
     staleness_match = re.search(r"[0-9]+", UNFILLED.sub("", staleness_cell))
@@ -2749,6 +2794,8 @@ def kit_status(project):
             "dev_method_state": dev_state,
             "acquisition_profile": acq_resolved,
             "acquisition_state": acq_state,
+            "discovered_defects": disc_policy,
+            "discovered_defects_state": disc_state,
             "agent_budget": budget_cell,
             "staleness_days": staleness_days,
         },
@@ -3003,6 +3050,21 @@ def configure_kit(project, changes):
         text = _set_charter_row(text, "Acquisition profile", "`%s`" % val)
         extra_profile["acquisition_profile"] = val.lower()
         applied.append("Acquisition profile=%s" % val)
+
+    if changes.get("discovered_defects"):
+        raw_dd = str(changes["discovered_defects"]).strip().lower()
+        dd_map = {
+            "parked": "Parked",
+            "auto-ready-bite": "Auto-Ready (bite)",
+            "auto-ready (bite)": "Auto-Ready (bite)",
+            "auto": "Auto-Ready (bite)",
+        }
+        if raw_dd not in dd_map:
+            return None, "discovered_defects must be Parked or Auto-Ready (bite)"
+        dd_val = dd_map[raw_dd]
+        text = _set_charter_row(text, "Discovered defects", "`%s`" % dd_val)
+        extra_profile["discovered_defects"] = dd_val
+        applied.append("Discovered defects=%s" % dd_val)
 
     if changes.get("preferred_reviewer"):
         rev = str(changes["preferred_reviewer"]).strip().lower()
@@ -3302,6 +3364,9 @@ def selftest():
     assert norm_it["type"] == "defect" and norm_it["effort"] == "Beast"
     assert norm_it["status"] == "Ready" and norm_it["touch"] == ["src/a.py", "tests/t.py"]
     assert norm_it["depends"] == ["ACME-001", "ACME-002"]
+    assert discovered_defects_policy("") == ("Parked", "blank")
+    assert discovered_defects_policy("| **Discovered defects** | `Parked` · `Auto-Ready (bite)` |") == ("Parked", "undecided")
+    assert discovered_defects_policy("| **Discovered defects** | `Auto-Ready (bite)` |") == ("Auto-Ready (bite)", "decided")
     print("sdlc runtime self-test passed")
 
 
@@ -3429,6 +3494,7 @@ Work items and agents
   claim <ID>          take an item: atomic claim, its branch and its own worktree     claim ACME-12
   release <ID>        free it (--remove-worktree to clean up)                         release ACME-12
   claims / parallel   who holds what / which Ready items can run side by side        parallel
+  dispatch            execute conflict-free waves of Ready items across workers       dispatch --workers 2 --by claude
   trailers <ID>       the Work-Item, Agent and Model commit trailers                   trailers ACME-12
   sync                behind the remote or the default branch? conflicts? next command  sync --fetch
   review <ID>         one role's review of the diff, by another model family          review ACME-12 --role security --by codex
@@ -3492,6 +3558,8 @@ EXAMPLES = {
     "release": ["release ACME-12", "release ACME-12 --remove-worktree"],
     "claims": ["claims", "claims --json"],
     "parallel": ["parallel", "parallel --json"],
+    "dispatch": ["dispatch --dry-run", "dispatch --workers 2 --by claude",
+                 "dispatch --workers 3 --by codex --reviewer claude --pr"],
 }
 
 
@@ -3638,6 +3706,9 @@ def main(argv):
     cfg.add_argument("--slop-filter", choices=("off", "on", "strict"),
                      help="set the Slop filter: off, on (public copy, advisory) or strict "
                           "(all prose; `slop` exits 1 on a failing file)")
+    cfg.add_argument("--discovered-defects", dest="discovered_defects",
+                     choices=("Parked", "Auto-Ready (bite)", "parked", "auto-ready-bite", "auto"),
+                     help="set Discovered defects triage policy: Parked or Auto-Ready (bite)")
     cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
     fx = sub.add_parser("fix", help="run safe mechanical repairs on kit setup")
     fx.add_argument("action", nargs="?", default="all",
@@ -3708,8 +3779,9 @@ def main(argv):
                     help="include remote claims from refs/nuhut/claims/* on origin")
     pa.add_argument("--json", action="store_true")
     it_p = sub.add_parser("item", help="manage sharded work items under <docs>/project/items/<ID>.json")
-    it_p.add_argument("action", choices=("add", "set", "show", "list"))
+    it_p.add_argument("action", choices=("add", "set", "show", "list", "triage"))
     it_p.add_argument("target", nargs="?", help="work item ID (auto-allocated on `add` when omitted)")
+    it_p.add_argument("--id", dest="item_id_flag", help="optional explicit work item ID alias")
     it_p.add_argument("--title", help="item title")
     it_p.add_argument("--type", dest="item_type", choices=_shards_mod.ITEM_TYPES,
                       help="work item type (feat, fix, defect, chore, docs, refactor, test)")
@@ -3720,6 +3792,8 @@ def main(argv):
     it_p.add_argument("--status", help="status, e.g. Ready, In progress, Parked, Done")
     it_p.add_argument("--depends", help="comma-separated dependency IDs")
     it_p.add_argument("--touch", help="comma-separated file or glob patterns for parallel scheduling")
+    it_p.add_argument("--discovered", action="store_true",
+                      help="apply charter Discovered defects triage policy (Parked, or Ready with passing bite)")
     it_p.add_argument("--waiting-on", dest="waiting_on", help="who Parked waits on")
     it_p.add_argument("--park-reason", dest="park_reason", help="decision Parked waits for")
     it_p.add_argument("--unblock-by", dest="unblock_by", help="who can unblock a Blocked item")
@@ -3729,6 +3803,27 @@ def main(argv):
     it_p.add_argument("--sync-refs", dest="sync_refs", action="store_true",
                       help="when auto-allocating ID on `add`, coordinate via refs/nuhut/seq on origin")
     it_p.add_argument("--json", action="store_true", help="print result as JSON")
+    dsp = sub.add_parser("dispatch", help="execute conflict-free waves of Ready items across isolated worker worktrees")
+    dsp.add_argument("--workers", type=int, default=1, help="max parallel workers per wave (default: 1)")
+    dsp.add_argument("--by", help="builder CLI: claude, codex, gemini, or cmd:<command>")
+    dsp.add_argument("--model", help="model override passed to the builder CLI and trailers")
+    dsp.add_argument("--reviewer", help="optional independent reviewer CLI: claude, codex, gemini, or cmd:<command>")
+    dsp.add_argument("--reviewer-model", dest="reviewer_model", help="model override for reviewer CLI")
+    dsp.add_argument("--max-items", dest="max_items", type=int, default=0,
+                     help="cap total dispatched items across waves (0 = all eligible)")
+    dsp.add_argument("--tier", default="2,3", help="comma-separated allowed tiers (default: 2,3)")
+    dsp.add_argument("--max-retries", dest="max_retries", type=int, default=1,
+                     help="repair retries on failed verify/slop checks (default: 1)")
+    dsp.add_argument("--timeout", type=int, default=1800, help="per-turn timeout in seconds (default: 1800)")
+    dsp.add_argument("--worktree-root", dest="worktree_root", help="directory for worker worktrees")
+    dsp.add_argument("--pr", action="store_true", help="push each finished branch and open a PR/MR instead of merging")
+    dsp.add_argument("--no-merge", dest="no_merge", action="store_true",
+                     help="keep finished branches unmerged instead of merging Done Tier 2/3 items")
+    dsp.add_argument("--sync-refs", dest="sync_refs", action="store_true",
+                     help="coordinate claims and IDs across clones via refs/nuhut/* on origin")
+    dsp.add_argument("--dry-run", dest="dry_run", action="store_true",
+                     help="preview conflict-free waves without claiming or executing")
+    dsp.add_argument("--json", action="store_true", help="print dispatch report as JSON")
     nid_p = sub.add_parser("next-id", help="atomically allocate the next work item or ADR ID")
     nid_p.add_argument("--kind", default="item", choices=("item", "adr"),
                        help="sequence kind: item (default) or adr")
@@ -3948,6 +4043,8 @@ def main(argv):
         return 0 if (not opts.check or res["in_sync"]) else 1
     if opts.command == "item":
         today_iso = datetime.date.today().isoformat()
+        if getattr(opts, "item_id_flag", None) and not opts.target:
+            opts.target = opts.item_id_flag
         if opts.action == "list":
             all_items = _shards_mod.merged_items(project)
             tier_filter = set(s.strip() for s in (opts.tier or "").split(",") if s.strip())
@@ -4007,20 +4104,31 @@ def main(argv):
             if item_id in existing:
                 sys.stderr.write("item add: %s already exists (use `item set %s`)\n" % (item_id, item_id))
                 return 1
+            itype_val = opts.item_type or ("defect" if getattr(opts, "discovered", False) else "feat")
+            tier_val = opts.tier or "2"
+            status_val = opts.status or "Ready"
+            wait_val = opts.waiting_on or ""
+            reason_val = opts.park_reason or ""
+            triage_note = ""
+            if getattr(opts, "discovered", False):
+                status_val, triage_note = resolve_discovered_status(project, item_id, itype_val, tier_val)
+                if status_val == "Parked":
+                    wait_val = wait_val or "backlog owner"
+                    reason_val = reason_val or ("Discovered item triage: accept into Ready, defer, or drop (%s)" % triage_note)
             data = {
                 "id": item_id,
                 "title": opts.title,
-                "type": opts.item_type or "feat",
-                "tier": opts.tier or "2",
+                "type": itype_val,
+                "tier": tier_val,
                 "effort": opts.effort or "",
-                "owner": opts.owner or "software-engineer",
-                "status": opts.status or "Ready",
+                "owner": opts.owner or ("qa" if itype_val == "defect" else "software-engineer"),
+                "status": status_val,
                 "depends": opts.depends or "",
                 "touch": opts.touch or "",
                 "created": today_iso,
                 "updated": today_iso,
-                "waiting_on": opts.waiting_on or "",
-                "park_reason": opts.park_reason or "",
+                "waiting_on": wait_val,
+                "park_reason": reason_val,
                 "unblock_by": opts.unblock_by or "",
                 "later_when": opts.later_when or "",
                 "dropped_reason": opts.dropped_reason or "",
@@ -4032,11 +4140,41 @@ def main(argv):
                 sys.stderr.write("item add: %s\n" % exc)
                 return 2
             if opts.json:
-                print(json.dumps(saved, indent=2))
+                out_saved = dict(saved)
+                if triage_note:
+                    out_saved["triage_reason"] = triage_note
+                print(json.dumps(out_saved, indent=2))
             else:
                 print("added %s (%s, Tier %s) -> %s/project/items/%s.json" % (
                     saved["id"], saved["status"], saved["tier"], project.docs, saved["id"]
                 ))
+            return 0
+        if opts.action == "triage":
+            if not opts.target:
+                sys.stderr.write("item triage: give a work item ID\n")
+                return 2
+            cur = _shards_mod.merged_items(project).get(opts.target)
+            if not cur:
+                sys.stderr.write("item triage: %s not found\n" % opts.target)
+                return 2
+            new_status, triage_reason = resolve_discovered_status(
+                project, opts.target, cur.get("type") or "feat", cur.get("tier") or "2"
+            )
+            updated = dict(cur)
+            updated["status"] = new_status
+            updated["updated"] = today_iso
+            if new_status == "Ready":
+                updated["waiting_on"] = ""
+                updated["park_reason"] = ""
+            else:
+                updated["waiting_on"] = updated.get("waiting_on") or "backlog owner"
+                updated["park_reason"] = updated.get("park_reason") or ("Discovered item triage: %s" % triage_reason)
+            saved = _shards_mod.save_item(project, updated, today=today_iso)
+            if opts.json:
+                out_saved = dict(saved, promoted=(saved["status"] == "Ready"), triage_reason=triage_reason)
+                print(json.dumps(out_saved, indent=2))
+            else:
+                print("triaged %s -> %s (%s)" % (saved["id"], saved["status"], triage_reason))
             return 0
         if opts.action == "set":
             if not opts.target:
@@ -4086,6 +4224,20 @@ def main(argv):
             else:
                 print("updated %s (%s, Tier %s)" % (saved["id"], saved["status"], saved["tier"]))
             return 0
+    if opts.command == "dispatch":
+        dispatch_mod = runtime_module("dispatch")
+        report, rc = dispatch_mod.run_dispatch(sys.modules[__name__], project, opts)
+        if report.get("error"):
+            if opts.json:
+                print(json.dumps(report, indent=2))
+            else:
+                sys.stderr.write("dispatch: %s\n" % report["error"])
+            return rc
+        if opts.json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(dispatch_mod.format_dispatch_report(report))
+        return rc
     if opts.command in ("claim", "release", "claims", "parallel"):
         claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
         if opts.command == "claim":
@@ -4280,6 +4432,8 @@ def main(argv):
             changes["specs"] = opts.specs
         if getattr(opts, "slop_filter", None):
             changes["slop_filter"] = opts.slop_filter
+        if getattr(opts, "discovered_defects", None):
+            changes["discovered_defects"] = opts.discovered_defects
         if opts.reviewer:
             changes["preferred_reviewer"] = opts.reviewer
         if opts.token_saving:

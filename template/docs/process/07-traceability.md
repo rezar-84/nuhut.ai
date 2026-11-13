@@ -90,7 +90,7 @@ owner or a tier because it finished.
 | **Blocked** | Cannot start. The blocker is named in Depends-on, and it is a real identified thing, not "needs more thought". |
 | **In progress** | Actively being built. One or two at a time, not fifteen. |
 | **In review** | Built, awaiting role review — or holding a *Block* verdict that is being fixed. A Block does not send an item back to `Blocked`; that status means work never started. |
-| **Parked** | Complete as far as an agent can take it; waiting on a named human for an approval or a waiver. Also the entry status for anything an agent discovered and filed unasked: the decision waited on is whether it becomes `Ready` at all. See "Waiting on a human" and "Work you discovered" in `00-operating-model.md`. |
+| **Parked** | Complete as far as an agent can take it; waiting on a named human for an approval or a waiver. Also the default entry status for anything an agent discovered and filed unasked (unless the charter's **Discovered defects** row is `Auto-Ready (bite)` for a Tier 2–3 defect with a passing `bite` run): the decision waited on is whether it becomes `Ready` at all. See "Waiting on a human" and "Work you discovered" in `00-operating-model.md`. |
 | **Done** | Meets the Definition of Done, worklog entry written. Nothing is `Done` without a worklog entry. |
 | **Deferred** | Valid, not now. Say when it becomes relevant again. |
 | **Dropped** | Will not be done. One-line reason, and the row stays. |

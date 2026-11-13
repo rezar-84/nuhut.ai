@@ -36,6 +36,11 @@ COLUMNS = ("arm", "task", "run", "agent_version", "model_version", "repo_commit"
 CLAUDE = ["claude", "-p", "{prompt}", "--output-format", "stream-json", "--verbose",
           "--setting-sources", "project,local", "--strict-mcp-config",
           "--no-session-persistence", "--permission-mode", "bypassPermissions"]
+HARNESS_TEMPLATES = {
+    "claude": CLAUDE,
+    "codex": ["codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "{prompt}"],
+    "gemini": ["gemini", "-p", "{prompt}", "-y", "--output-format", "stream-json"],
+}
 GIT_ENV = {"GIT_AUTHOR_NAME": "bench", "GIT_AUTHOR_EMAIL": "bench@example.invalid",
            "GIT_COMMITTER_NAME": "bench", "GIT_COMMITTER_EMAIL": "bench@example.invalid"}
 
@@ -100,8 +105,8 @@ class KitSource(object):
 
 
 def fill_charter(workspace):
-    """The kit's charter is where an agent is told the real commands. The installer cannot
-    detect a bare stdlib project, so write the one row every task needs."""
+    """The kit's charter is where an agent is told the real commands. Fill checks.unit and
+    explicitly mark all other check stages absent so agents do not treat them as Unknown."""
     path = os.path.join(workspace, "docs", "project", "charter.md")
     with open(path, encoding="utf-8") as handle:
         text = handle.read()
@@ -109,17 +114,24 @@ def fill_charter(workspace):
                           text, flags=re.M)
     if count != 1:
         raise RuntimeError("charter has no empty checks.unit row to fill")
+    text = re.sub(
+        r"^(\| `checks\.(?!unit`)[a-z0-9]+` \|)[^|\n]*\|$",
+        r"\1 absent _(bare stdlib fixture)_ |",
+        text,
+        flags=re.M,
+    )
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(text)
 
 
-def prepare(task, arm, workspace, kit_path=KIT):
+def prepare(task, arm, workspace, kit_path=KIT, harness="claude"):
     shutil.copytree(os.path.join(TASKS, task, "repo"), workspace)
     env = git_env()
     sh(["git", "init", "-q", "-b", "main"], workspace, env)
     if arm != "none":
+        install_harness = harness if harness in ("claude", "codex", "gemini") else "claude"
         args = [sys.executable, os.path.join(kit_path, "install.py"), workspace, PREFIX, "-y",
-                "--harness", "claude"]
+                "--harness", install_harness]
         if arm == "kit-hooks":
             args.append("--hooks")
         sh(args, kit_path, env)
@@ -149,7 +161,7 @@ def run_cell(opts, template, task, arm, number, agent_version, kit):
     transcript = os.path.join(cell, "transcript.jsonl")
     set_aside(cell)
     os.makedirs(cell)
-    prepare(task, arm, workspace, kit.path)
+    prepare(task, arm, workspace, kit.path, harness=opts.harness)
     with open(os.path.join(TASKS, task, "prompt.md"), encoding="utf-8") as handle:
         prompt = handle.read().strip()
 
@@ -211,7 +223,9 @@ def parse_args(argv):
     parser.add_argument("--runs", type=int, default=4, help="runs per cell (default 4, "
                         "the scorer's minimum)")
     parser.add_argument("--out", help="results directory; default a new temp dir")
-    parser.add_argument("--model", help="passed to claude as --model")
+    parser.add_argument("--harness", default="claude",
+                        help="agent harness: claude (default), codex, gemini, or cmd:<command>")
+    parser.add_argument("--model", help="passed to the harness as --model")
     parser.add_argument("--timeout", type=int, default=1200, help="seconds per run")
     parser.add_argument("--fake-agent", help="run this script instead of claude "
                         "(tests only; it receives the prompt as its one argument)")
@@ -259,16 +273,28 @@ def main(argv):
     if opts.fake_agent:
         template = [sys.executable, os.path.abspath(opts.fake_agent), "{prompt}"]
         agent_version = "fake"
-    else:
-        if shutil.which("claude") is None:
-            sys.stderr.write("claude is not on PATH\n")
+    elif opts.harness.startswith("cmd:"):
+        import shlex
+        cmd_parts = shlex.split(opts.harness[4:].strip())
+        if not cmd_parts:
+            sys.stderr.write("--harness cmd: requires a command\n")
             return 2
-        if opts.isolate_config and not os.environ.get("ANTHROPIC_API_KEY"):
+        template = cmd_parts + (["{prompt}"] if "{prompt}" not in cmd_parts else [])
+        agent_version = "cmd:" + os.path.basename(cmd_parts[0])
+    elif opts.harness in HARNESS_TEMPLATES:
+        exe = HARNESS_TEMPLATES[opts.harness][0]
+        if shutil.which(exe) is None:
+            sys.stderr.write("%s is not on PATH\n" % exe)
+            return 2
+        if opts.harness == "claude" and opts.isolate_config and not os.environ.get("ANTHROPIC_API_KEY"):
             sys.stderr.write("isolated runs need ANTHROPIC_API_KEY (a fresh config dir has "
                              "no login). Or pass --no-isolate-config and disclose it.\n")
             return 2
-        template = list(CLAUDE) + (["--model", opts.model] if opts.model else [])
-        agent_version = sh(["claude", "--version"], HERE).stdout.strip()
+        template = list(HARNESS_TEMPLATES[opts.harness]) + (["--model", opts.model] if opts.model else [])
+        agent_version = sh([exe, "--version"], HERE, check=False).stdout.strip().splitlines()[0] if sh([exe, "--version"], HERE, check=False).stdout.strip() else opts.harness
+    else:
+        sys.stderr.write("--harness must be claude, codex, gemini, or cmd:<command>\n")
+        return 2
 
     opts.out = os.path.abspath(opts.out or tempfile.mkdtemp(prefix="kit-value-"))
     os.makedirs(opts.out, exist_ok=True)

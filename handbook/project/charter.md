@@ -172,6 +172,7 @@ last-reviewed: 2026-11-13
 | **Never Tier 1 here** | No PII or payment processing exists in this repository |
 | **Human approval required for** | Cutting a release tag, merging to `main`, weakening security hooks, or removing CLI commands |
 | **Independent review required for** | `none` |
+| **Discovered defects** | `Parked` |
 | **Finish guard** | `on` |
 | **Agent budget per tier** | Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h |
 | **Approvers** | rezar-84 |

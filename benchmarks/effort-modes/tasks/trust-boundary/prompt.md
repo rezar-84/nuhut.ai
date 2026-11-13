@@ -1,0 +1,1 @@
+Implement `export_store.read_export(root_dir, relative_name)` so tenants can read UTF-8 export files inside their `root_dir` (including nested subdirectories like `2026/april.csv`), raising `FileNotFoundError` when a valid path does not exist and `PermissionError` on any attempt to read outside `root_dir`.

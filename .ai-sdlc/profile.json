@@ -39,6 +39,7 @@
     "vector_stores": []
   },
   "dev_method": "item",
+  "discovered_defects": "Parked",
   "docs_dir": "handbook",
   "effort_mode": "normal",
   "facts": {

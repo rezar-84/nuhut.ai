@@ -4236,6 +4236,197 @@ def test_json_and_doctor_cache():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_dispatch_and_self_healing():
+    print("headless dispatch: multi-worker waves, repair loop, self-healing triage, and telemetry")
+    base = tempfile.mkdtemp(prefix="sdlc-dispatch-")
+    d = os.path.join(base, "repo")
+    os.makedirs(d)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", d])
+    write(d, ".gitignore", "__pycache__/\n*.pyc\n.ai-sdlc/evidence/\n")
+    write(d, "app.py", "def base_val():\n    return 1\n")
+    write(d, "tests/__init__.py", "")
+    write(d, "tests/test_base.py",
+          "import unittest\nfrom app import base_val\n\nclass T(unittest.TestCase):\n"
+          "    def test_ok(self):\n        self.assertEqual(base_val(), 1)\n")
+    run([d, "DSP", "-y"])
+    charter = read(d, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| \*\*Default branch\*\* \|.*$", "| **Default branch** | `main` |", charter)
+    charter = charter.replace("| `checks.unit` | |",
+                              "| `checks.unit` | `%s -m unittest discover -s tests` |" % sys.executable)
+    charter = re.sub(r"(?m)^(\| `checks\.(?!unit`)[a-z0-9]+` \|)[^|\n]*\|$",
+                     r"\1 absent _(test fixture)_ |", charter)
+    write(d, "docs/project/charter.md", charter)
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com",
+               PYTHONDONTWRITEBYTECODE="1")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    # 1. Controlled self-healing triage policy (Discovered defects: Parked vs Auto-Ready (bite)).
+    rc_d1, out_d1 = sdlc("item", "add", "--discovered", "--type", "defect", "--tier", "2",
+                         "--title", "Edge rounding bug", "--json")
+    d1 = json.loads(out_d1)
+    check("default Discovered defects policy parks discovered defect",
+          rc_d1 == 0 and d1["id"] == "DSP-001" and d1["status"] == "Parked", out_d1)
+
+    rc_cfg, out_cfg = sdlc("config", "--discovered-defects", "Auto-Ready (bite)")
+    check("config --discovered-defects sets Auto-Ready (bite)", rc_cfg == 0, out_cfg)
+    rc_tr0, out_tr0 = sdlc("item", "triage", "DSP-001", "--json")
+    check("Auto-Ready (bite) keeps item Parked without passing bite evidence",
+          rc_tr0 == 0 and json.loads(out_tr0)["promoted"] is False
+          and json.loads(out_tr0)["status"] == "Parked", out_tr0)
+
+    # Plant a defect, commit baseline, add biting test + fix, run bite --item DSP-001, then triage.
+    write(d, "edge.py", "def half(x):\n    return x\n")
+    subprocess.call(["git", "add", "-A"], cwd=d, env=env)
+    subprocess.call(git + ["commit", "-qm", "init baseline"], cwd=d, env=env)
+    write(d, "edge.py", "def half(x):\n    return x / 2.0\n")
+    write(d, "tests/test_edge.py",
+          "import unittest\nfrom edge import half\n\nclass E(unittest.TestCase):\n"
+          "    def test_half(self):\n        self.assertEqual(half(4), 2.0)\n")
+    rc_bite, out_bite = sdlc("bite", "--item", "DSP-001", "%s -m unittest tests.test_edge" % sys.executable)
+    check("bite --item DSP-001 records passing bite evidence", rc_bite == 0, out_bite)
+    rc_tr1, out_tr1 = sdlc("item", "triage", "DSP-001", "--json")
+    check("Auto-Ready (bite) promotes Tier 2 defect to Ready once bite passes",
+          rc_tr1 == 0 and json.loads(out_tr1)["promoted"] is True
+          and json.loads(out_tr1)["status"] == "Ready", out_tr1)
+
+    rc_t1d, out_t1d = sdlc("item", "add", "--discovered", "--type", "defect", "--tier", "1",
+                           "--title", "Auth boundary bug", "--json")
+    check("Tier 1 discovered defect stays Parked even under Auto-Ready (bite)",
+          rc_t1d == 0 and json.loads(out_t1d)["status"] == "Parked", out_t1d)
+
+    # Park DSP-001 and reset Discovered defects policy to Parked before testing dispatch waves.
+    sdlc("item", "set", "DSP-001", "--status", "Parked", "--waiting-on", "backlog owner",
+         "--park-reason", "Held for next sprint")
+    sdlc("config", "--discovered-defects", "Parked")
+    subprocess.call(["git", "add", "-A"], cwd=d, env=env)
+    subprocess.call(git + ["commit", "-qm", "chore(DSP-001): park triaged edge defect\n\nWork-Item: DSP-001\nAgent: test\nModel: test"], cwd=d, env=env)
+
+    # 2. Multi-worker dispatch waves + repair retry + discovered defect filing.
+    sdlc("item", "add", "--id", "DSP-003", "--title", "Add mod_a", "--tier", "2", "--status", "Ready",
+         "--touch", "mod_a.py,tests/test_mod_a.py")
+    sdlc("item", "add", "--id", "DSP-004", "--title", "Add mod_b", "--tier", "2", "--status", "Ready",
+         "--touch", "mod_b.py,tests/test_mod_b.py")
+    sdlc("item", "add", "--id", "DSP-005", "--title", "Add mod_c after mod_a", "--tier", "2", "--status", "Ready",
+         "--depends", "DSP-003", "--touch", "mod_c.py,tests/test_mod_c.py")
+    sdlc("item", "add", "--id", "DSP-006", "--title", "Unplanned Tier 1", "--tier", "1", "--status", "Ready",
+         "--touch", "auth.py")
+    subprocess.call(["git", "add", "-A"], cwd=d, env=env)
+    subprocess.call(git + ["commit", "-qm", "chore(DSP-003): queue items\n\nWork-Item: DSP-003\nAgent: test\nModel: test"], cwd=d, env=env)
+
+    rc_dry, out_dry = sdlc("dispatch", "--dry-run", "--workers", "2", "--json")
+    dry = json.loads(out_dry)
+    check("dispatch --dry-run previews conflict-free Wave 1 and skips unplanned Tier 1",
+          rc_dry == 0 and dry["waves"] == [["DSP-003", "DSP-004"]]
+          and "DSP-006" in dry["skipped_tier1_unplanned"], out_dry)
+
+    fake_builder = os.path.join(base, "fake_builder.py")
+    with open(fake_builder, "w", encoding="utf-8") as fh:
+        fh.write(
+            "import os, sys\n"
+            "prompt = sys.stdin.read()\n"
+            "iid = os.environ['NUHUT_ITEM_ID']\n"
+            "attempt = int(os.environ['NUHUT_ATTEMPT'])\n"
+            "wt = os.environ['NUHUT_WORKTREE']\n"
+            "if iid == 'DSP-003':\n"
+            "    if attempt == 1:\n"
+            "        open(os.path.join(wt, 'mod_a.py'), 'w').write('def val_a():\\n    return 0\\n')\n"
+            "        open(os.path.join(wt, 'tests/test_mod_a.py'), 'w').write(\n"
+            "            'import unittest\\nfrom mod_a import val_a\\nclass TA(unittest.TestCase):\\n'\n"
+            "            '    def test_a(self): self.assertEqual(val_a(), 10)\\n')\n"
+            "        print('Summary: initial buggy draft')\n"
+            "    else:\n"
+            "        assert 'Repair Turn (Attempt 2)' in prompt, 'missing repair prompt'\n"
+            "        open(os.path.join(wt, 'mod_a.py'), 'w').write('def val_a():\\n    return 10\\n')\n"
+            "        print('Discovered: Minor help spacing glitch in legacy script')\n"
+            "        print('Summary: Implemented mod_a after repair retry')\n"
+            "elif iid == 'DSP-004':\n"
+            "    open(os.path.join(wt, 'mod_b.py'), 'w').write('def val_b():\\n    return 20\\n')\n"
+            "    open(os.path.join(wt, 'tests/test_mod_b.py'), 'w').write(\n"
+            "        'import unittest\\nfrom mod_b import val_b\\nclass TB(unittest.TestCase):\\n'\n"
+            "        '    def test_b(self): self.assertEqual(val_b(), 20)\\n')\n"
+            "    print('Summary: Implemented mod_b cleanly')\n"
+            "elif iid == 'DSP-005':\n"
+            "    from pathlib import Path\n"
+            "    assert Path(wt, 'mod_a.py').is_file(), 'DSP-005 wave 2 should see merged mod_a.py'\n"
+            "    open(os.path.join(wt, 'mod_c.py'), 'w').write('from mod_a import val_a\\ndef val_c():\\n    return val_a() + 5\\n')\n"
+            "    open(os.path.join(wt, 'tests/test_mod_c.py'), 'w').write(\n"
+            "        'import unittest\\nfrom mod_c import val_c\\nclass TC(unittest.TestCase):\\n'\n"
+            "        '    def test_c(self): self.assertEqual(val_c(), 15)\\n')\n"
+            "    print('Summary: Implemented mod_c depending on mod_a')\n"
+        )
+
+    rc_run, out_run = sdlc("dispatch", "--workers", "2", "--max-retries", "1",
+                           "--by", "cmd:%s %s" % (sys.executable, fake_builder), "--json")
+    rep = json.loads(out_run)
+    check("dispatch executes Wave 1 in parallel and Wave 2 after dependency merges",
+          rc_run == 0 and rep["passed"] == 3 and rep["failed"] == 0
+          and rep["waves"] == [["DSP-003", "DSP-004"], ["DSP-005"]], out_run[:600])
+    by_item = dict((r["item"], r) for r in rep["items"])
+    check("dispatch repaired DSP-003 on attempt 2 and merged all 3 items cleanly",
+          by_item["DSP-003"]["attempts"] == 2
+          and all(by_item[k].get("merged") is True for k in ("DSP-003", "DSP-004", "DSP-005"))
+          and all(os.path.isfile(os.path.join(d, f)) for f in ("mod_a.py", "mod_b.py", "mod_c.py")),
+          json.dumps(by_item)[:500])
+    check("dispatch filed discovered defect as Parked under charter policy",
+          len(rep["discovered_filed"]) == 1
+          and json.loads(read(d, "docs/project/items/%s.json" % rep["discovered_filed"][0]))["status"] == "Parked",
+          str(rep["discovered_filed"]))
+
+    rc_vw, out_vw = sdlc("view", "--json")
+    vw = json.loads(out_vw)
+    check("view --json surfaces factory shard counts and dispatch telemetry",
+          rc_vw == 0 and vw.get("factory", {}).get("sharded") is True
+          and len(vw.get("factory", {}).get("dispatch_runs", [])) == 1, out_vw[:300])
+    rc_doc, out_doc = sdlc("doctor", "--json")
+    doc_fails = [f for f in json.loads(out_doc) if f.get("level") == "fail"]
+    check("doctor reports zero failures after multi-wave dispatch",
+          rc_doc == 0 and not doc_fails, json.dumps(doc_fails)[:400])
+    shutil.rmtree(base, ignore_errors=True)
+
+
+def test_benchmarks_harnesses_and_effort_modes():
+    print("benchmarks: kit-value absent checks/shard accounting and effort-modes runner + scorer")
+    tmp = tempfile.mkdtemp(prefix="sdlc-bench-m3-")
+    kv_out = os.path.join(tmp, "kv")
+    p_kv = subprocess.run([
+        sys.executable, os.path.join(ROOT, "benchmarks", "kit-value", "run.py"),
+        "--tasks", "copy-fix", "--arms", "kit", "--runs", "1",
+        "--fake-agent", os.path.join(ROOT, "benchmarks", "kit-value", "fake_agent.py"),
+        "--out", kv_out,
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("kit-value runner succeeds with absent charter rows", p_kv.returncode == 0, p_kv.stdout[-400:])
+    kv_ws = os.path.join(kv_out, "copy-fix--kit--1", "workspace")
+    check("kit-value fill_charter marks unused checks absent",
+          "absent _(bare stdlib fixture)_" in read(kv_ws, "docs/project/charter.md"))
+
+    em_out = os.path.join(tmp, "em")
+    p_em = subprocess.run([
+        sys.executable, os.path.join(ROOT, "benchmarks", "effort-modes", "run.py"),
+        "--tasks", "stdlib-reuse,trust-boundary", "--modes", "lean,normal,beast", "--runs", "4",
+        "--fake-agent", os.path.join(ROOT, "benchmarks", "effort-modes", "fake_agent.py"),
+        "--out", em_out,
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("effort-modes runner completes 2 tasks x 3 modes x 4 runs", p_em.returncode == 0, p_em.stdout[-400:])
+    p_sc = subprocess.run([
+        sys.executable, os.path.join(ROOT, "benchmarks", "effort-modes", "score.py"),
+        os.path.join(em_out, "results.csv"),
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    sc_data = json.loads(p_sc.stdout) if p_sc.returncode == 0 else {}
+    check("effort-modes score.py validates and summarizes 100% pass across all 3 modes",
+          p_sc.returncode == 0
+          and all(sc_data[m][t]["acceptance_pass"] == 4 and sc_data[m][t]["safety_pass"] == 4
+                  for m in ("lean", "normal", "beast") for t in ("stdlib-reuse", "trust-boundary")),
+          p_sc.stdout[:400])
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -4253,7 +4444,8 @@ def main():
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
                  test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
-                 test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache):
+                 test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
+                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes):
         test()
     print("")
     if failures:

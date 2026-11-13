@@ -12,6 +12,7 @@ __pycache__/
 .ai-sdlc/backups/
 .ai-sdlc/bite/
 .ai-sdlc/cache/
+.ai-sdlc/dispatch/
 .ai-sdlc/evidence/
 .ai-sdlc/guard/
 .ai-sdlc/runs/

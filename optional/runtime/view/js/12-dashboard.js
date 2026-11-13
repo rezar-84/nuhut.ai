@@ -186,7 +186,8 @@
       [docRows, M.alerts.length ? viewAll(M.alerts.length, "dashboard/doctor", "finding") : null]));
 
     // Parallel work: who holds what, and what else can start without colliding.
-    var par = M.parallel || { groups: [] }, held = M.claims || [];
+    var par = M.parallel || { groups: [] }, held = M.claims || [], fac = M.factory || {};
+    var dRuns = fac.dispatch_runs || [], lastDisp = dRuns.length ? dRuns[dRuns.length - 1] : null;
     var parRows = el("div", { role: "list" });
     held.slice(0, 4).forEach(function (c) {
       var open = function () { openItemDrawer(c.id); };
@@ -196,8 +197,11 @@
     });
     if (par.groups && par.groups.length) parRows.appendChild(el("p", { style: "font-size: 12.5px; margin: 8px 0 0;" },
       [el("strong", { text: "Can start together: " }), document.createTextNode(par.groups[0].slice(0, 8).join(", ") + (par.groups[0].length > 8 ? " and " + (par.groups[0].length - 8) + " more" : ""))]));
-    if (!held.length && !(par.groups || []).length) parRows.appendChild(el("p", { cls: "muted", text: "Nothing claimed, and no Ready item with a plan to start." }));
-    grid.appendChild(ckCard("parallel", "Parallel work", plural(held.length, "claim") + "; " + plural((par.candidates || []).length, "Ready item") + " with a plan" + ((par.plan_first || []).length ? ", " + (par.plan_first || []).length + " need a plan first" : "") + ".",
+    if (lastDisp) parRows.appendChild(el("p", { cls: "muted", style: "font-size: 12px; margin: 6px 0 0;" },
+      [el("strong", { text: "Last dispatch: " }), document.createTextNode((lastDisp.passed || 0) + " passed, " + (lastDisp.failed || 0) + " failed (" + (lastDisp.builder || "agent") + ")")]));
+    if (!held.length && !(par.groups || []).length && !lastDisp) parRows.appendChild(el("p", { cls: "muted", text: "Nothing claimed, and no Ready item scoped to start." }));
+    var facNote = fac.sharded ? " · " + plural(fac.item_shards || 0, "item shard") : "";
+    grid.appendChild(ckCard("parallel", "Parallel work", plural(held.length, "claim") + "; " + plural((par.candidates || []).length, "Ready item") + " scoped" + ((par.plan_first || []).length ? ", " + (par.plan_first || []).length + " unscoped" : "") + facNote + ".",
       [parRows, el("a", { cls: "view-all", href: "#/dashboard/parallel", text: "Plan parallel work →" })]));
 
     // Project stats

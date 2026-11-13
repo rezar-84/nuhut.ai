@@ -483,6 +483,7 @@ def main():
             errors.append("optional/runtime/%s contains a double brace, which the installer "
                           "would substitute; spell it '[{][{]'" % name)
     for rel in ("optional/runtime/sdlc.py", "benchmarks/effort-modes/score.py",
+                "benchmarks/effort-modes/measure.py",
                 "benchmarks/kit-value/score.py", "benchmarks/kit-value/measure.py"):
         script = ROOT / rel
         if not script.is_file():
@@ -493,10 +494,11 @@ def main():
                               stderr=subprocess.STDOUT, universal_newlines=True)
         if proc.returncode:
             errors.append("%s self-test failed: %s" % (rel, proc.stdout[-500:]))
-    for task in sorted((ROOT / "benchmarks" / "kit-value" / "tasks").iterdir()):
-        for name in ("prompt.md", "accept.sh", "safety.sh", "repo"):
-            if task.is_dir() and not (task / name).exists():
-                errors.append("kit-value task %s is missing %s" % (task.name, name))
+    for bench_name in ("kit-value", "effort-modes"):
+        for task in sorted((ROOT / "benchmarks" / bench_name / "tasks").iterdir()):
+            for name in ("prompt.md", "accept.sh", "safety.sh", "repo"):
+                if task.is_dir() and not (task / name).exists():
+                    errors.append("%s task %s is missing %s" % (bench_name, task.name, name))
 
     for path in markdown_files():
         text = path.read_text(encoding="utf-8")

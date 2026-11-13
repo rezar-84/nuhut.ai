@@ -601,6 +601,23 @@ def _build_inner(rt, project):
     except Exception as exc:  # claims are a convenience; the page opens without them
         model["claims"], model["parallel"] = [], {"groups": [], "conflicts": [], "plan_first": [], "candidates": [],
                                                   "error": str(exc)}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import shards as shards_mod
+        import dispatch as dispatch_mod
+        items_d = shards_mod.items_dir(project)
+        wl_d = shards_mod.worklog_dir(project)
+        ldg_d = shards_mod.ledger_dir(project)
+        model["factory"] = {
+            "sharded": shards_mod.has_shards(project),
+            "item_shards": len([n for n in os.listdir(items_d) if n.endswith(".json")]) if os.path.isdir(items_d) else 0,
+            "worklog_shards": len([n for n in os.listdir(wl_d) if n.endswith(".md")]) if os.path.isdir(wl_d) else 0,
+            "ledger_shards": len([n for n in os.listdir(ldg_d) if n.endswith(".jsonl")]) if os.path.isdir(ldg_d) else 0,
+            "dispatch_runs": dispatch_mod.load_dispatch_runs(project, limit=20),
+        }
+    except Exception as exc:
+        model["factory"] = {"sharded": False, "item_shards": 0, "worklog_shards": 0, "ledger_shards": 0,
+                            "dispatch_runs": [], "error": str(exc)}
     model["metrics"] = metrics(rt, project, model)
     try:
         model["flow"] = flow(rt, project, model)
@@ -1151,7 +1168,7 @@ def watched_paths(project):
         project.path(".ai-sdlc/bite/active.json"),
     ]
     for base, _, files in os.walk(project.path(os.path.join(project.docs, "project"))):
-        paths.extend(os.path.join(base, n) for n in files if n.endswith(".md"))
+        paths.extend(os.path.join(base, n) for n in files if n.endswith((".md", ".json", ".jsonl")))
     evidence = project.path(os.path.join(".ai-sdlc", "evidence"))
     if os.path.isdir(evidence):
         paths.extend(os.path.join(evidence, n, "summary.json") for n in os.listdir(evidence))
@@ -1165,6 +1182,9 @@ def watched_paths(project):
     runs = runs_folder(project)
     if os.path.isdir(runs):
         paths.extend(os.path.join(runs, n) for n in os.listdir(runs) if n.endswith(".json"))
+    disp = project.path(os.path.join(".ai-sdlc", "dispatch"))
+    if os.path.isdir(disp):
+        paths.extend(os.path.join(disp, n) for n in os.listdir(disp) if n.endswith(".json"))
     return sorted(paths)
 
 

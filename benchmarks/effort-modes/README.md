@@ -16,11 +16,17 @@ quality claim by itself.
    acceptance result, and safety result.
 5. Include tasks with native/stdlib reuse opportunities, a shared-caller defect, a
    trust boundary, an irreducible implementation, and a change with adjacent operational
-   risk. The same deterministic acceptance and adversarial checks score every mode.
-6. Record one CSV row per run with the columns accepted by `score.py`, then run:
+   risk. Those five fixture tasks live under `tasks/` (`stdlib-reuse`,
+   `shared-caller-defect`, `trust-boundary`, `irreducible-feature`, `adjacent-ops-risk`).
+   The same deterministic acceptance (`accept.sh`) and adversarial (`safety.sh`) checks
+   score every mode.
+6. Run the suite (`--harness claude|codex|gemini|cmd:...`, or `--fake-agent` for smoke
+   checks) to record one CSV row per run, then score it:
 
    ```sh
-   python3 benchmarks/effort-modes/score.py results.csv
+   python3 benchmarks/effort-modes/run.py --dry-run
+   python3 benchmarks/effort-modes/run.py --harness claude --out results/
+   python3 benchmarks/effort-modes/score.py results/results.csv
    ```
 
 The scorer refuses missing versions, commits, duplicate runs, fewer than four samples

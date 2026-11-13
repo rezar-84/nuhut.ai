@@ -740,12 +740,28 @@ def _sanitize_run_name(name):
     return cleaned or datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+_LEDGER_SHARD_RE = re.compile(
+    r"^(\d{8}T\d{6}(?:\.\d+)?Z)(?:-(bite|audit|waiver))?(?:-(\d+))?(?:-(.*))?\.jsonl$"
+)
+
+
+def _ledger_shard_sort_key(filename):
+    m = _LEDGER_SHARD_RE.match(filename or "")
+    if m:
+        stamp = m.group(1)
+        kind = m.group(2) or ""
+        seq = int(m.group(3)) if m.group(3) else 1
+        rest = m.group(4) or ""
+        return (0, stamp, seq, kind, rest)
+    return (1, filename or "", 0, "", "")
+
+
 def read_ledger_shards(project):
     folder = ledger_dir(project)
     rows = []
     if not os.path.isdir(folder):
         return rows
-    for name in sorted(os.listdir(folder)):
+    for name in sorted(os.listdir(folder), key=_ledger_shard_sort_key):
         if not name.endswith(".jsonl"):
             continue
         path = os.path.join(folder, name)

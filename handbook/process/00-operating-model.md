@@ -125,8 +125,9 @@ narrative into the backlog.
 - Backlog status updated to one of the eight values in `07-traceability.md` — with a
   pointer to the worklog entry or the blocker, never a bare status change.
 - New items created for everything discovered and not fixed. They enter as `Parked`,
-  waiting on a human for the intake decision, never as `Ready` ("Work you discovered"
-  below).
+  waiting on a human for the intake decision, unless the charter's **Discovered defects**
+  row is `Auto-Ready (bite)` and a Tier 2 or 3 defect carries a passing `sdlc.py bite`
+  run ("Work you discovered" below).
 - `assumptions-and-risks.md` updated: resolved entries closed, new unknowns added.
 - Docs the change falsified are updated or marked `stale` (`07-traceability.md`).
 - State completion plainly: what is done, what is verified, what is open.
@@ -166,11 +167,13 @@ work, and do not re-ask if the question is already logged.
 
 A review, an audit or a fix turns up things nobody asked for: a second defect, a
 refactor that would have made this one easier, an idea. File each one with an ID, a
-tier and a one-line task, as intake requires. Then set it **`Parked`**, not `Ready`: who
-is waited on is the human who owns the backlog, the decision is *accept into Next, defer,
-or drop*, and Since is today. Whether a thing you noticed is the next priority is not an
-agent's call, and a backlog that agents fill unasked stops being read. Do not claim a
-Parked item you filed yourself; it becomes claimable when a human moves it to `Ready`.
+tier and a one-line task, as intake requires. By default (**Discovered defects**:
+`Parked`), set it **`Parked`**, not `Ready`: who is waited on is the human who owns the
+backlog, the decision is *accept into Next, defer, or drop*, and Since is today. When the
+charter sets **Discovered defects** to `Auto-Ready (bite)`, a Tier 2 or 3 defect whose
+reproducing test already passed `sdlc.py bite --item <ID>` may enter `Ready`; Tier 1
+work, non-defects, and defects without a passing `bite` still enter `Parked`. Do not
+claim a Parked item you filed yourself; it becomes claimable when it is `Ready`.
 
 ### Interrupted mid-loop
 

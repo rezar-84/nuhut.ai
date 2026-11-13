@@ -56,9 +56,8 @@ already make small work cheap, once the checks respect them.
 | A, correctness | Done (`92d3f92`) | Tier-aware checks; epic files count; case fix; every finding has `fix` and `who`; statuses normalised; the docs agree with each other. |
 | B, finishing tools | Done (`8ca7125`) | `sdlc.py finish <ID>` and `/sdlc-finish`; `verify --item`; named waivers that never count as Verified and are refused at Tier 1; the finish-guard Stop hook; `doctor --baseline` ratchet; the charter allowlist; record repairs that preview before writing. |
 | Dashboard | Done (`97871c4`) | Needs you pages and groups; the cards are balanced. |
-| Trial | **Next** | Trial Release B on an active project for one week. Measure the gap rate and the waiver rate. |
-| C, shorter loop | Gated on the trial | Rename the loop to PLAN → BUILD → VERIFY → FINISH (major, 5.0). |
-| Pull request | After the trial | `kit-v4` → `main`, so CI runs. |
+| Software Factory (`kit-v5`) | Done (`kit-v5`) | Unified Python stdlib hooks (`hooks.py`, Gemini Stop guard, zero `jq`); hardened `view --serve` (`HttpOnly` cookie + `Origin` check); sharded zero-conflict store (`items/`, `worklog/`, `ledger/`, `fix migrate-shards`); `--sync-refs` git-ref CAS leases + `next-id`; `<500ms` incremental `doctor` cache; `sdlc.py dispatch`; `Discovered defects` triage policy; multi-harness `kit-value` and 5-task `effort-modes` benchmarks. |
+| Release `v5.0.0` | Gated on owner merge | Merge `kit-v5` → `main` and tag `v5.0.0` after human review. |
 
 ### Trial (next)
 
@@ -99,25 +98,25 @@ How to read the results:
 ## Known gaps
 
 ### Enforcement
-- **The finish guard only works in Claude Code.** Gemini CLI is not wired yet.
-  Other tools rely on `doctor --strict` in CI and the git hooks.
-- **The guard is bash-only**, like the other hooks. On Windows without bash, use the CI
-  check.
+- **The finish guard covers Claude Code and Gemini CLI.** Tools without a `Stop` hook event
+  rely on `doctor --strict` in CI and the git hooks.
+- **Hooks run on Python 3.8+ standard library (`hooks.py`).** Thin shell shims invoke
+  `python3` without needing `jq` or GNU/BSD `sed`.
 - **The guard only sees committed work.** It finds item IDs in commits made during the
   session, so an item worked on but never committed gets no reminder.
 - **Only verify can be waived.** A named person cannot waive a review or plan-check, by
-  design. Revisit if the trial shows a real need.
+  design.
 
 ### Records and parsing
 - **Old "Verified" claims are hidden, not fixed.** The baseline accepts them, and
   `fix link-evidence` repairs only the ones a ledger run can be matched to.
 - **Sub-part headings** like `## ACME-193 Part B —` are not parsed as items.
-- **Non-standard legacy backlog tables** are left in their original format on purpose.
+- **Non-standard legacy backlog tables** are left in their original format unless migrated
+  with `sdlc.py fix migrate-shards --apply`.
 
 ### Performance
-- **`doctor` takes over 2 minutes on large repositories** (e.g. 700+ Done items and a large
-  git history). The guard and `finish` never run it, but CI and the viewer's doctor button
-  pay the cost.
+- **Cold `doctor` runs scan full records once, then hit `.ai-sdlc/cache/doctor.json`.**
+  Warm runs complete in under 500ms until a record, shard, git `HEAD`, or claim changes.
 
 ### Testing and proof
 - **CI has not run on `kit-v4`.** It runs when the pull request opens.
