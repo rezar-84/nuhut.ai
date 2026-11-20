@@ -45,6 +45,15 @@ def display_version(root=SRC):
     if not (root / ".git").exists() or not tool.is_file():
         return version
     try:
+        shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=str(root),
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, timeout=5)
+        if shallow.stdout.decode("utf-8", "replace").strip() == "true":
+            # The cut-off hides the commit that last changed VERSION, so a count would be wrong.
+            return "%s (shallow clone: unreleased commits unknown)" % version
+    except (OSError, subprocess.SubprocessError):
+        return version
+    try:
         proc = subprocess.run([sys.executable, str(tool), "next", "--json", "--root", str(root)],
                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                               stderr=subprocess.DEVNULL, timeout=10)

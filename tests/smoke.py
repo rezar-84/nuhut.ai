@@ -3786,6 +3786,15 @@ def test_lifecycle_gaps():
     print("lifecycle: steps owed by tier, honest skips, epics, shared entries, fixes")
     d = tempfile.mkdtemp(prefix="sdlc-steps-")
     subprocess.call(["git", "init", "-q", d])
+    commit("feat(x): after the release", "e.txt")
+    commit("fix(x): another", "f.txt")
+    shallow = tempfile.mkdtemp()
+    subprocess.call(["git", "clone", "-q", "--depth", "1", "file://" + d, shallow],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    check("a shallow clone says its unreleased state is unknown rather than guessing",
+          installer.display_version(Path(shallow)) == "5.0.0 (shallow clone: unreleased commits unknown)",
+          installer.display_version(Path(shallow)))
+    shutil.rmtree(shallow, ignore_errors=True)
     run([d, "LCX", "-y"])
     script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
     git = ["git", "-c", "user.email=t@t", "-c", "user.name=tester"]
