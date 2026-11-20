@@ -1219,6 +1219,18 @@ def test_runtime():
     check("plan-check --pre passes a plan whose paths exist or are marked new", code == 0, out)
     code, out = sdlc("plan-check", "RTX-8", "--pre")
     check("plan-check --pre fails a plan that is too broad", code == 1 and "too broad" in out, out)
+    write(d, "src/caf\u00e9.py", "c = 1\n")
+    write(d, "docs/project/plans/RTX-6.md",
+          "# Plan\n## Files that change\n- `src/caf*.py`\n- `src/later.py (new)`\n## Order of work\n")
+    code, out = sdlc("plan-check", "RTX-6", "--pre", "--json")
+    try:
+        pre = json.loads(out)
+    except ValueError:
+        pre = {}
+    check("plan-check --pre matches a glob against a non-ASCII file name",
+          code == 0 and pre.get("missing") == [], out)
+    check("a (new) marker inside the backticks still plans the path, as new",
+          "src/later.py" in pre.get("planned", []) and pre.get("new") == ["src/later.py"], out)
 
     # An older install gains the runtime on upgrade; a local edit blocks it.
     os.remove(script)

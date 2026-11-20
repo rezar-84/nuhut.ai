@@ -371,7 +371,9 @@ class Project(object):
 
     def git(self, *args):
         try:
-            proc = subprocess.run(("git",) + args, cwd=self.root, stdout=subprocess.PIPE,
+            # quotePath=false: non-ASCII names come back as text, not "caf\303\251.py".
+            proc = subprocess.run(("git", "-c", "core.quotePath=false") + args, cwd=self.root,
+                                  stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, universal_newlines=True)
         except OSError:
             return ""
@@ -2473,6 +2475,7 @@ def changed_files(project, base):
     if cache is not None and key in cache:
         return cache[key]
     names = set()
+                token = NEW_MARK.sub("", token)
     merge_base = project.git("merge-base", base, "HEAD").strip()
     if merge_base:
         names.update(project.git("diff", "--name-only", merge_base, "HEAD").split("\n"))
@@ -2527,7 +2530,7 @@ def planned_new(text):
     for line in plan_section(text, "Files that change"):
         if re.search(r"\(new\)", line, re.I):
             for token in re.findall(r"`([^`]+)`", line):
-                for path in expand_braces(token.strip()):
+                for path in expand_braces(NEW_MARK.sub("", token).strip()):
                     while path.startswith("./"):
                         path = path[2:]
                     found.append(path)
@@ -2566,6 +2569,9 @@ def plan_precheck(project, item):
         return None, error
     planned = planned_paths(text)
     new = [p for p in planned_new(text) if p in planned]
+NEW_MARK = re.compile(r"\s*\(new\)\s*$", re.I)
+
+
     on_disk = set(t for t in project.git("ls-files", "--cached", "--others",
                                          "--exclude-standard").split("\n") if t)
     regexes = [(p, glob_regex(p)) for p in planned]
@@ -3775,7 +3781,7 @@ def main(argv):
                      "the plan is too broad to check")
     chk.add_argument("--pre", action="store_true",
                      help="before the build: exit 1 if a planned path matches no file and is "
-                     "not marked (new), or the plan is too broad")
+                     "not marked (new), or the plan is too broad (ignores --base and --strict)")
     vw = sub.add_parser("view", help="draw the records as an interactive page "
                         "(.ai-sdlc/view/index.html, git-ignored)")
     vw.add_argument("--no-open", action="store_true", help="write the page, do not open it")
