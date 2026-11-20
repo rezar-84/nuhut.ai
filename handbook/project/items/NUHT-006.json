@@ -1,0 +1,28 @@
+{
+  "id": "NUHT-006",
+  "title": "plan-check --pre: refuse plans that name missing files before the build",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "architect",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    ".ai-sdlc/bin/sdlc.py",
+    "tests/smoke.py",
+    "docs/cli.md",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "created": "2026-11-21",
+  "updated": "2026-11-21",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

@@ -1,0 +1,21 @@
+{
+  "id": "NUHT-008",
+  "title": "Plugin bootstrap for Claude Code / Codex that runs install.py",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "devops-sre",
+  "status": "Deferred",
+  "depends": [],
+  "touch": [],
+  "created": "2026-11-21",
+  "updated": "2026-11-21",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "NUHT-005 and v5.0.0 are released",
+  "dropped_reason": ""
+}

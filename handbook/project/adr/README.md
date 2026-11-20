@@ -22,4 +22,5 @@ the real reason an option lost — are in `../../process/05-change-control.md`,
 
 | # | Decision | Status | Date |
 | --- | --- | --- | --- |
-| 0001 | _(none yet)_ | | |
+| [0001](0001-v5-software-factory-architecture.md) | v5 Software Factory architecture (unified Python hooks, sharded records, headless dispatch) | Proposed | 2026-11-13 |
+| [0002](0002-fresh-context-review-level.md) | A third review independence level: fresh context | Proposed | 2026-11-21 |

@@ -1,0 +1,33 @@
+{
+  "id": "NUHT-005",
+  "title": "Review triage: paraphrase step and Contest/Escalate/Fix/Decline responses, escalations in Needs you",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "qa",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    "template/docs/process/02-role-reviews.md",
+    "template/docs/templates/role-review.md",
+    "handbook/process/02-role-reviews.md",
+    "handbook/templates/role-review.md",
+    "optional/runtime/sdlc.py",
+    ".ai-sdlc/bin/sdlc.py",
+    ".claude/commands/sdlc-review.md",
+    "optional/commands/**",
+    "tests/smoke.py",
+    "CHANGELOG.md",
+    "docs/**"
+  ],
+  "created": "2026-11-21",
+  "updated": "2026-11-21",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}
