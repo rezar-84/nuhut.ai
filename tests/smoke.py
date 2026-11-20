@@ -3945,7 +3945,31 @@ def test_finish():
     check("a Tier 1 item cannot waive verify and owes a ship review",
           code == 1 and "cannot be waived" in out and "ship review" in out, out)
     sdlc("verify", "--item", "FIN-3")
-    write(d, "docs/project/reviews/FIN-3-ship-qa.md", "# Ship review\n\nPass.\n")
+    responses = ("# Ship review\n\nPass.\n\n## Responses\n\n"
+                 "| # | Response | Evidence or decision | Decided by |\n| --- | --- | --- | --- |\n"
+                 "| 1 | Escalate | the retention period is a legal call | |\n"
+                 "| 2 | Contest | | |\n| 3 | Fix | `src/a.py` changed | |\n"
+                 "| _(#)_ | _(Fix / Contest / Escalate / Decline)_ | _(evidence)_ | _(name)_ |\n")
+    write(d, "docs/project/reviews/FIN-3-ship-qa.md", responses)
+    code, out, err = sdlc("finish", "FIN-3")
+    check("finish refuses while a review finding is escalated to a person with no decision",
+          code == 1 and "escalated" in out and "FIN-3-ship-qa.md" in out, out)
+    code, out, err = sdlc("doctor", "--json")
+    found = json.loads(out) if code in (0, 1) and out.strip().startswith("[") else []
+    esc = [f for f in found if f.get("check") == "escalation"]
+    con = [f for f in found if f.get("check") == "contest"]
+    check("doctor lists the open escalation as the owner's decision, once",
+          len(esc) == 1 and esc[0].get("who") == "owner" and "#1" in esc[0].get("where", ""), out[:600])
+    check("doctor flags a contest with no evidence the reviewer could read",
+          len(con) == 1 and "#2" in con[0].get("where", ""), out[:600])
+    code, out, err = sdlc("view", "--json")
+    model = json.loads(out) if code == 0 else {}
+    check("the viewer model carries the escalation for Needs you",
+          any(a.get("check") == "escalation" and a.get("who") == "owner" for a in model.get("alerts", [])),
+          str(model.get("alerts"))[:400])
+    write(d, "docs/project/reviews/FIN-3-ship-qa.md",
+          responses.replace("legal call | |", "legal call; keep 30 days | Sam |")
+          .replace("| 2 | Contest | | |", "| 2 | Contest | `src/a.py:3` already checks it | |"))
     sdlc("finish", "FIN-3")
     write(d, "docs/project/worklog.md",
           re.sub(r"(?m)^TODO\(finish\): .*$", "none.", read(d, "docs/project/worklog.md")))

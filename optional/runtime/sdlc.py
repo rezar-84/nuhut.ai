@@ -436,6 +436,10 @@ FIX_HINTS = (
     ("dependencies", r"", "agent", "Correct the Depends on cell of {item}"),
     ("hooks", r"", "owner", "Install jq, or remove the hooks"),
     ("bite", r"", "tool", SDLC + " bite --restore"),
+    ("escalation", r"", "owner", "Decide the finding, write the decision and your name in the "
+     "review's Responses row; the agent then applies it"),
+    ("contest", r"", "agent", "Cite a file:line or a recorded decision the reviewer could read, "
+     "or change the response to Fix or Escalate"),
     ("independence", r"", "tool", SDLC + " review {item} --role <role> --by <other harness>"),
     ("evidence", r"", "agent", "Run " + SDLC + " verify --item {item} and cite the run. Runs "
      "kept on disk but missing from the ledger: " + SDLC + " fix link-evidence. For past work "
@@ -1100,7 +1104,7 @@ def check_bite_leftover(project, out):
                 "`sdlc.py bite --restore`")
 
 
-DOCTOR_CACHE_VERSION = 1
+DOCTOR_CACHE_VERSION = 2
 
 
 def _doctor_input_digest(project, today):
@@ -1206,6 +1210,7 @@ def doctor(project, today=None, use_cache=True):
         check_bite_leftover(project, out)
         check_hook_dependency(project, out)
         check_identity(project, out)
+        check_responses(project, out)
         check_verified_claims(project, out)
         check_placeholders(project, out)
         check_pointer(project, out)
@@ -1710,6 +1715,8 @@ def review_prompt(project, item, role, tier, diff):
     return ("You are an independent reviewer. Review the diff below as the %s role, using only "
             "the playbook, the charter rows and the diff given here. Work item %s, Tier %s.\n\n"
             "Answer in this exact shape:\nVerdict: Pass | Pass with conditions | Block\n"
+            "Paraphrase: <two to five sentences of your own: what this change does and how the "
+            "code it touches works. A part you cannot paraphrase is a finding>\n"
             "Checked: <what you examined>\nNot checked: <what you did not>\nFindings:\n"
             "| # | Sev | Location | Finding | Consequence | Fix |\n\n"
             "## Playbook\n\n%s\n\n## Charter rows\n\n%s\n\n## Diff\n\n```diff\n%s\n```\n"
@@ -1805,6 +1812,65 @@ def review(project, item, role, by, model=None, stage="ship", base=None, timeout
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(text)
     return os.path.relpath(path, project.root), record, None
+
+
+RESPONSES = ("fix", "contest", "escalate", "decline")
+
+
+def review_responses(text):
+    """Rows of a review's "## Responses" table: the author's answer to each finding
+    (02-role-reviews.md, "Answering findings"). Template placeholder rows are skipped."""
+    rows = []
+    for line in plan_section(text, "Responses"):
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2 or not line.lstrip().startswith("|") or set(cells[0]) <= set("-: "):
+            continue
+        if cells[0] == "#" or UNFILLED.sub("", cells[1]).strip() == "":
+            continue
+        cells += [""] * (4 - len(cells))
+        blank = lambda c: UNFILLED.sub("", c).strip().strip("—-").strip() == ""
+        rows.append({"n": cells[0], "response": cells[1].strip("*` ").lower(),
+                     "evidence": "" if blank(cells[2]) else cells[2],
+                     "decided_by": "" if blank(cells[3]) else cells[3]})
+    return rows
+
+
+def open_escalations(project, item):
+    """(file, finding #) for each of <item>'s findings escalated to a person and not decided."""
+    folder = project.path(os.path.join(project.docs, "project", "reviews"))
+    found = []
+    for rec in review_records(project, item):
+        for row in review_responses(read(os.path.join(folder, rec["file"]))):
+            if row["response"] == "escalate" and not row["decided_by"]:
+                found.append((rec["file"], row["n"]))
+    return found
+
+
+def check_responses(project, out):
+    """An escalated finding waits on a person: it is the owner's decision. A contest must
+    cite evidence the reviewer could read, or it is only the author disagreeing."""
+    rel = os.path.join(project.docs, "project", "reviews")
+    folder = project.path(rel)
+    if not os.path.isdir(folder):
+        return
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith(".md") or name == "README.md":
+            continue
+        for row in review_responses(read(os.path.join(folder, name))):
+            where = "%s/%s #%s" % (rel, name, row["n"])
+            if row["response"] == "escalate" and not row["decided_by"]:
+                out.add("warn", "escalation", where,
+                        "finding %s is escalated to a person and has no decision: %s"
+                        % (row["n"], row["evidence"] or "no reason given"))
+            elif row["response"] == "contest" and not row["evidence"]:
+                out.add("warn", "contest", where,
+                        "finding %s is contested with no evidence the reviewer could read"
+                        % row["n"])
+            elif row["response"] not in RESPONSES:
+                out.add("warn", "contest", where,
+                        "finding %s has response %r; use Fix, Contest, Escalate or Decline"
+                        % (row["n"], row["response"]),
+                        fix="Change the response to Fix, Contest, Escalate or Decline")
 
 
 def review_records(project, item):

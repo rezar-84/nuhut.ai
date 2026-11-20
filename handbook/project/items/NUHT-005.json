@@ -5,7 +5,7 @@
   "tier": "2",
   "effort": "",
   "owner": "qa",
-  "status": "Ready",
+  "status": "In review",
   "depends": [],
   "touch": [
     "template/docs/process/02-role-reviews.md",

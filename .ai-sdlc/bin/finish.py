@@ -476,6 +476,11 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     elif reviews:
         out.append("review   %s" % ", ".join(r["file"] for r in reviews))
 
+    for name, n in rt.open_escalations(project, item):
+        owe("review   finding %s in %s/project/reviews/%s is escalated and has no decision: "
+            "a person decides it and writes their name in its Responses row"
+            % (n, project.docs, name))
+
     needs_human_gate = (tier == "1") or (tier == "2" and str(t_rules).lower() == "strict")
     final = "Parked" if needs_human_gate else "Done"
     entry = worklog_entry(project, item)

@@ -38,6 +38,10 @@
         need("bad", "Doctor", firstSentence(a.message), a.check + (a.where ? " · " + a.where : ""), function () { openFindingDrawer(a); }, "How to fix");
       });
     });
+    // A review finding escalated to a person is a decision only the owner can make.
+    f.warns.filter(function (a) { return a.check === "escalation"; }).forEach(function (a) {
+      need("warn", "Review", firstSentence(a.message), a.where, function () { openFindingDrawer(a); }, "Decide");
+    });
     // Build and security failures from the Project lens, once it has loaded.
     lensIssues().filter(function (x) { return x.level === "fail"; }).forEach(function (x) {
       need("bad", x.group, x.title, x.detail, x.open, "Open");

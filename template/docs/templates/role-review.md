@@ -11,6 +11,13 @@ last-reviewed: YYYY-MM-DD
 
 ---
 
+## Paraphrase (design review)
+
+_(Two to five sentences in your own words: what the plan proposes, and how the existing
+system works according to it. A part you cannot paraphrase is a finding.)_
+
+---
+
 ## Conformance (ship review, Tier 1 and 2)
 
 **plan-check:** _(the output of `sdlc.py plan-check <ID>` for Tier 1, and for each
@@ -68,3 +75,16 @@ S0 and S1 are not waivable. An agent may not waive its own blocker — see
 
 | Finding | Waived by | Reason | Follow-up |
 | --- | --- | --- | --- |
+
+---
+
+## Responses
+
+_(The author's answer to every finding, after the review: Fix, Contest, Escalate or
+Decline — `../process/02-role-reviews.md`, "Answering findings". A Contest cites evidence
+the reviewer could read. An Escalate stays open until a person writes their name under
+Decided by.)_
+
+| # | Response | Evidence or decision | Decided by |
+| --- | --- | --- | --- |
+| _(#)_ | _(Fix / Contest / Escalate / Decline)_ | _(commit, `file:line`, or the decision)_ | _(a person's name, for Escalate)_ |
