@@ -14,7 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Python 3.8 is the kit's floor. setup-python has no 3.8 build for
+          # ubuntu-24.04 (ubuntu-latest), so this leg stays on 22.04.
+          - os: ubuntu-22.04
             python-version: "3.8"
           - os: ubuntu-latest
             python-version: "3.12"

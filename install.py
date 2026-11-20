@@ -31,6 +31,30 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parent
 VERSION = (SRC / "VERSION").read_text(encoding="utf-8").strip()
+
+
+def display_version(root=SRC):
+    """VERSION, plus how far a git checkout is past it. Installing from a branch ahead of
+    the last release still stamps VERSION into the manifest (upgrades compare it), but the
+    banner says the code is unreleased and which version it becomes when merged."""
+    try:
+        version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return VERSION
+    tool = root / "tools" / "semver.py"
+    if not (root / ".git").exists() or not tool.is_file():
+        return version
+    try:
+        proc = subprocess.run([sys.executable, str(tool), "next", "--json", "--root", str(root)],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, timeout=10)
+        info = json.loads(proc.stdout.decode("utf-8", "replace")) if proc.returncode == 0 else {}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return version
+    if not info.get("commits") or info.get("level") in (None, "none"):
+        return version
+    return "%s + %d unreleased commit%s (next release: %s)" % (
+        version, info["commits"], "" if info["commits"] == 1 else "s", info["next"])
 MANIFEST_REL = Path(".ai-sdlc") / "manifest.json"
 PROFILE_REL = Path(".ai-sdlc") / "profile.json"
 # Retired in 4.0: the static status page. `sdlc.py view --export-html` replaces it.
@@ -3472,7 +3496,7 @@ class Installer(object):
     def run(self):
         w = self.w
         print("")
-        print("Installing Nuhut kit v%s into %s" % (VERSION, self.target))
+        print("Installing Nuhut kit v%s into %s" % (display_version(), self.target))
         print("")
         candidates = [self.target / "AGENTS.md", self.target / "CLAUDE.md",
                       self.target / MANIFEST_REL]
@@ -4707,7 +4731,7 @@ def upgrade(target, o):
               % (len(changed), len(obsolete)))
         return 0
 
-    print("Upgrading Nuhut kit in %s to v%s" % (target, VERSION))
+    print("Upgrading Nuhut kit in %s to v%s" % (target, display_version()))
     print("  refreshes the kit's own files: %s/process, roles, templates, platforms, the"
           % docs)
     print("  /sdlc-* commands and the skills already installed. Your charter, backlog,")
@@ -5292,7 +5316,7 @@ def main(argv):
 
     if w.interactive:
         print("")
-        print("%s%s%s" % (TERM.B, t("intro.title", version=VERSION), TERM.R))
+        print("%s%s%s" % (TERM.B, t("intro.title", version=display_version()), TERM.R))
         TERM.dim(t("intro.what"))
         TERM.say("")
         if TERM.rich:

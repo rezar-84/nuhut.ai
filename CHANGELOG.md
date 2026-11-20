@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **The installer's banner names unreleased work.** Installing or upgrading from a git checkout ahead of `VERSION` prints, for example, `v4.0.0 + 30 unreleased commits (next release: 5.0.0)`. The manifest still records `VERSION`.
+- **CI runs the Python 3.8 leg on `ubuntu-22.04`.** `setup-python` has no 3.8 build for `ubuntu-latest` (24.04), so that leg failed before any check ran.
 - **`plan-check` counts `.ai-sdlc/bin/`, `profile.json` and `manifest.json`, and warns when a plan's paths match over half the repository.**
 - **The `work-item-id` hook no longer traces commits that provably target another repository** (a literal `cd`/`-C` path); unresolvable targets stay enforced.
 

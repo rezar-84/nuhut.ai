@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INSTALL = os.path.join(ROOT, "install.py")
@@ -3693,8 +3694,12 @@ def test_semver():
     write(d, "VERSION", "4.0.0\n")
     write(d, ".claude-plugin/plugin.json", '{\n  "name": "x",\n  "version": "4.0.0"\n}\n')
     write(d, "CHANGELOG.md", "# Changelog\n\n## Unreleased\n\n## 4.0.0 — 2026-10-19\n\n- first\n")
+    os.makedirs(os.path.join(d, "tools"))
+    shutil.copy(tool, os.path.join(d, "tools", "semver.py"))
     subprocess.call(["git", "add", "-A"], cwd=d)
     subprocess.call(git + ["commit", "-qm", "docs(release): 4.0.0"], cwd=d)
+    check("the installer names a released checkout by VERSION alone",
+          installer.display_version(Path(d)) == "4.0.0", installer.display_version(Path(d)))
 
     def commit(msg, name):
         write(d, name, msg)
@@ -3715,6 +3720,9 @@ def test_semver():
           nxt("--prerelease"))
     commit("refactor(api)!: drop the old flag", "c.txt")
     check("a ! after the type is a major", nxt() == "5.0.0", nxt())
+    check("the installer says a checkout ahead of VERSION is unreleased, and what it becomes",
+          installer.display_version(Path(d)) == "4.0.0 + 3 unreleased commits (next release: 5.0.0)",
+          installer.display_version(Path(d)))
     out = subprocess.run([sys.executable, tool, "bump", "--root", d], stdout=subprocess.PIPE,
                          universal_newlines=True).stdout.strip()
     changelog = read(d, "CHANGELOG.md")
@@ -3726,6 +3734,13 @@ def test_semver():
     subprocess.call(["git", "add", "-A"], cwd=d)
     subprocess.call(git + ["commit", "-qm", "chore(release): v5.0.0 [skip ci]"], cwd=d)
     check("the release commit itself starts no new release", nxt() == "5.0.0", nxt())
+    check("after the release the installer names the new VERSION alone",
+          installer.display_version(Path(d)) == "5.0.0", installer.display_version(Path(d)))
+    plain = tempfile.mkdtemp()
+    write(plain, "VERSION", "5.0.0\n")
+    check("a copy with no git history falls back to VERSION",
+          installer.display_version(Path(plain)) == "5.0.0", installer.display_version(Path(plain)))
+    shutil.rmtree(plain, ignore_errors=True)
     shutil.rmtree(d, ignore_errors=True)
 
 
