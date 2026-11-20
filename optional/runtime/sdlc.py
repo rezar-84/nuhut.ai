@@ -1819,21 +1819,66 @@ def review(project, item, role, by, model=None, stage="ship", base=None, timeout
 RESPONSES = ("fix", "contest", "escalate", "decline")
 
 
+NOT_DECIDED = re.compile(r"^(tbd|pending|owner|the owner|n/?a|none|todo|unknown|\?+)$", re.I)
+
+
+def _response_sections(text):
+    """Lines under every `## Responses...` or `### Responses...` heading, each up to the
+    next heading of the same or a higher level."""
+    lines, level = [], 0
+    for line in text.splitlines():
+        m = re.match(r"^(#{2,6})\s+(.*)$", line)
+        if m:
+            depth = len(m.group(1))
+            if level and depth <= level:
+                level = 0
+            if m.group(2).strip().lower().startswith("responses"):
+                level = depth
+            continue
+        if level:
+            lines.append(line)
+    return lines
+
+
+def _plain(cell):
+    return re.sub(r"[*_`]", "", UNFILLED.sub("", cell)).strip()
+
+
 def review_responses(text):
-    """Rows of a review's "## Responses" table: the author's answer to each finding
-    (02-role-reviews.md, "Answering findings"). Template placeholder rows are skipped."""
-    rows = []
-    for line in plan_section(text, "Responses"):
-        cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 2 or not line.lstrip().startswith("|") or set(cells[0]) <= set("-: "):
+    """Rows of a review's Responses table(s): the author's answer to each finding
+    (02-role-reviews.md, "Answering findings"). Columns are found by their header names.
+    Template placeholder rows are skipped. Fails closed: a cell that only defers the
+    decision ("pending", "TBD", "owner") is not a decision."""
+    rows, cols = [], None
+    for line in _response_sections(text):
+        cells = split_row(line)
+        if cells is None:
+            cols = None if not line.strip() else cols
             continue
-        if cells[0] == "#" or UNFILLED.sub("", cells[1]).strip() == "":
+        if all(set(c) <= set("-: ") for c in cells):
             continue
-        cells += [""] * (4 - len(cells))
-        blank = lambda c: UNFILLED.sub("", c).strip().strip("—-").strip() == ""
-        rows.append({"n": cells[0], "response": cells[1].strip("*` ").lower(),
-                     "evidence": "" if blank(cells[2]) else cells[2],
-                     "decided_by": "" if blank(cells[3]) else cells[3]})
+        if cols is None:
+            names = [_plain(c).lower() for c in cells]
+            pick = lambda *keys: next((i for i, n in enumerate(names)
+                                       if any(n.startswith(k) for k in keys)), None)
+            cols = {"n": pick("#", "finding", "no"), "response": pick("response"),
+                    "evidence": pick("evidence"), "decided_by": pick("decided")}
+            if cols["response"] is None:
+                cols = {"n": 0, "response": 1, "evidence": 2, "decided_by": 3}
+            else:
+                continue
+        get = lambda k: cells[cols[k]] if cols.get(k) is not None and cols[k] < len(cells) else ""
+        word = _plain(get("response")).lower()
+        if not word:
+            continue
+        m = re.match(r"(fix|contest|escalat|declin)", word)
+        response = {"fix": "fix", "contest": "contest", "escalat": "escalate",
+                    "declin": "decline"}[m.group(1)] if m else \
+            ("escalate" if "escalat" in word else word)
+        decided = _plain(get("decided_by")).strip("—-– ").strip()
+        evidence = UNFILLED.sub("", get("evidence")).strip().strip("—-– ").strip()
+        rows.append({"n": _plain(get("n")), "response": response, "evidence": evidence,
+                     "decided_by": "" if not decided or NOT_DECIDED.match(decided) else decided})
     return rows
 
 
@@ -2430,6 +2475,7 @@ def planned_paths(text):
             if not line.lstrip().startswith(("-", "*")):
                 continue
             for token in re.findall(r"`([^`]+)`", UNFILLED.sub("", line)):
+                token = NEW_MARK.sub("", token)
                 for path in expand_braces(token.strip()):
                     while path.startswith("./"):
                         path = path[2:]
@@ -2475,7 +2521,6 @@ def changed_files(project, base):
     if cache is not None and key in cache:
         return cache[key]
     names = set()
-                token = NEW_MARK.sub("", token)
     merge_base = project.git("merge-base", base, "HEAD").strip()
     if merge_base:
         names.update(project.git("diff", "--name-only", merge_base, "HEAD").split("\n"))
@@ -2524,6 +2569,9 @@ def find_plan(project, item):
     return rel, text
 
 
+NEW_MARK = re.compile(r"\s*\(new\)\s*$", re.I)
+
+
 def planned_new(text):
     """Planned paths whose list line says (new): the build creates them."""
     found = []
@@ -2569,9 +2617,6 @@ def plan_precheck(project, item):
         return None, error
     planned = planned_paths(text)
     new = [p for p in planned_new(text) if p in planned]
-NEW_MARK = re.compile(r"\s*\(new\)\s*$", re.I)
-
-
     on_disk = set(t for t in project.git("ls-files", "--cached", "--others",
                                          "--exclude-standard").split("\n") if t)
     regexes = [(p, glob_regex(p)) for p in planned]

@@ -3786,6 +3786,15 @@ def test_semver():
     check("the release commit itself starts no new release", nxt() == "5.0.0", nxt())
     check("after the release the installer names the new VERSION alone",
           installer.display_version(Path(d)) == "5.0.0", installer.display_version(Path(d)))
+    commit("feat(x): after the release", "e.txt")
+    commit("fix(x): another", "f.txt")
+    shallow = tempfile.mkdtemp()
+    subprocess.call(["git", "clone", "-q", "--depth", "1", "file://" + d, shallow],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    check("a shallow clone says its unreleased state is unknown rather than guessing",
+          installer.display_version(Path(shallow)) == "5.0.0 (shallow clone: unreleased commits unknown)",
+          installer.display_version(Path(shallow)))
+    shutil.rmtree(shallow, ignore_errors=True)
     plain = tempfile.mkdtemp()
     write(plain, "VERSION", "5.0.0\n")
     check("a copy with no git history falls back to VERSION",
@@ -3798,15 +3807,6 @@ def test_lifecycle_gaps():
     print("lifecycle: steps owed by tier, honest skips, epics, shared entries, fixes")
     d = tempfile.mkdtemp(prefix="sdlc-steps-")
     subprocess.call(["git", "init", "-q", d])
-    commit("feat(x): after the release", "e.txt")
-    commit("fix(x): another", "f.txt")
-    shallow = tempfile.mkdtemp()
-    subprocess.call(["git", "clone", "-q", "--depth", "1", "file://" + d, shallow],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    check("a shallow clone says its unreleased state is unknown rather than guessing",
-          installer.display_version(Path(shallow)) == "5.0.0 (shallow clone: unreleased commits unknown)",
-          installer.display_version(Path(shallow)))
-    shutil.rmtree(shallow, ignore_errors=True)
     run([d, "LCX", "-y"])
     script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
     git = ["git", "-c", "user.email=t@t", "-c", "user.name=tester"]
@@ -3988,6 +3988,26 @@ def test_finish():
     check("the viewer model carries the escalation for Needs you",
           any(a.get("check") == "escalation" and a.get("who") == "owner" for a in model.get("alerts", [])),
           str(model.get("alerts"))[:400])
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import sdlc as rt
+    hdr = "| # | Response | Evidence or decision | Decided by |\n| --- | --- | --- | --- |\n"
+    def esc_open(text):
+        return [r for r in rt.review_responses(text) if r["response"] == "escalate" and not r["decided_by"]]
+    check("a pipe inside the evidence does not shift Decided by",
+          len(esc_open("## Responses\n\n" + hdr + "| 1 | Escalate | the `a\\|b` convention | |\n")) == 1)
+    check("pending, TBD or owner under Decided by is not a decision",
+          all(len(esc_open("## Responses\n\n" + hdr + "| 1 | Escalate | x | %s |\n" % w)) == 1
+              for w in ("pending", "TBD", "owner", "_pending_", "n/a", "?")))
+    check("Escalated, or Escalate with a note, is still an escalation",
+          len(esc_open("## Responses\n\n" + hdr + "| 1 | Escalated | x | |\n| 2 | **Escalate** — owner | y | |\n")) == 2)
+    check("columns are read from the header row, not by position",
+          len(esc_open("## Responses\n\n| Finding | Sev | Response | Evidence | Decided by |\n| --- | --- | --- | --- | --- |\n"
+                       "| **3** | S3 | Escalate | legal | |\n")) == 1)
+    check("a Responses heading with a suffix, or a role's ### Responses, is read",
+          len(esc_open("## Responses (author)\n\n" + hdr + "| 1 | Escalate | x | |\n")) == 1
+          and len(esc_open("## qa\n\n### Responses\n\n" + hdr + "| 1 | Escalate | x | |\n\n## Outcome\n")) == 1)
+    check("a finding number in bold is reported plainly",
+          [r["n"] for r in rt.review_responses("## Responses\n\n" + hdr + "| **4** | Fix | abc | |\n")] == ["4"])
     write(d, "docs/project/reviews/FIN-3-ship-qa.md",
           responses.replace("legal call | |", "legal call; keep 30 days | Sam |")
           .replace("| 2 | Contest | | |", "| 2 | Contest | `src/a.py:3` already checks it | |"))
