@@ -2423,9 +2423,8 @@ def changed_files(project, base):
     return res
 
 
-def plan_check(project, item, base=None):
-    """Returns (result, error). The records under project/ are bookkeeping every change
-    touches, so they are never "unplanned"."""
+def find_plan(project, item):
+    """(rel, text) of the item's plan or spec; text is "" when there is none."""
     folder = os.path.join(project.docs, "project", "plans")
     rel = os.path.join(folder, item + ".md")
     if not os.path.isfile(project.path(rel)) and os.path.isdir(project.path(folder)):
@@ -2453,13 +2452,84 @@ def plan_check(project, item, base=None):
                     rel = cand
                     text = cand_text
                     break
+    return rel, text
+
+
+def planned_new(text):
+    """Planned paths whose list line says (new): the build creates them."""
+    found = []
+    for line in plan_section(text, "Files that change"):
+        if re.search(r"\(new\)", line, re.I):
+            for token in re.findall(r"`([^`]+)`", line):
+                for path in expand_braces(token.strip()):
+                    while path.startswith("./"):
+                        path = path[2:]
+                    found.append(path)
+    return found
+
+
+def _too_broad(project, regexes):
+    """The planned paths that make a plan match over half the tracked files, or []."""
+    tracked = [t for t in project.git("ls-files").split("\n") if t]
+    if len(tracked) < 20:
+        return []
+    matched = sum(1 for t in tracked if any(r.match(t) for _, r in regexes))
+    if matched * 2 <= len(tracked):
+        return []
+    broad = [p for p, r in regexes if sum(1 for t in tracked if r.match(t)) * 10 > len(tracked)]
+    return broad or [p for p, _ in regexes]
+
+
+def _plan_or_error(project, item):
+    rel, text = find_plan(project, item)
     if not text:
-        return None, ("no plan at %s. Tier 1 items have one; a Tier 2 or 3 plan lives in "
-                      "the response and cannot be checked mechanically." % rel)
+        return None, None, ("no plan at %s. Tier 1 items have one; a Tier 2 or 3 plan lives in "
+                            "the response and cannot be checked mechanically." % rel)
     planned = planned_paths(text)
     if not planned:
-        return None, ("%s has no backticked paths under \"## Files that change\", so "
-                      "there is nothing to compare the diff with." % rel)
+        return None, None, ("%s has no backticked paths under \"## Files that change\", so "
+                            "there is nothing to compare the diff with." % rel)
+    return rel, text, None
+
+
+def plan_precheck(project, item):
+    """Before the build: every planned path matches a file here or is marked (new), and the
+    list is narrow enough for plan-check to fail. Returns (result, error)."""
+    rel, text, error = _plan_or_error(project, item)
+    if error:
+        return None, error
+    planned = planned_paths(text)
+    new = [p for p in planned_new(text) if p in planned]
+    on_disk = set(t for t in project.git("ls-files", "--cached", "--others",
+                                         "--exclude-standard").split("\n") if t)
+    regexes = [(p, glob_regex(p)) for p in planned]
+    missing = [p for p, r in regexes if p not in new
+               and not any(r.match(f) for f in on_disk)
+               and not os.path.exists(project.path(p))]
+    return {"item": item, "plan": rel, "planned": planned, "new": new, "missing": missing,
+            "broad": _too_broad(project, regexes)}, None
+
+
+def print_plan_precheck(result):
+    print("plan-check %s --pre: %d planned, %d marked new, in %s"
+          % (result["item"], len(result["planned"]), len(result["new"]), result["plan"]))
+    for p in result["missing"]:
+        print("fail  missing     %s  (no file matches it; fix the path, or add (new) after it "
+              "if the build creates it)" % p)
+    if result["broad"]:
+        print("fail  too broad   the plan's paths match over half the repository, so "
+              "plan-check cannot fail after the build. Narrow: %s" % ", ".join(result["broad"]))
+    if not result["missing"] and not result["broad"]:
+        print("Every planned path exists or is marked (new).")
+
+
+def plan_check(project, item, base=None):
+    """Returns (result, error). The records under project/ are bookkeeping every change
+    touches, so they are never "unplanned"."""
+    rel, text, error = _plan_or_error(project, item)
+    if error:
+        return None, error
+    planned = planned_paths(text)
     base = base or default_branch(project) or "main"
     if str(base).startswith("-"):
         return None, ("base %r is not a git ref here. Pass --base, or fill the charter's "
@@ -2480,14 +2550,7 @@ def plan_check(project, item, base=None):
     unplanned = [f for f in changed if not any(r.match(f) for _, r in regexes)]
     untouched = [p for p, r in regexes if not any(r.match(f) for f in changed)]
     # A plan whose globs match most of the repository cannot fail this check.
-    tracked = [t for t in project.git("ls-files").split("\n") if t]
-    broad = []
-    if len(tracked) >= 20:
-        matched = sum(1 for t in tracked if any(r.match(t) for _, r in regexes))
-        if matched * 2 > len(tracked):
-            broad = [p for p, r in regexes
-                     if sum(1 for t in tracked if r.match(t)) * 10 > len(tracked)]
-            broad = broad or [p for p, _ in regexes]
+    broad = _too_broad(project, regexes)
     return {"item": item, "plan": rel, "base": base, "planned": planned,
             "changed": changed, "unplanned": unplanned, "untouched": untouched,
             "broad": broad}, None
@@ -3542,7 +3605,8 @@ EXAMPLES = {
                "finish ACME-12 --waive verify --by Sam --reason \"no staging DB here\""],
     "guard": ["guard start              # SessionStart hook (reads the hook JSON on stdin)",
               "guard stop               # Stop hook"],
-    "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict"],
+    "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict",
+                   "plan-check ACME-12 --pre"],
     "view": ["view                     # write .ai-sdlc/view/index.html and open it",
              "view --serve             # live page on 127.0.0.1",
              "view --serve --github    # also open GitHub issues and PRs", "view --export-html report.html"],
@@ -3641,7 +3705,11 @@ def main(argv):
                      "branch, else main)")
     chk.add_argument("--json", action="store_true", help="print the result as JSON")
     chk.add_argument("--strict", action="store_true",
-                     help="exit 1 if any file is unplanned or any planned path untouched")
+                     help="exit 1 if any file is unplanned, any planned path untouched, or "
+                     "the plan is too broad to check")
+    chk.add_argument("--pre", action="store_true",
+                     help="before the build: exit 1 if a planned path matches no file and is "
+                     "not marked (new), or the plan is too broad")
     vw = sub.add_parser("view", help="draw the records as an interactive page "
                         "(.ai-sdlc/view/index.html, git-ignored)")
     vw.add_argument("--no-open", action="store_true", help="write the page, do not open it")
@@ -4424,15 +4492,22 @@ def main(argv):
             print_bite(result)
         return 0 if result["bites"] else 1
     if opts.command == "plan-check":
-        result, error = plan_check(project, opts.item, opts.base)
+        if opts.pre:
+            result, error = plan_precheck(project, opts.item)
+        else:
+            result, error = plan_check(project, opts.item, opts.base)
         if error:
             sys.stderr.write("plan-check: %s\n" % error)
             return 2
         if opts.json:
             print(json.dumps(result, indent=2))
+        elif opts.pre:
+            print_plan_precheck(result)
         else:
             print_plan_check(result)
-        gaps = result["unplanned"] or result["untouched"]
+        if opts.pre:
+            return 1 if result["missing"] or result["broad"] else 0
+        gaps = result["unplanned"] or result["untouched"] or result["broad"]
         return 1 if opts.strict and gaps else 0
     if opts.command == "config":
         changes = {}

@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **`plan-check --pre` checks a plan before the build.** It exits `1` when a planned path matches no file and is not marked `(new)`, or when the list matches most of the repository. `/sdlc-plan` runs it for Tier 1 plans, and the plan template explains `(new)`.
+- **`plan-check --strict` now fails a plan that is too broad to check.** The warning added earlier did not affect the exit code.
 - **The installer's banner names unreleased work.** Installing or upgrading from a git checkout ahead of `VERSION` prints, for example, `v4.0.0 + 30 unreleased commits (next release: 5.0.0)`. The manifest still records `VERSION`.
 - **CI runs the Python 3.8 leg on `ubuntu-22.04`.** `setup-python` has no 3.8 build for `ubuntu-latest` (24.04), so that leg failed before any check ran.
 - **`plan-check` counts `.ai-sdlc/bin/`, `profile.json` and `manifest.json`, and warns when a plan's paths match over half the repository.**

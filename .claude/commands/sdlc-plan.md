@@ -47,6 +47,10 @@ Follow `handbook/process/00-operating-model.md`. Specifically:
    `handbook/templates/spec-change.md` and link it from the plan's **Spec changes**
    line (`handbook/process/15-specs.md`); check it with `python3 .ai-sdlc/bin/sdlc.py spec validate`.
 
+   For a Tier 1 plan file, run `python3 .ai-sdlc/bin/sdlc.py plan-check <ID> --pre` and fix
+   what it fails: a path that matches no file (correct it, or mark it `(new)`) and a list
+   too broad for plan-check to fail after the build.
+
 4. **Design review.** Run `/sdlc-review` against the plan. Reviews at this stage read the
    plan and the current code, not a diff.
 

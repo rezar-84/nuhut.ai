@@ -153,7 +153,7 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 
 | | |
 | --- | --- |
-| **Records and checks** | `doctor` audit the records · `verify` run the checks, keep the evidence · `bite` prove a test catches the change · `plan-check` diff vs plan · `finish` close an item: evidence, review, worklog draft, status · `render` materialise `backlog.md` and `worklog.md` from shards |
+| **Records and checks** | `doctor` audit the records · `verify` run the checks, keep the evidence · `bite` prove a test catches the change · `plan-check` diff vs plan (`--pre` before the build) · `finish` close an item: evidence, review, worklog draft, status · `render` materialise `backlog.md` and `worklog.md` from shards |
 | **Viewer and reports** | `view` the project as one page (`--serve` live) · `lens` stack, build, security, deploy, env, agents · `audit` vulnerable packages · `metrics` process measures |
 | **Work items and agents** | `item` per-item shards · `next-id` atomic ID allocation · `claim` / `release` / `claims` · `parallel` · `dispatch` headless multi-worker queue execution · `trailers` commit trailers · `sync` behind the remote? conflicts? · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |
 | **Specs** | `spec list \| show \| validate \| apply` |

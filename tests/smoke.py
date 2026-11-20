@@ -1181,6 +1181,44 @@ def test_runtime():
     check("plan-check --strict fails on a gap", code == 1, out)
     code, out = sdlc("plan-check", "RTX-404", "--base", base)
     check("plan-check explains a missing plan", code == 2 and "no plan" in out, out)
+    write(d, ".ai-sdlc/bin/extra.py", "z = 3\n")
+    write(d, ".ai-sdlc/cache/junk.json", "{}\n")
+    code, out = sdlc("plan-check", "RTX-9", "--base", base, "--json")
+    try:
+        changed = json.loads(out).get("changed", [])
+    except ValueError:
+        changed = []
+    check("plan-check counts the kit runtime but not its cache",
+          ".ai-sdlc/bin/extra.py" in changed and ".ai-sdlc/cache/junk.json" not in changed, out)
+    os.remove(os.path.join(d, ".ai-sdlc/bin/extra.py"))
+    write(d, "docs/project/plans/RTX-8.md", "# Plan\n## Files that change\n- `**`\n## Order of work\n")
+    code, out = sdlc("plan-check", "RTX-8", "--base", base, "--json")
+    try:
+        broad = json.loads(out).get("broad")
+    except ValueError:
+        broad = None
+    check("plan-check flags a plan whose paths match most of the repository", broad == ["**"], out)
+    code, out = sdlc("plan-check", "RTX-8", "--base", base, "--strict")
+    check("plan-check --strict fails a plan that is too broad to check", code == 1 and "too broad" in out, out)
+    # --pre: before the build, every planned path must exist or be marked (new).
+    write(d, "docs/project/plans/RTX-7.md",
+          "# Plan\n## Files that change\n- `src/pay/**`\n- `docs/api.md`\n"
+          "- `src/refund.py` (new)\n- `AGENTS.md`\n## Order of work\n")
+    code, out = sdlc("plan-check", "RTX-7", "--pre", "--json")
+    try:
+        pre = json.loads(out)
+    except ValueError:
+        pre = {}
+    check("plan-check --pre names a planned path that does not exist and is not marked new",
+          code == 1 and pre.get("missing") == ["docs/api.md"] and pre.get("new") == ["src/refund.py"], out)
+    code, out = sdlc("plan-check", "RTX-7", "--pre")
+    check("plan-check --pre says how to resolve a missing path", code == 1 and "(new)" in out and "docs/api.md" in out, out)
+    write(d, "docs/project/plans/RTX-7.md",
+          "# Plan\n## Files that change\n- `src/pay/**`\n- `src/refund.py` (new)\n## Order of work\n")
+    code, out = sdlc("plan-check", "RTX-7", "--pre")
+    check("plan-check --pre passes a plan whose paths exist or are marked new", code == 0, out)
+    code, out = sdlc("plan-check", "RTX-8", "--pre")
+    check("plan-check --pre fails a plan that is too broad", code == 1 and "too broad" in out, out)
 
     # An older install gains the runtime on upgrade; a local edit blocks it.
     os.remove(script)
