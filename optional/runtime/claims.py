@@ -164,6 +164,17 @@ def sync_remote_claims(project, remote="origin"):
     return True, ""
 
 
+def _delete_remote_claim(project, remote, item, expected_sha):
+    """Delete refs/nuhut/claims/<item> on remote only if it still points at expected_sha."""
+    ref = "refs/nuhut/claims/%s" % item
+    ok, _, err = _git_ok(project.root, "push", "--force-with-lease=%s:%s" % (ref, expected_sha),
+                         remote, ":" + ref)
+    if ok or "remote ref does not exist" in err.lower() or "unable to delete" in err.lower():
+        _git_ok(project.root, "update-ref", "-d", "refs/nuhut/remote-claims/%s" % item)
+        return True, ""
+    return False, err
+
+
 def _remote_claim_records(project):
     out = {}
     refs = _git(
@@ -517,6 +528,10 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
                 )
             return None, "remote claim push failed for %s: %s" % (item, err_p)
         _git_ok(project.root, "update-ref", "refs/nuhut/remote-claims/%s" % item, commit_sha)
+        # Remember which remote lease is ours, so release can delete it compare-and-swap.
+        record["ref_sha"] = commit_sha
+        with open(target, "w", encoding="utf-8") as h:
+            json.dump(record, h, indent=2)
 
     def _rollback_claim():
         try:
@@ -524,8 +539,7 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
         except OSError:
             pass
         if sync_refs:
-            _git_ok(project.root, "push", remote, ":refs/nuhut/claims/%s" % item)
-            _git_ok(project.root, "update-ref", "-d", "refs/nuhut/remote-claims/%s" % item)
+            _delete_remote_claim(project, remote, item, commit_sha)
 
     exists = bool(_git(project, "rev-parse", "--verify", "--quiet", branch).strip())
     if path:
@@ -602,8 +616,27 @@ def release(project, item, remove_worktree=False, agent=None, force=False,
     if os.path.exists(target):
         with open(target, encoding="utf-8") as h:
             record = json.load(h)
-    elif sync_refs:
-        record = _remote_claim_records(project).get(item)
+    remote_sha = ""
+    if sync_refs:
+        # The remote lease is the truth; a local record may be stale.
+        remote_sha = _git(project, "rev-parse", "--verify", "--quiet",
+                          "refs/nuhut/remote-claims/%s" % item).strip()
+        remote_rec = _remote_claim_records(project).get(item) if remote_sha else None
+        if record and record.get("synced"):
+            ours = record.get("ref_sha") or ""
+            if remote_sha and ours != remote_sha:
+                if not force:
+                    try:
+                        os.remove(target)
+                    except OSError:
+                        pass
+                    return None, ("%s was taken over on %s by %s since %s; dropped the stale "
+                                  "local claim record and left the remote lease alone" % (
+                                      item, remote, (remote_rec or {}).get("agent", "?"),
+                                      (remote_rec or {}).get("since", "?")))
+                record = remote_rec or record
+        elif remote_rec:
+            record = remote_rec
 
     if not record:
         return None, "%s is not claimed" % item
@@ -625,11 +658,11 @@ def release(project, item, remove_worktree=False, agent=None, force=False,
         if not ok:
             return None, "git worktree remove failed: %s" % (err_s or out_s)
 
-    if sync_refs:
-        ok_p, _, err_p = _git_ok(project.root, "push", remote, ":refs/nuhut/claims/%s" % item)
-        if not ok_p and "remote ref does not exist" not in err_p.lower() and "unable to delete" not in err_p.lower():
-            return None, "failed to delete remote claim %s on %s: %s" % (item, remote, err_p)
-        _git_ok(project.root, "update-ref", "-d", "refs/nuhut/remote-claims/%s" % item)
+    if sync_refs and remote_sha:
+        ok_p, err_p = _delete_remote_claim(project, remote, item, remote_sha)
+        if not ok_p:
+            return None, ("remote claim %s on %s changed since it was checked; nothing was "
+                          "released: %s" % (item, remote, err_p))
 
     try:
         os.remove(target)

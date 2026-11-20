@@ -22,30 +22,49 @@ Harden `optional/runtime/view.py` and viewer JS (`optional/runtime/view/`), buil
 
 ## Files that change
 
-- `optional/runtime/**`
-- `optional/hooks/**`
-- `optional/git-hooks/**`
-- `optional/skills/**`
-- `template/**`
-- `install.py`
-- `validate.py`
-- `tests/smoke.py`
-- `docs/**`
-- `benchmarks/**`
-- `handbook/**`
-- `.github/workflows/**`
-- `.agents/**`
-- `.claude/**`
-- `.cursor/**`
-- `.gemini/**`
+- `.agents/skills/**`
+- `.ai-sdlc/bin/**`
+- `.ai-sdlc/manifest.json`
+- `.ai-sdlc/profile.json`
+- `.claude/commands/**`
+- `.claude/hooks/**`
+- `.claude/settings.json`
+- `.claude/skills/**`
+- `.cursor/hooks.json`
+- `.cursor/rules/**`
 - `.cursorrules`
+- `.gemini/settings.json`
+- `.github/workflows/**`
 - `.gitignore`
 - `AGENTS.md`
+- `CHANGES-REPORT.md`
 - `CLAUDE.md`
 - `GEMINI.md`
-- `README.md`
-- `CHANGELOG.md`
-- `CHANGES-REPORT.md`
+- `handbook/CARD.md`
+- `handbook/README.md`
+- `handbook/process/**`
+- `handbook/roles/**`
+- `handbook/templates/**`
+- `install.py`
+- `optional/git-hooks/**`
+- `optional/hooks/**`
+- `optional/runtime/**`
+- `optional/skills/**`
+- `template/AGENTS.md`
+- `template/docs/CARD.md`
+- `template/docs/process/02-role-reviews.md`
+- `template/docs/process/06-evidence-and-claims.md`
+- `template/docs/process/07-traceability.md`
+- `template/docs/roles/accessibility.md`
+- `template/docs/roles/data-engineer.md`
+- `template/docs/roles/ml-engineer.md`
+- `template/docs/roles/qa.md`
+- `template/docs/roles/security.md`
+- `template/docs/roles/ux-designer.md`
+- `tests/smoke.py`
+- `validate.py`
+
+_Amended 2026-11-15 after the kit-v5 ship re-review (finding C1): the earlier list was 24 repo-wide globs shared by NUHT-001..003, so plan-check could not fail. This list is what the item's commits touched. The three items share one branch, so run `sdlc.py plan-check NUHT-001 --base main`; files from later items on the branch still show as unplanned._
 
 ## Order of work
 

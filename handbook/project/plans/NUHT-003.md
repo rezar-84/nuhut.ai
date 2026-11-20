@@ -22,30 +22,46 @@ Implement `optional/runtime/dispatch.py` (`sdlc.py dispatch`) and wire factory t
 
 ## Files that change
 
-- `optional/runtime/**`
-- `optional/hooks/**`
-- `optional/git-hooks/**`
-- `optional/skills/**`
-- `template/**`
-- `install.py`
-- `validate.py`
-- `tests/smoke.py`
-- `docs/**`
-- `benchmarks/**`
-- `handbook/**`
-- `.github/workflows/**`
-- `.agents/**`
-- `.claude/**`
-- `.cursor/**`
-- `.gemini/**`
-- `.cursorrules`
+- `.ai-sdlc/bin/dispatch.py`
+- `.ai-sdlc/bin/finish.py`
+- `.ai-sdlc/bin/sdlc.py`
+- `.ai-sdlc/bin/shards.py`
+- `.ai-sdlc/bin/view.html`
+- `.ai-sdlc/bin/view.py`
+- `.ai-sdlc/manifest.json`
+- `.ai-sdlc/profile.json`
 - `.gitignore`
-- `AGENTS.md`
-- `CLAUDE.md`
-- `GEMINI.md`
-- `README.md`
 - `CHANGELOG.md`
-- `CHANGES-REPORT.md`
+- `README.md`
+- `benchmarks/effort-modes/**`
+- `benchmarks/kit-value/README.md`
+- `benchmarks/kit-value/measure.py`
+- `benchmarks/kit-value/run.py`
+- `benchmarks/kit-value/tasks/copy-fix/safety.sh`
+- `docs/cli.md`
+- `docs/multi-agent.md`
+- `docs/roadmap.md`
+- `docs/runtime.md`
+- `handbook/CARD.md`
+- `handbook/process/00-operating-model.md`
+- `handbook/process/07-traceability.md`
+- `install.py`
+- `optional/runtime/dispatch.py`
+- `optional/runtime/finish.py`
+- `optional/runtime/sdlc.py`
+- `optional/runtime/shards.py`
+- `optional/runtime/view.html`
+- `optional/runtime/view.py`
+- `optional/runtime/view/js/12-dashboard.js`
+- `optional/runtime/view/js/15-dashboard-doctor.js`
+- `template/docs/CARD.md`
+- `template/docs/process/00-operating-model.md`
+- `template/docs/process/07-traceability.md`
+- `template/docs/project/charter.md`
+- `tests/smoke.py`
+- `validate.py`
+
+_Amended 2026-11-15 after the kit-v5 ship re-review (finding C1): the earlier list was 24 repo-wide globs shared by NUHT-001..003, so plan-check could not fail. This list is what the item's commits touched. The three items share one branch, so run `sdlc.py plan-check NUHT-003 --base c5118ca`; files from later items on the branch still show as unplanned._
 
 ## Order of work
 

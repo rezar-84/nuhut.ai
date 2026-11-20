@@ -374,7 +374,32 @@ def eval_work_item_id(payload, cwd, root):
     after = commit_args_after_git_commit(cmd)
     if not COMMIT_MSG_FLAG_RE.search(after):
         return None
+    # A commit that provably targets a different repository (a literal `cd`/`-C` path
+    # outside this project) is not this project's to trace. Unresolvable targets, such
+    # as shell variables, stay enforced.
+    if not _same_repository(resolve_git_worktree(cmd, cwd, root), root):
+        return None
     return check_work_item_message(root, cmd)
+
+
+def _git_common_dir(path):
+    try:
+        proc = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                              cwd=path, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, timeout=5)
+    except Exception:
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return os.path.realpath(proc.stdout.decode("utf-8", "replace").strip())
+
+
+def _same_repository(target, root):
+    if os.path.realpath(target) == os.path.realpath(root):
+        return True
+    a, b = _git_common_dir(target), _git_common_dir(root)
+    # Fail closed: only a target that is provably its own repository is skipped.
+    return not a or a == b
 
 
 def eval_protected_paths(payload, cwd, root):

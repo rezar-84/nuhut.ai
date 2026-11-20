@@ -2413,8 +2413,11 @@ def changed_files(project, base):
     names.update(project.git("diff", "--name-only", "HEAD").split("\n"))
     names.update(project.git("ls-files", "--others", "--exclude-standard").split("\n"))
     records = project.docs.rstrip("/") + "/project/"
+    # .ai-sdlc/ holds generated state (ledger, cache, dispatch logs, backups), which every
+    # change touches. Its runtime, profile and manifest are real changes and are counted.
+    counted = (".ai-sdlc/bin/", ".ai-sdlc/profile.json", ".ai-sdlc/manifest.json")
     res = sorted(n for n in names if n and not n.startswith(records)
-                 and not n.startswith(".ai-sdlc/"))
+                 and (not n.startswith(".ai-sdlc/") or n.startswith(counted)))
     if cache is not None:
         cache[key] = res
     return res
@@ -2476,8 +2479,18 @@ def plan_check(project, item, base=None):
     regexes = [(p, glob_regex(p)) for p in planned]
     unplanned = [f for f in changed if not any(r.match(f) for _, r in regexes)]
     untouched = [p for p, r in regexes if not any(r.match(f) for f in changed)]
+    # A plan whose globs match most of the repository cannot fail this check.
+    tracked = [t for t in project.git("ls-files").split("\n") if t]
+    broad = []
+    if len(tracked) >= 20:
+        matched = sum(1 for t in tracked if any(r.match(t) for _, r in regexes))
+        if matched * 2 > len(tracked):
+            broad = [p for p, r in regexes
+                     if sum(1 for t in tracked if r.match(t)) * 10 > len(tracked)]
+            broad = broad or [p for p, _ in regexes]
     return {"item": item, "plan": rel, "base": base, "planned": planned,
-            "changed": changed, "unplanned": unplanned, "untouched": untouched}, None
+            "changed": changed, "unplanned": unplanned, "untouched": untouched,
+            "broad": broad}, None
 
 
 def print_plan_check(result):
@@ -2500,7 +2513,11 @@ def print_plan_check(result):
     for p in result["untouched"]:
         print("%swarn  untouched   %s  (in the plan, but nothing matching it changed)%s"
               % (c_yellow, p, c_reset))
-    if not result["unplanned"] and not result["untouched"]:
+    if result.get("broad"):
+        print("%swarn  too broad   the plan's paths match over half the repository, so this "
+              "check cannot find gaps. Narrow: %s%s"
+              % (c_red, ", ".join(result["broad"]), c_reset))
+    if not result["unplanned"] and not result["untouched"] and not result.get("broad"):
         print("%sThe diff matches the plan's file list. Whether it matches the plan's intent "
               "is the review's conformance pass.%s" % (c_green, c_reset))
     else:
@@ -3764,7 +3781,7 @@ def main(argv):
     cl.add_argument("--json", action="store_true")
     rl = sub.add_parser("release", help="free a claimed item")
     rl.add_argument("item")
-    rl.add_argument("--agent", help="assert caller identity before releasing")
+    rl.add_argument("--agent", help="who is releasing (default: the identity trailers would use)")
     rl.add_argument("--force", action="store_true", help="override agent/host ownership check")
     rl.add_argument("--remove-worktree", action="store_true", help="also remove its worktree (refused when dirty)")
     rl.add_argument("--sync-refs", dest="sync_refs", action="store_true",
@@ -4263,7 +4280,7 @@ def main(argv):
         if opts.command == "release":
             record, error = claims_mod.release(
                 project, opts.item, opts.remove_worktree,
-                agent=getattr(opts, "agent", None),
+                agent=getattr(opts, "agent", None) or identity(None, None)[0],
                 force=getattr(opts, "force", False),
                 sync_refs=getattr(opts, "sync_refs", False),
             )

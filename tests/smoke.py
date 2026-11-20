@@ -688,6 +688,13 @@ def test_hooks():
         check("a commit with an ID is allowed", "deny" not in out, out)
         out = fire("work-item-id.sh", {"tool_input": {"command": "ls"}})
         check("an unrelated command is allowed", "deny" not in out, out)
+        foreign = tempfile.mkdtemp(prefix="sdlc-foreign-")
+        subprocess.call(["git", "init", "-q", foreign])
+        out = fire("work-item-id.sh", {"tool_input": {"command": 'cd %s && git commit -m "init"' % foreign}})
+        check("a commit provably in another repository is not traced", "deny" not in out, out)
+        out = fire("work-item-id.sh", {"tool_input": {"command": 'cd $SOMEWHERE && git commit -m "init"'}})
+        check("a commit whose target cannot be resolved stays enforced", '"permissionDecision":"deny"' in out, out)
+        shutil.rmtree(foreign, ignore_errors=True)
         out = fire("protected-paths.sh", {"tool_input": {"file_path": "package-lock.json"}})
         check("an unlisted path is allowed", "deny" not in out, out)
         out = fire("protected-paths.sh", {"tool_input": {"file_path": ".ai-sdlc/protected.txt"}})
@@ -3230,7 +3237,7 @@ def test_claims():
     code, out = sdlc(repo, "claim", "CLX-6", "--no-worktree")
     check("an item with an unfinished dependency cannot be claimed", code == 1 and "CLX-9" in out, out)
     write(wt, "scratch.txt", "work in progress\n")
-    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree")
+    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree", "--agent", "agent-a")
     check("release refuses to remove a dirty worktree", code == 1 and "uncommitted" in out and os.path.isdir(wt), out)
     os.remove(os.path.join(wt, "scratch.txt"))
     # A claim on a finished item is reported until it is released.
@@ -3241,7 +3248,7 @@ def test_claims():
         "| CLX-2 | Billing page | 2 | software-engineer |  | Ready |", "| CLX-2 | Billing page | 2 | software-engineer |  | Done |"))
     code, out = sdlc(repo, "doctor")
     check("doctor flags a claim on a finished item", "claim CLX-2" in out and "still claimed" in out, out[-600:])
-    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree")
+    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree", "--agent", "agent-a")
     check("release frees the claim and removes a clean worktree", code == 0 and not os.path.isdir(wt), out)
     code_wrong, out_wrong = sdlc(repo, "release", "CLX-2", "--agent", "agent-other")
     check("release refuses another agent's claim without --force",
@@ -4158,6 +4165,26 @@ def test_distributed_git_refs():
           rc_rel == 0 and json.loads(out_rel)["released"] == "DST-001", out_rel)
     rc_cb2, out_cb2 = sdlc(clone_b, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-b", "--json")
     check("clone_b can claim DST-001 once worker-a releases it", rc_cb2 == 0, out_cb2)
+
+    # Stale local record: worker-a's claim is force-released and re-taken by worker-b on
+    # another clone. worker-a's later release must not delete worker-b's lease.
+    sdlc(clone_b, "release", "DST-001", "--sync-refs", "--agent", "worker-b")
+    rc_a2, out_a2 = sdlc(clone_a, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-a")
+    rc_fr, out_fr = sdlc(clone_b, "release", "DST-001", "--sync-refs", "--force")
+    rc_b3, out_b3 = sdlc(clone_b, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-b")
+    check("setup: worker-b re-claims DST-001 after force-release",
+          rc_a2 == 0 and rc_fr == 0 and rc_b3 == 0, out_a2 + out_fr + out_b3)
+    rc_stale, out_stale = sdlc(clone_a, "release", "DST-001", "--sync-refs", "--agent", "worker-a")
+    remote_ref = subprocess.run(["git", "--git-dir", origin, "for-each-ref", "refs/nuhut/claims/DST-001"],
+                                stdout=subprocess.PIPE, universal_newlines=True).stdout.strip()
+    check("stale release is refused and leaves worker-b's remote lease intact",
+          rc_stale == 1 and "worker-b" in out_stale and remote_ref, out_stale + remote_ref)
+
+    # release without --agent defaults to the caller's identity, so it cannot free
+    # another agent's claim without --force.
+    rc_noag, out_noag = sdlc(clone_b, "release", "DST-001", "--sync-refs")
+    check("release without --agent does not free worker-b's claim",
+          rc_noag == 1 and "worker-b" in out_noag, out_noag)
     shutil.rmtree(d, ignore_errors=True)
 
 
