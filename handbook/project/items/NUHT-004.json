@@ -5,7 +5,7 @@
   "tier": "2",
   "effort": "",
   "owner": "devops-sre",
-  "status": "In progress",
+  "status": "Done",
   "depends": [],
   "touch": [
     ".github/workflows/ci.yml",
@@ -16,7 +16,7 @@
   ],
   "created": "2026-11-21",
   "updated": "2026-11-21",
-  "completed": "",
+  "completed": "2026-11-21",
   "summary": "",
   "approvers": [],
   "waiting_on": "",
