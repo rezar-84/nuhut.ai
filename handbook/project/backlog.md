@@ -36,6 +36,7 @@ is prioritised.
 
 | ID | Task | Tier | Owner role | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
+| NUHT-010 | Guided installer draws 40 columns on Python 3.8-3.10 when the terminal reports size 0 (touch: install_ui.py, tests/smoke.py, CHANGELOG.md) | 2 | qa |  | In progress |
 
 ## Next
 

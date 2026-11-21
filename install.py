@@ -2011,7 +2011,7 @@ class Wizard(object):
 
     @staticmethod
     def term_cols():
-        return shutil.get_terminal_size((80, 24)).columns
+        return Term._size()[0]
 
     def show_files(self):
         new, kept = preview_files(self)

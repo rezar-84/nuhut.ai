@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-010",
+  "title": "Guided installer draws 40 columns on Python 3.8-3.10 when the terminal reports size 0",
+  "type": "defect",
+  "tier": "2",
+  "effort": "",
+  "owner": "qa",
+  "status": "In progress",
+  "depends": [],
+  "touch": [
+    "install_ui.py",
+    "tests/smoke.py",
+    "CHANGELOG.md"
+  ],
+  "created": "2026-11-21",
+  "updated": "2026-11-21",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "backlog owner",
+  "park_reason": "Discovered item triage: accept into Ready, defer, or drop (charter Discovered defects policy is Parked (human triage required))",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

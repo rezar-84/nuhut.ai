@@ -95,11 +95,18 @@ class Term(object):
             os.system("")                             # turns on VT escape handling
         return self.rich
 
+    @staticmethod
+    def _size():
+        # Python 3.8-3.10 return 0x0 rather than the fallback when the terminal reports a
+        # size of 0 (an unsized pty, some IDE and container consoles); 3.11 fixed that.
+        size = shutil.get_terminal_size((80, 24))
+        return (size.columns if size.columns > 0 else 80, size.lines if size.lines > 0 else 24)
+
     def width(self):
-        return max(40, shutil.get_terminal_size((80, 24)).columns)
+        return max(40, self._size()[0])
 
     def height(self):
-        return max(10, shutil.get_terminal_size((80, 24)).lines)
+        return max(10, self._size()[1])
 
     def _count(self, text):
         width = self.width()

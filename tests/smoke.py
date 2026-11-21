@@ -190,6 +190,15 @@ def test_guards():
         os.environ["TERM"] = "dumb"
         term_dumb = installer.Term()
         check("TERM=dumb disables bold ANSI", term_dumb.B == "")
+        # Python 3.8-3.10 return a 0x0 size, not the fallback, for a terminal that reports 0.
+        real_size = shutil.get_terminal_size
+        shutil.get_terminal_size = lambda fallback=(80, 24): os.terminal_size((0, 0))
+        try:
+            check("a terminal that reports size 0 is drawn at the 80x24 fallback, not 40 columns",
+                  term_dumb.width() == 80 and term_dumb.height() == 24,
+                  "%sx%s" % (term_dumb.width(), term_dumb.height()))
+        finally:
+            shutil.get_terminal_size = real_size
     finally:
         if orig_no_color is not None:
             os.environ["NO_COLOR"] = orig_no_color
