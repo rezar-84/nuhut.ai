@@ -36,7 +36,6 @@ is prioritised.
 
 | ID | Task | Tier | Owner role | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
-| NUHT-010 | Guided installer draws 40 columns on Python 3.8-3.10 when the terminal reports size 0 (touch: install_ui.py, tests/smoke.py, CHANGELOG.md) | 2 | qa |  | In progress |
 
 ## Next
 
@@ -79,6 +78,7 @@ permanent record, and the entry is found by ID.
 
 | ID | Task | Tier | Owner role | Depends on | Status | Completed |
 | --- | --- | --- | --- | --- | --- | --- |
+| NUHT-010 | Guided installer draws 40 columns on Python 3.8-3.10 when the terminal reports size 0 (touch: install_ui.py, tests/smoke.py, CHANGELOG.md) | 2 | qa |  | Done | 2026-11-21 |
 | NUHT-006 | plan-check --pre: refuse plans that name missing files before the build (touch: optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, tests/smoke.py, docs/cli.md, README.md, CHANGELOG.md) | 2 | architect |  | Done | 2026-11-21 |
 | NUHT-005 | Review triage: paraphrase step and Contest/Escalate/Fix/Decline responses, escalations in Needs you (touch: template/docs/process/02-role-reviews.md, template/docs/templates/role-review.md, handbook/process/02-role-reviews.md, handbook/templates/role-review.md, optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, .claude/commands/sdlc-review.md, optional/commands/**, tests/smoke.py, CHANGELOG.md, docs/**) | 2 | qa |  | Done | 2026-11-21 |
 | NUHT-004 | Release hygiene: CI Python 3.8 runner, installer names the unreleased version (touch: .github/workflows/ci.yml, install.py, tests/smoke.py, CHANGELOG.md, docs/install.md) | 2 | devops-sre |  | Done | 2026-11-21 |
