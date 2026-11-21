@@ -1,12 +1,12 @@
 ---
-status: proposed
+status: approved
 owner: rezar-84
 last-reviewed: 2026-11-13
 ---
 
 # ADR 0001 — v5 Software Factory architecture (unified Python hooks, sharded records, and headless dispatch)
 
-- **Status:** Proposed
+- **Status:** Approved (rezar-84, 2026-11-21)
 - **Date:** 2026-11-13
 - **Deciders:** rezar-84
 - **Work item:** NUHT-001, NUHT-002, NUHT-003

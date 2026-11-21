@@ -37,10 +37,6 @@ can require it. `independent` meets both gates. `fresh-context` never meets the
 - One more charter row, and one more value in `review --json`. Both are contracts installed
   projects consume.
 
-## Version facts
-
-No external versions are involved.
-
 ## Alternatives considered
 
 ### Treat fresh-context as independent

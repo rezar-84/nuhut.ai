@@ -30,6 +30,153 @@ last-reviewed: 2026-11-13
 
 <!-- New entries go here, above the older ones. -->
 
+## NUHT-006 — plan-check --pre: refuse plans that name missing files before the build (touch: optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, tests/smoke.py, docs/cli.md, README.md, CHANGELOG.md)
+
+**Date:** 2026-11-21 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v5` / `4ba9260..b34ee52`
+
+### What changed
+
+- fix(NUHT-005): make the escalation gate fail closed (b34ee52)
+- fix(NUHT-006): read git paths unquoted; accept (new) inside the backticks (3bbff99)
+- feat(NUHT-006): plan-check --pre checks a plan before the build; --strict fails too-broad plans (568f999)
+- docs(NUHT-007): plan and ADR 0002 for a fresh-context review level; file NUHT-005..009 (4ba9260)
+
+Files: `CHANGELOG.md`, `docs/cli.md`, `docs/viewer.md`, `optional/runtime/finish.py`, `optional/runtime/sdlc.py`, `tests/smoke.py`, `README.md`, `handbook/templates/plan.md`, `optional/claude-commands/sdlc-plan.md`, `template/docs/templates/plan.md`
+
+### Why
+
+A plan's file list was only checked after the build, and the too-broad warning from 0831487 did not affect --strict, so the vacuous-plan failure from the NUHT-002 re-review (C1) could still pass a gate. Rejected: checking function signatures like EGM's readiness stage, which needs a parser per language and breaks the stdlib, stack-agnostic rule.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261121T000412Z, commit b34ee52
+- `checks.unit` — Verified: pass — run 20261121T000412Z, commit b34ee52
+- `checks.integration` — Verified: pass — run 20261121T000412Z, commit b34ee52
+- `checks.build` — Verified: pass — run 20261121T000412Z, commit b34ee52
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+0831487 shipped the .ai-sdlc/bin counting and the too-broad warning without tests; tests added here. Ship review F4: git's quotePath broke glob matching for non-ASCII names in every plan-check (pre-existing), fixed in 3bbff99.
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+A plan's file list was only checked after the build, and the too-broad warning from 0831487 did not affect --strict, so the vacuous-plan failure from the NUHT-002 re-review (C1) could still pass a gate. Rejected: checking function signatures like EGM's readiness stage, which needs a parser per language and breaks the stdlib, stack-agnostic rule.
+
+### Reviews
+
+Fresh-context ship review (claude-code subagent, same model family as the author, so recorded as a self-check) of 0831487..821415b: Pass with conditions, 5 x S3 and 3 x S4. All fixed in 6ecebdc/3bbff99/b34ee52 with failing-first smoke tests. F4 and part of F8 were this item's.
+
+## NUHT-005 — Review triage: paraphrase step and Contest/Escalate/Fix/Decline responses, escalations in Needs you (touch: template/docs/process/02-role-reviews.md, template/docs/templates/role-review.md, handbook/process/02-role-reviews.md, handbook/templates/role-review.md, optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, .claude/commands/sdlc-review.md, optional/commands/, tests/smoke.py, CHANGELOG.md, docs/)
+
+**Date:** 2026-11-21 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v5` / `4ba9260..b34ee52`
+
+### What changed
+
+- fix(NUHT-005): make the escalation gate fail closed (b34ee52)
+- feat(NUHT-005): answer review findings (Fix/Contest/Escalate/Decline); paraphrase-first design reviews (821415b)
+- docs(NUHT-007): plan and ADR 0002 for a fresh-context review level; file NUHT-005..009 (4ba9260)
+
+Files: `CHANGELOG.md`, `docs/cli.md`, `docs/viewer.md`, `optional/runtime/finish.py`, `optional/runtime/sdlc.py`, `tests/smoke.py`, `handbook/process/02-role-reviews.md`, `handbook/templates/role-review.md`, `optional/claude-commands/sdlc-review.md`, `optional/runtime/view.html`, `optional/runtime/view/js/12-dashboard.js`, `template/docs/process/02-role-reviews.md` (+1 more)
+
+### Why
+
+From the Elephant-Goldfish Model comparison: reviews had no structured author answer, so a finding only a person can settle had nowhere to wait. Escalations now block finish and show in Needs you. Rejected: a doctor fail for open escalations, which would turn every pending decision into a red failure; a warn routed to Needs you matches 'waiting on a person'.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261120T234923Z, commit b34ee52
+- `checks.unit` — Verified: pass — run 20261120T234923Z, commit b34ee52
+- `checks.integration` — Verified: pass — run 20261120T234923Z, commit b34ee52
+- `checks.build` — Verified: pass — run 20261120T234923Z, commit b34ee52
+
+### Not done
+
+NUHT-007 (fresh-context review level) is Parked for owner approval; NUHT-008/009 Deferred.
+
+### Discovered
+
+Ship review F1-F3: the first parser failed open (escaped pipes, 'pending' in Decided by, 'Escalated', column order, '### Responses'). Fixed in b34ee52.
+
+### Decisions
+
+none (ADR 0002 is NUHT-007's, proposed)
+
+### Assumptions used
+
+none
+
+### Plan
+
+From the Elephant-Goldfish Model comparison: reviews had no structured author answer, so a finding only a person can settle had nowhere to wait. Escalations now block finish and show in Needs you. Rejected: a doctor fail for open escalations, which would turn every pending decision into a red failure; a warn routed to Needs you matches 'waiting on a person'.
+
+### Reviews
+
+Fresh-context ship review (claude-code subagent, same model family as the author, so recorded as a self-check) of 0831487..821415b: Pass with conditions, 5 x S3 and 3 x S4. All fixed in 6ecebdc/3bbff99/b34ee52 with failing-first smoke tests. F1-F3, F6-F8 were this item's.
+
+## NUHT-004 — Release hygiene: CI Python 3.8 runner, installer names the unreleased version (touch: .github/workflows/ci.yml, install.py, tests/smoke.py, CHANGELOG.md, docs/install.md)
+
+**Date:** 2026-11-21 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v5` / `3b18878..6ecebdc`
+
+### What changed
+
+- fix(NUHT-004): a shallow clone says its unreleased state is unknown (6ecebdc)
+- fix(NUHT-004): run CI's Python 3.8 leg on ubuntu-22.04; installer names unreleased work (3b18878)
+
+Files: `CHANGELOG.md`, `install.py`, `tests/smoke.py`, `.github/workflows/ci.yml`, `docs/install.md`
+
+### Why
+
+CI's 3.8 leg failed at setup-python on ubuntu-latest (24.04 has no 3.8 build), and installs from kit-v5 printed v4.0.0 with nothing saying the code was unreleased. Rejected: bumping VERSION to 5.0.0 by hand. tools/semver.py takes the last commit that changed VERSION as the release base, so a manual bump would leave the merge to main with nothing to release, and no v5.0.0 tag would be created. Rejected: stamping a dev version into the manifest, which would churn AGENTS.md and the manifest on every commit and break upgrade comparisons.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261120T235639Z, commit b34ee52
+- `checks.unit` — Verified: pass — run 20261120T235639Z, commit b34ee52
+- `checks.integration` — Verified: pass — run 20261120T235639Z, commit b34ee52
+- `checks.build` — Verified: pass — run 20261120T235639Z, commit b34ee52
+
+### Not done
+
+ubuntu-22.04 will be retired by GitHub at some point; then the 3.8 leg needs a container image (python:3.8). Not filed yet: no retirement date is known (Unknown).
+
+### Discovered
+
+Version workflow on main fails at 'Validate before releasing' (smoke tests fail on main at 4907e16), so no release has ever been tagged, not even v4.0.0 (Reported: GitHub Actions API, runs on 2026-11-06..10). kit-v5's smoke passes, so the merge should clear it.
+
+### Decisions
+
+none
+
+### Assumptions used
+
+setup-python ships 3.8 for ubuntu-22.04 (Assumed; confirmed only when CI runs on push).
+
+### Plan
+
+CI's 3.8 leg failed at setup-python on ubuntu-latest (24.04 has no 3.8 build), and installs from kit-v5 printed v4.0.0 with nothing saying the code was unreleased. Rejected: bumping VERSION to 5.0.0 by hand. tools/semver.py takes the last commit that changed VERSION as the release base, so a manual bump would leave the merge to main with nothing to release, and no v5.0.0 tag would be created. Rejected: stamping a dev version into the manifest, which would churn AGENTS.md and the manifest on every commit and break upgrade comparisons.
+
+### Reviews
+
+Fresh-context ship review (claude-code subagent, same model family as the author, so recorded as a self-check) of 0831487..821415b: Pass with conditions, 5 x S3 and 3 x S4. All fixed in 6ecebdc/3bbff99/b34ee52 with failing-first smoke tests. F5 (shallow clone) was this item's.
+
 ## NUHT-003 — M3: Multi-worker headless dispatcher (dispatch.py), self-healing defect policy & effort-modes benchmark suite
 
 **Date:** 2026-11-13 **Tier:** 1 **Effort:** Normal
@@ -80,6 +227,10 @@ gh or glab CLI installed when --pr is requested
 - [NUHT-003-design.md](reviews/NUHT-003-design.md)
 - [NUHT-003-ship.md](reviews/NUHT-003-ship.md)
 
+### Approval
+
+Merge to `main` and release `v5.0.0` approved by rezar-84 on 2026-11-21, in the session. One approver: the charter lists one (`Approvers: rezar-84`), while `process/05-change-control.md` asks for two at Tier 1. The charter row "May merge to the default branch" is `no`; rezar-84 authorised the agent to run this one merge, and the row is unchanged.
+
 ## NUHT-002 — M2: Sharded zero-conflict store, git-ref leases, Tier 2 parallel scope globs, universal --json & cached doctor
 
 **Date:** 2026-11-13 **Tier:** 1 **Effort:** Normal
@@ -129,6 +280,10 @@ Git 2.20+ available for worktrees and --force-with-lease ref pushes
 - [NUHT-002-design.md](reviews/NUHT-002-design.md)
 - [NUHT-002-ship.md](reviews/NUHT-002-ship.md)
 
+### Approval
+
+Merge to `main` and release `v5.0.0` approved by rezar-84 on 2026-11-21, in the session. One approver: the charter lists one (`Approvers: rezar-84`), while `process/05-change-control.md` asks for two at Tier 1. The charter row "May merge to the default branch" is `no`; rezar-84 authorised the agent to run this one merge, and the row is unchanged.
+
 ## NUHT-001 — M1: Control-plane security hardening, unified Python hook engine, runtime bug fixes & contract reconciliation
 
 **Date:** 2026-11-13 **Tier:** 1 **Effort:** Normal
@@ -177,3 +332,7 @@ Python 3.8+ available on developer and CI machines
 
 - [NUHT-001-design.md](reviews/NUHT-001-design.md)
 - [NUHT-001-ship.md](reviews/NUHT-001-ship.md)
+
+### Approval
+
+Merge to `main` and release `v5.0.0` approved by rezar-84 on 2026-11-21, in the session. One approver: the charter lists one (`Approvers: rezar-84`), while `process/05-change-control.md` asks for two at Tier 1. The charter row "May merge to the default branch" is `no`; rezar-84 authorised the agent to run this one merge, and the row is unchanged.

@@ -46,3 +46,7 @@ Python 3.8+ available on developer and CI machines
 
 - [NUHT-001-design.md](reviews/NUHT-001-design.md)
 - [NUHT-001-ship.md](reviews/NUHT-001-ship.md)
+
+### Approval
+
+Merge to `main` and release `v5.0.0` approved by rezar-84 on 2026-11-21, in the session. One approver: the charter lists one (`Approvers: rezar-84`), while `process/05-change-control.md` asks for two at Tier 1. The charter row "May merge to the default branch" is `no`; rezar-84 authorised the agent to run this one merge, and the row is unchanged.

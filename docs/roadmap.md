@@ -57,7 +57,7 @@ already make small work cheap, once the checks respect them.
 | B, finishing tools | Done (`8ca7125`) | `sdlc.py finish <ID>` and `/sdlc-finish`; `verify --item`; named waivers that never count as Verified and are refused at Tier 1; the finish-guard Stop hook; `doctor --baseline` ratchet; the charter allowlist; record repairs that preview before writing. |
 | Dashboard | Done (`97871c4`) | Needs you pages and groups; the cards are balanced. |
 | Software Factory (`kit-v5`) | Done (`kit-v5`) | Unified Python stdlib hooks (`hooks.py`, Gemini Stop guard, zero `jq`); hardened `view --serve` (`HttpOnly` cookie + `Origin` check); sharded zero-conflict store (`items/`, `worklog/`, `ledger/`, `fix migrate-shards`); `--sync-refs` git-ref CAS leases + `next-id`; `<500ms` incremental `doctor` cache; `sdlc.py dispatch`; `Discovered defects` triage policy; multi-harness `kit-value` and 5-task `effort-modes` benchmarks. |
-| Release `v5.0.0` | Gated on owner merge | Merge `kit-v5` → `main` and tag `v5.0.0` after human review. |
+| Release `v5.0.0` | Approved by `rezar-84` on 2026-11-21 | `kit-v5` merged to `main`; the Version workflow bumps `VERSION` and tags `v5.0.0`. |
 
 ### Trial (next)
 

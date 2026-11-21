@@ -36,9 +36,6 @@ is prioritised.
 
 | ID | Task | Tier | Owner role | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
-| NUHT-004 | Release hygiene: CI Python 3.8 runner, installer names the unreleased version (touch: .github/workflows/ci.yml, install.py, tests/smoke.py, CHANGELOG.md, docs/install.md) | 2 | devops-sre |  | In progress |
-| NUHT-005 | Review triage: paraphrase step and Contest/Escalate/Fix/Decline responses, escalations in Needs you (touch: template/docs/process/02-role-reviews.md, template/docs/templates/role-review.md, handbook/process/02-role-reviews.md, handbook/templates/role-review.md, optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, .claude/commands/sdlc-review.md, optional/commands/**, tests/smoke.py, CHANGELOG.md, docs/**) | 2 | qa |  | In review |
-| NUHT-006 | plan-check --pre: refuse plans that name missing files before the build (touch: optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, tests/smoke.py, docs/cli.md, README.md, CHANGELOG.md) | 2 | architect |  | In review |
 
 ## Next
 
@@ -64,9 +61,6 @@ proceed. See "Waiting on a human" in `../process/00-operating-model.md`.
 | ID | Task | Tier | Owner role | Depends on | Status | Waiting on whom | For what decision | Since |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | NUHT-007 | Fresh-context review as a recorded independence level | 1 | architect |  | Parked | rezar-84 | plan and ADR approval: changes a Tier 1 governance gate | 2026-11-21 |
-| NUHT-003 | M3: Multi-worker headless dispatcher (dispatch.py), self-healing defect policy & effort-modes benchmark suite | 1 | architect | NUHT-002 | Parked | rezar-84 | merge approval (Tier 1) | 2026-11-13 |
-| NUHT-002 | M2: Sharded zero-conflict store, git-ref leases, Tier 2 parallel scope globs, universal --json & cached doctor | 1 | architect | NUHT-001 | Parked | rezar-84 | merge approval (Tier 1) | 2026-11-13 |
-| NUHT-001 | M1: Control-plane security hardening, unified Python hook engine, runtime bug fixes & contract reconciliation | 1 | security |  | Parked | rezar-84 | merge approval (Tier 1) | 2026-11-13 |
 
 ## Later
 
@@ -84,6 +78,12 @@ permanent record, and the entry is found by ID.
 
 | ID | Task | Tier | Owner role | Depends on | Status | Completed |
 | --- | --- | --- | --- | --- | --- | --- |
+| NUHT-006 | plan-check --pre: refuse plans that name missing files before the build (touch: optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, tests/smoke.py, docs/cli.md, README.md, CHANGELOG.md) | 2 | architect |  | Done | 2026-11-21 |
+| NUHT-005 | Review triage: paraphrase step and Contest/Escalate/Fix/Decline responses, escalations in Needs you (touch: template/docs/process/02-role-reviews.md, template/docs/templates/role-review.md, handbook/process/02-role-reviews.md, handbook/templates/role-review.md, optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, .claude/commands/sdlc-review.md, optional/commands/**, tests/smoke.py, CHANGELOG.md, docs/**) | 2 | qa |  | Done | 2026-11-21 |
+| NUHT-004 | Release hygiene: CI Python 3.8 runner, installer names the unreleased version (touch: .github/workflows/ci.yml, install.py, tests/smoke.py, CHANGELOG.md, docs/install.md) | 2 | devops-sre |  | Done | 2026-11-21 |
+| NUHT-003 | M3: Multi-worker headless dispatcher (dispatch.py), self-healing defect policy & effort-modes benchmark suite | 1 | architect | NUHT-002 | Done | 2026-11-21 |
+| NUHT-002 | M2: Sharded zero-conflict store, git-ref leases, Tier 2 parallel scope globs, universal --json & cached doctor | 1 | architect | NUHT-001 | Done | 2026-11-21 |
+| NUHT-001 | M1: Control-plane security hardening, unified Python hook engine, runtime bug fixes & contract reconciliation | 1 | security |  | Done | 2026-11-21 |
 
 ## Dropped
 
