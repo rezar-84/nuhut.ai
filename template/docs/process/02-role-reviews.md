@@ -52,6 +52,16 @@ security finding, not a formality.
 Design review is cheap and prevents expensive rework. Do not skip it to "just start
 coding" on a Tier 1 or Tier 2 item.
 
+### Paraphrase first
+
+A design review opens, before any role, with a **Paraphrase**: in two to five sentences of
+your own, what the plan proposes and how the existing system works according to the plan.
+The author compares it with what they meant. A part you cannot paraphrase, or paraphrase
+wrongly, is a finding: the plan does not say what its author thinks it says. A list of
+undefined terms does not catch a plan whose terms are all defined but whose parts do not
+connect. A paraphrase does. (Adapted from the Elephant-Goldfish Model's comprehension
+reviewer, Apache-2.0.)
+
 ### The conformance pass
 
 Every ship review of a Tier 1 or Tier 2 item starts with one pass that belongs to no role:
@@ -98,6 +108,9 @@ surface or add irrelevant reviews for appearance.
 | A conversion path, funnel step, form, pricing, or CTA | cro-analyst |
 | Authentication, authorisation, secrets, input handling, sessions, isolation | security |
 | Build, deploy, infra, config, observability, backups | devops-sre |
+| Pipelines, schemas, ingestion, ETL/ELT, backfills, lineage, data contracts | data-engineer |
+| Models, prompts, retrieval, embeddings, inference parameters, evaluation sets | ml-engineer |
+| Hot paths, query plans, payload/bundle budgets, caching, latency/throughput | performance-engineer |
 | Any behaviour with acceptance criteria | qa |
 | Personal data, tracking, consent, retention, terms, claims about the business | privacy-legal |
 
@@ -139,6 +152,24 @@ work, and S4 is a *nit*: a real observation that changes no verdict.
 This rule exists because the single most common way an agent-run process degrades is a
 review that finds a real problem, notes it politely, and continues anyway. That is worse
 than not reviewing — it launders the problem into a document that looks like diligence.
+
+### Answering findings
+
+After the review, the author answers every finding in the review file's **Responses**
+table with exactly one of:
+
+| Response | When | Rule |
+| --- | --- | --- |
+| **Fix** | The finding is right. | Name the change: a commit, or the file and line. |
+| **Contest** | The reviewer is wrong. | Cite evidence the reviewer could read: a `file:line`, or a decision recorded in the plan or an ADR. "This was intentional" is not evidence. |
+| **Escalate** | The reviewer is wrong, but the evidence is outside anything the reviewer could read: a team convention, a verbal decision, a legal call. | A person decides and writes their name under **Decided by**. Until then it is in the viewer's Needs you, and `finish` refuses. |
+| **Decline** | An S4 the author chooses not to fix. | Record it. Only S4. |
+
+You wrote the work under review, so a wish to contest is not evidence. Never change a
+severity in your answer: contest the finding and say why. Never contest a paraphrase or
+comprehension gap: if a reader could not follow the plan, the plan is missing something.
+Add context to the plan when a human reader needs it, not only to satisfy the reviewer.
+`sdlc.py doctor` warns on a contest with no evidence and on an open escalation.
 
 ---
 

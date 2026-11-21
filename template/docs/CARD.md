@@ -194,8 +194,9 @@ Backlog row, positional: `| ID | Task | Tier | Owner role | Depends on | Status 
 
 Status: `Ready` · `Blocked` (never started) · `In progress` · `In review` (includes
 holding a Block) · `Parked` (waiting on a named human; also where an item you discovered
-and filed unasked enters, never `Ready`) · `Done` (worklog entry exists) · `Deferred` ·
-`Dropped`. A Tier 3 change needs no backlog row: its commit is its record.
+and filed unasked enters unless `Auto-Ready (bite)` applies to a Tier 2–3 defect) ·
+`Done` (worklog entry exists) · `Deferred` · `Dropped`. A Tier 3 change needs no backlog
+row: its commit is its record.
 
 **Keep the backlog terse — narrative goes in the worklog.** This is the most-broken
 formatting rule in the kit.
@@ -219,7 +220,9 @@ this table, say so and ask.
 | `sdlc-build` | BUILD, for an ID whose plan is approved | VERIFY; nothing is called *Verified* |
 | `sdlc-verify` | VERIFY, through `sdlc.py verify` (`process/04-quality-gates.md`) | fixing anything |
 | `sdlc-review` | DESIGN or SHIP REVIEW by the active roles (`process/02-role-reviews.md`) | merging |
+| `sdlc-finish` | VERIFY / REVIEW / LOG / CLOSE gate check, through `sdlc.py finish` (`process/03-ready-and-done.md`) | human merge approval on Tier 1 |
 | `sdlc-log` | LOG → CLOSE (`process/03-ready-and-done.md`) | |
+| `sdlc-slop` | prose tell scan, through `sdlc.py slop` (`sdlc-slop-filter`) | rewriting without reading |
 | `sdlc-doctor` | the record audit, through `sdlc.py doctor` | fixing what needs a human |
 
 ## What to open next
@@ -251,6 +254,8 @@ this table, say so and ask.
 | The development method is `Epic` | `process/11-epics.md`, `templates/epic.md` |
 | A stack, runtime, database, framework or host is chosen or moved across a major version | `process/13-stack-evaluation.md`, `templates/adr.md` |
 | A choice the request did not settle, or a non-specialist is being asked | `process/14-decision-style.md` |
+| Living specs (`Specs: on`) or a behavioural requirement delta | `process/15-specs.md`, `templates/spec-change.md` |
+| Public copy or prose reviewed for machine-written tells (`Slop filter`) | `sdlc-slop-filter` skill, `sdlc.py slop` |
 | A person pastes a secret or personal data, or a record is about to quote one | `process/12-sensitive-data-in-records.md` |
 
 This table is the routing that a tool which loads skills (from `.claude/skills/` or

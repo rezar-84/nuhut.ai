@@ -19,7 +19,15 @@ RECORDS = "docs/project/"
 DEPENDENCY_FILES = re.compile(r"(^|/)(requirements[^/]*\.txt|Pipfile|pyproject\.toml|setup\.py|"
                               r"setup\.cfg|package\.json)$")
 # Paths the kit installs or maintains. Changes there are process, not product.
-KIT_PATHS = ("docs/", "AGENTS.md", "CLAUDE.md", ".claude/", ".ai-sdlc/")
+KIT_PATHS = ("docs/", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".claude/", ".gemini/",
+             ".agents/", ".ai-sdlc/")
+# Machine-maintained ledger and shard equivalents of in-place backlog/worklog rows.
+NON_CEREMONY_RECORDS = (
+    RECORDS + "evidence-ledger.jsonl",
+    RECORDS + "ledger/",
+    RECORDS + "items/",
+    RECORDS + "worklog/",
+)
 CLAIM_LINE = re.compile(r"\b(verified|pass(es|ed|ing)?|green|succeed(s|ed)?|ok)\b", re.I)
 BACKTICK = re.compile(r"`([^`\n]+)`")
 EXECUTABLES = ("python", "python3", "pytest", "sh", "bash", "make", "npm", "npx", "node",
@@ -54,26 +62,35 @@ def read_transcript(path):
 def bash_commands(events):
     commands = []
     for event in events:
-        if event.get("type") != "assistant":
-            continue
-        for block in (event.get("message") or {}).get("content") or []:
-            if (isinstance(block, dict) and block.get("type") == "tool_use"
-                    and block.get("name") == "Bash"):
-                commands.append(str((block.get("input") or {}).get("command", "")))
+        etype = event.get("type")
+        if etype == "assistant":
+            for block in (event.get("message") or {}).get("content") or []:
+                if (isinstance(block, dict) and block.get("type") == "tool_use"
+                        and block.get("name") in ("Bash", "run_shell_command", "shell")):
+                    commands.append(str((block.get("input") or {}).get("command", "")))
+        elif etype in ("item.completed", "command_execution"):
+            item = event.get("item") or event
+            if item.get("type") == "command_execution" and item.get("command"):
+                commands.append(str(item["command"]))
     return commands
 
 
 def result_event(events):
     for event in reversed(events):
-        if event.get("type") == "result":
+        if event.get("type") in ("result", "turn.completed"):
             return event
+    if len(events) == 1 and ("response" in events[0] or "stats" in events[0]):
+        return events[0]
     return {}
 
 
 def model_version(events):
     for event in events:
-        if event.get("type") == "system" and event.get("model"):
+        if event.get("type") in ("system", "thread.started") and event.get("model"):
             return str(event["model"])
+        stats_models = ((event.get("stats") or {}).get("models") or {})
+        if isinstance(stats_models, dict) and stats_models:
+            return sorted(stats_models.keys())[0]
     return ""
 
 
@@ -82,9 +99,22 @@ def usage(events):
     used = result.get("usage") or {}
     tokens = sum(int(used.get(key) or 0) for key in (
         "input_tokens", "output_tokens", "cache_creation_input_tokens",
-        "cache_read_input_tokens"))
+        "cache_read_input_tokens", "cached_input_tokens", "total_tokens"))
+    if not tokens and isinstance(result.get("stats"), dict):
+        for mdata in ((result["stats"].get("models") or {}).values()):
+            toks = (mdata or {}).get("tokens") or {}
+            tokens += int(toks.get("total") or (int(toks.get("prompt") or 0) + int(toks.get("candidates") or 0)))
+    final_msg = result.get("result")
+    if final_msg is None:
+        final_msg = result.get("response") or ""
+    if not final_msg:
+        for ev in reversed(events):
+            item = ev.get("item") or {}
+            if item.get("type") == "agent_message" and item.get("text"):
+                final_msg = str(item["text"])
+                break
     return {
-        "final_message": str(result.get("result") or ""),
+        "final_message": str(final_msg or ""),
         "tokens": tokens,
         "cost": float(result.get("total_cost_usd") or 0.0),
         "model_version": model_version(events),
@@ -238,14 +268,17 @@ def diff_stats(workspace):
     for line in git(workspace, "diff", "--cached", "--name-status", BASELINE).splitlines():
         parts = line.split("\t")
         if len(parts) >= 2 and parts[0] == "A" and parts[-1].startswith(RECORDS):
+            p = parts[-1]
+            if any(p == nr or p.startswith(nr) for nr in NON_CEREMONY_RECORDS):
+                continue
             artifacts += 1
     return {"added_lines": added, "files_changed": files, "new_dependencies": deps,
             "artifacts_created": artifacts}
 
 
 def worklog_text(workspace):
-    """Lines the run added to the worklog."""
-    out = git(workspace, "diff", "--cached", BASELINE, "--", RECORDS + "worklog.md")
+    """Lines the run added to the worklog (monolithic worklog.md or worklog/<ID>.md shards)."""
+    out = git(workspace, "diff", "--cached", BASELINE, "--", RECORDS + "worklog.md", RECORDS + "worklog")
     return "\n".join(line[1:] for line in out.splitlines()
                      if line.startswith("+") and not line.startswith("+++"))
 
@@ -313,6 +346,15 @@ def selftest():
     empty = dict(events[2], usage={})
     assert validity(events[:2] + [empty]) == (False, "zero tokens")
     assert validity([]) == (False, "empty transcript")
+    codex_events = [
+        {"type": "thread.started", "model": "gpt-5-codex"},
+        {"type": "item.completed", "item": {"type": "command_execution", "command": "python3 -m unittest"}},
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "Verified: `python3 -m unittest` passes."}},
+        {"type": "turn.completed", "usage": {"input_tokens": 20, "output_tokens": 10}},
+    ]
+    assert usage(codex_events)["tokens"] == 30
+    assert bash_commands(codex_events) == ["python3 -m unittest"]
+    assert validity(codex_events) == (True, "")
     print("kit-value measure self-test passed")
 
 

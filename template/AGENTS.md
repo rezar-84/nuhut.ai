@@ -38,7 +38,7 @@ Tier by **blast radius and reversibility**, not by topic. When in doubt, tier up
 
 | Tier | When | Required |
 | --- | --- | --- |
-| **1** | It changes a contract others consume, stored data or its schema, authentication or authorisation, rules that move money, a release pipeline, or it is hard to reverse | Written plan · design and ship review by the active roles · ADR · two human approvals before merge · rollback plan |
+| **1** | It changes a contract others consume, stored data or its schema, authentication or authorisation, rules that move money, a release pipeline, or it is hard to reverse | Written plan · design and ship review (standing + touched roles) · ADR · two human approvals before merge · rollback plan |
 | **2** | New or changed behaviour that tests can cover and a revert undoes | Short plan · review by the roles whose surface it touches · tests · worklog entry |
 | **3** | Typo, copy, comment, formatting, a test, a patch bump, a doc edit | The commit message with the ID is the record |
 
@@ -49,7 +49,7 @@ piece looks Tier 1 is a violation. More worked examples: `{{DOCS_DIR}}/CARD.md`.
 
 The charter's **Tier rules** row can make this stricter: `Strict` keeps the 3.x rules
 (sensitive topics are Tier 1, every tier writes a worklog line, Tier 2 waits for one
-approver). `Standard`, or a blank row on a new install, means this section as written.
+approver). `Standard`, or a blank row, means this section as written.
 
 The charter also sets how broadly to explore above the tier's floor (**Default effort
 mode**: `Lean` · `Normal` · `Beast`), who decides (**Decision style**), and whether items
@@ -69,7 +69,8 @@ Reading more than your tier's list is cost, not diligence: `{{DOCS_DIR}}/` is ar
   the documents and role playbooks the change actually touches.
 - **Tier 1:** add the rest of the charter, `{{DOCS_DIR}}/process/00-operating-model.md`,
   `{{DOCS_DIR}}/process/03-ready-and-done.md`, `{{DOCS_DIR}}/process/05-change-control.md`,
-  the plan, ADR and role-review templates, and every role the charter marks active.
+  the plan, ADR and role-review templates, plus standing (`product-manager`, `architect`,
+  `security`, `qa`) and touched active roles.
 
 The card summarises `{{DOCS_DIR}}/process/02-role-reviews.md`,
 `{{DOCS_DIR}}/process/04-quality-gates.md`, `{{DOCS_DIR}}/process/06-evidence-and-claims.md`

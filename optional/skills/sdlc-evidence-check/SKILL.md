@@ -8,15 +8,17 @@ description: Check a status claim before it is written — "done", "tests pass",
 `{{DOCS_DIR}}/process/06-evidence-and-claims.md` is the authority. This skill is the
 pre-flight for the moment you are about to type a claim.
 
-## The only five words
+## The seven evidence words
 
 | Word | Means | Requires |
 | --- | --- | --- |
 | **Verified** | you ran it and read the output | the command, and its real result |
+| **Measured** | the result is a number, not a pass | method · subject and its version · N · spread · date |
+| **Reported** | a tool, log, or person said so and you are relaying it | naming the source |
+| **Assumed** | you are proceeding on an unverified premise | recording it in `assumptions-and-risks.md` |
 | **Not run** | the check exists, you did not run it | the reason |
 | **Absent** | the charter has no command for this stage | naming it as a gap |
 | **Unknown** | you cannot establish it from here | who or what could |
-| **Measured** | the result is a number, not a pass | method · subject and its version · N · spread · date |
 
 No synonyms. "Should work", "looks right", "mostly passing", and "tests are green" (from
 memory) are none of these.

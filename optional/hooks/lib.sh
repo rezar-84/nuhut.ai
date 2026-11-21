@@ -1,138 +1,64 @@
-# Shared by the ai-sdlc hooks; sourced, never run. POSIX sh plus jq.
-#
-# Every hook must fail closed on the things an agent does by accident: run from a
-# subdirectory, name a file through `..`, or touch a file whose name holds a quote. So
-# each one anchors on the project root, compares normalised paths, and builds its JSON
-# with jq instead of printf.
+# Shared by the ai-sdlc POSIX shims; sourced, never run directly.
+# All hook evaluation, JSON parsing/formatting, symlink resolution, and secret/PII
+# pattern matching live in `.ai-sdlc/bin/hooks.py` (Python 3 stdlib, zero `jq` or
+# GNU sed required).
 
-# hook_init <name>: allow (and say so once) when jq is missing, then move to the project
-# root the harness names. Sets HOOK_CWD (where the call came from) and HOOK_ROOT.
-hook_init() {
-  command -v jq >/dev/null 2>&1 || {
-    # Silent: a hook speaks only when it denies. `sdlc.py doctor` reports a missing jq.
-    exit 0
-  }
-  HOOK_CWD=$(pwd -P 2>/dev/null || printf '%s' "$PWD")
-  HOOK_ROOT=${CLAUDE_PROJECT_DIR:-$PWD}
-  cd "$HOOK_ROOT" 2>/dev/null || exit 0
-  HOOK_ROOT=$(pwd -P 2>/dev/null || printf '%s' "$PWD")
-}
-
-# hook_rel_path <payload>: the tool call's file_path relative to the project root, with
-# `.` and `..` resolved; empty when there is none. A path outside the project prints as
-# an absolute path, which no project glob matches.
-hook_rel_path() {
-  _hr_raw=$(printf '%s' "$1" | jq -r '.tool_input.file_path // .tool_input.notebook_path // ""')
-  [ -n "$_hr_raw" ] || return 0
-  case "$_hr_raw" in
-    /*) _hr_full="$_hr_raw" ;;
-    *)  _hr_full="$HOOK_CWD/$_hr_raw" ;;
-  esac
-  if [ -e "$_hr_full" ] || [ -L "$_hr_full" ]; then
-    _hr_dir=$(dirname "$_hr_full")
-    _hr_base=$(basename "$_hr_full")
-    if [ -L "$_hr_full" ] && command -v readlink >/dev/null 2>&1; then
-      _hr_real=$(readlink -f "$_hr_full" 2>/dev/null || printf '%s' "$_hr_full")
-    elif _hr_rdir=$(cd "$_hr_dir" 2>/dev/null && pwd -P); then
-      _hr_real="$_hr_rdir/$_hr_base"
-    else
-      _hr_real="$_hr_full"
-    fi
-  else
-    _hr_real="$_hr_full"
+hook_find_python() {
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return 0
   fi
-  printf '%s' "$1" | jq -r --arg p "$_hr_real" --arg cwd "$HOOK_CWD" --arg root "$HOOK_ROOT" '
-    def norm: split("/") | reduce .[] as $s ([];
-        if $s == "" or $s == "." then .
-        elif $s == ".." then (if length > 0 then .[:-1] else . end)
-        else . + [$s] end) | "/" + join("/");
-    if $p == "" then ""
-    else (if ($p | startswith("/")) then $p else $cwd + "/" + $p end | norm) as $abs
-      | ($root | norm) as $r
-      | if ($abs | startswith($r + "/")) then $abs[($r | length) + 1:] else $abs end
-    end'
+  if command -v python >/dev/null 2>&1; then
+    command -v python
+    return 0
+  fi
+  return 1
 }
 
-# hook_deny <reason>: print a PreToolUse deny, escaped whatever the reason contains.
-hook_deny() {
-  jq -cn --arg r "$1" \
-    '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny",
-      permissionDecisionReason: $r}}'
+hook_find_engine() {
+  _hfe_dir=$1
+  for _cand in \
+    "${CLAUDE_PROJECT_DIR:-}/.ai-sdlc/bin/hooks.py" \
+    "${GEMINI_PROJECT_DIR:-}/.ai-sdlc/bin/hooks.py" \
+    "${CURSOR_PROJECT_DIR:-}/.ai-sdlc/bin/hooks.py" \
+    "$_hfe_dir/../../.ai-sdlc/bin/hooks.py" \
+    "$_hfe_dir/../bin/hooks.py" \
+    "$_hfe_dir/../../optional/runtime/hooks.py"
+  do
+    if [ -n "$_cand" ] && [ -f "$_cand" ]; then
+      printf '%s' "$_cand"
+      return 0
+    fi
+  done
+  if _top=$(git rev-parse --show-toplevel 2>/dev/null) && [ -f "$_top/.ai-sdlc/bin/hooks.py" ]; then
+    printf '%s' "$_top/.ai-sdlc/bin/hooks.py"
+    return 0
+  fi
+  return 1
+}
+
+hook_fail_closed() {
+  _hfc_harness=${1:-claude}
+  _hfc_reason=$2
+  case "$_hfc_harness" in
+    cursor)
+      printf '{"permission":"deny","agent_message":"%s","user_message":"%s"}\n' "$_hfc_reason" "$_hfc_reason"
+      ;;
+    gemini)
+      printf '{"decision":"deny","reason":"%s"}\n' "$_hfc_reason"
+      ;;
+    *)
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$_hfc_reason"
+      ;;
+  esac
   exit 0
 }
 
-# hook_note <message>: kept for older callers. Silent: a hook speaks only when it denies.
-hook_note() {
-  :
-}
-
-# hook_is_commit <command>: true when `git commit` appears anywhere in the command, with
-# or without git options between, but not `git commit-tree`. Deliberately loose: a quoted
-# mention is also caught, which is the safe direction for a guard.
-hook_is_commit() {
-  printf '%s' "$1" | sed ':a;N;$!ba;s/\\\n/ /g;s/\n/ /g' | grep -Eq 'git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([^-A-Za-z]|$)'
-}
-
-# hook_commit_args <command>: what follows the first `git commit`, so a flag check is not
-# fooled by another program's flags earlier in the command (python -m ...).
-hook_commit_args() {
-  printf '%s' "$1" | sed ':a;N;$!ba;s/\\\n/ /g;s/\n/ /g' | sed -E -n 's/.*git([[:space:]]+-[^[:space:]]+)*[[:space:]]+commit([^-A-Za-z]|$)//p' | head -n 1
-}
-
-# hook_secret_kinds <text>: the kinds of credential found in <text>, comma-separated, empty
-# when none. High-confidence shapes only -- provider-prefixed tokens, private-key headers,
-# and a URL that embeds a password -- so a hit is almost never a false alarm. A line that
-# contains EXAMPLE is skipped, for deliberate fixtures. It names kinds, never values: the
-# value is what must not travel further. sdlc.py keeps the same list for `doctor`.
-hook_secret_kinds() {
-  _hk_text=$(printf '%s\n' "$1" | grep -v 'EXAMPLE')
-  [ -n "$_hk_text" ] || return 0
-  _hk_found=""
-  _hk_check() {
-    if printf '%s\n' "$_hk_text" | grep -Eq -- "$2"; then
-      _hk_found="${_hk_found}${_hk_found:+, }$1"
-    fi
-  }
-  _hk_check "private key"            '-----BEGIN ([A-Z]+ )?PRIVATE KEY-----'
-  _hk_check "AWS access key"         '(AKIA|ASIA)[0-9A-Z]{16}'
-  _hk_check "GitHub token"           'gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,}'
-  _hk_check "GitLab token"           'glpat-[A-Za-z0-9_-]{20,}'
-  _hk_check "Slack token"            'xox[abposr]-[A-Za-z0-9-]{10,}'
-  _hk_check "Stripe live key"        '(sk|rk)_live_[A-Za-z0-9]{20,}'
-  _hk_check "Anthropic API key"      'sk-ant-[A-Za-z0-9_-]{20,}'
-  _hk_check "OpenAI API key"         '(^|[^A-Za-z0-9_-])sk-(proj-|svcacct-|admin-)?[A-Za-z0-9_-]{40,}'
-  _hk_check "Google API key"         'AIza[0-9A-Za-z_-]{35}'
-  # scheme://user:password@host, with the placeholder forms and example hosts excluded.
-  if printf '%s\n' "$_hk_text" | grep -E '[A-Za-z][A-Za-z0-9+.-]*://[^/[:space:]:@]+:[^/[:space:]@<>{}$]{4,}@' \
-       | grep -qviE '://[^@]*:(password|passwd|pass|secret|changeme|xxxx+|\*+)@|@[^/[:space:]]*(example\.(com|org|net)|\.invalid)'; then
-    _hk_found="${_hk_found}${_hk_found:+, }URL with embedded password"
-  fi
-  printf '%s' "$_hk_found"
-}
-
-# hook_pii_kinds <text>: personal-data shapes found in <text>, comma-separated. Lower
-# confidence than credentials, so callers warn instead of deny. Example addresses
-# (example.com/.org/.net), noreply addresses and EXAMPLE lines are skipped.
-hook_pii_kinds() {
-  _hk_text=$(printf '%s\n' "$1" | grep -v 'EXAMPLE')
-  [ -n "$_hk_text" ] || return 0
-  _hk_found=""
-  if printf '%s\n' "$_hk_text" \
-       | grep -Eo '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' \
-       | grep -qviE '@([A-Za-z0-9.-]*\.)?(example\.(com|org|net)|invalid)$|@users\.noreply\.github\.com$|^(noreply|no-reply)@'; then
-    _hk_found="email address"
-  fi
-  if printf '%s\n' "$_hk_text" | grep -Eq '(^|[^0-9])[0-9]{4}([ -][0-9]{4}){3}([^0-9]|$)'; then
-    _hk_found="${_hk_found}${_hk_found:+, }card-number shape"
-  fi
-  if printf '%s\n' "$_hk_text" | grep -Eq '(^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}([^0-9]|$)'; then
-    _hk_found="${_hk_found}${_hk_found:+, }national-ID shape (NNN-NN-NNNN)"
-  fi
-  printf '%s' "$_hk_found"
-}
-
-# hook_warn <message>: kept for older callers. Silent: a hook speaks only when it denies;
-# personal data in a record is reported by `sdlc.py doctor` instead.
-hook_warn() {
-  :
+hook_exec() {
+  _he_rule=$1
+  _he_harness=${2:-claude}
+  _he_dir=$3
+  _he_py=$(hook_find_python) || hook_fail_closed "$_he_harness" "python3 is required to run ai-sdlc hooks (fail-closed)"
+  _he_eng=$(hook_find_engine "$_he_dir") || hook_fail_closed "$_he_harness" "missing .ai-sdlc/bin/hooks.py (fail-closed)"
+  exec "$_he_py" "$_he_eng" run --harness "$_he_harness" "$_he_rule"
 }

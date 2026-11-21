@@ -1,0 +1,21 @@
+{
+  "id": "NUHT-009",
+  "title": "sdlc-drift: compare living specs and ADRs with code",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "architect",
+  "status": "Deferred",
+  "depends": [],
+  "touch": [],
+  "created": "2026-11-21",
+  "updated": "2026-11-21",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "the Specs row is on in a real project and drift is reported",
+  "dropped_reason": ""
+}

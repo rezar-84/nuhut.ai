@@ -1,0 +1,21 @@
+{
+  "id": "NUHT-007",
+  "title": "Fresh-context review as a recorded independence level",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "architect",
+  "status": "Parked",
+  "depends": [],
+  "touch": [],
+  "created": "2026-11-21",
+  "updated": "2026-11-21",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "rezar-84",
+  "park_reason": "plan and ADR approval: changes a Tier 1 governance gate",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

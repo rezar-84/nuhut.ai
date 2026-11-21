@@ -30,8 +30,11 @@ or write `none` and why — a refactor or a change nobody outside the code can o
 ## Files that change
 
 _(One backticked path or glob per line — `src/billing/**`, `db/migrations/0042_*.sql`.
-`sdlc.py plan-check` compares this list with the branch's diff, so a file the build touches
-that is not here, or a file here the build never touched, is a question the reviewer asks.)_
+Write `(new)` after a file the build creates. `sdlc.py plan-check <ID> --pre` checks the
+list before the build: each path matches a file or is marked new, and the list is not so
+broad that it matches most of the repository. After the build, `sdlc.py plan-check`
+compares it with the branch's diff, so a file the build touches that is not here, or a
+file here the build never touched, is a question the reviewer asks.)_
 
 - `path/or/glob`
 

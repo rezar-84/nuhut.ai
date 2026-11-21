@@ -1,0 +1,27 @@
+{
+  "id": "NUHT-004",
+  "title": "Release hygiene: CI Python 3.8 runner, installer names the unreleased version",
+  "type": "fix",
+  "tier": "2",
+  "effort": "",
+  "owner": "devops-sre",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    ".github/workflows/ci.yml",
+    "install.py",
+    "tests/smoke.py",
+    "CHANGELOG.md",
+    "docs/install.md"
+  ],
+  "created": "2026-11-21",
+  "updated": "2026-11-21",
+  "completed": "2026-11-21",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

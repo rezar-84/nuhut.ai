@@ -16,9 +16,11 @@ This file must never contain two opening braces in a row (see sdlc.py).
 
 import datetime
 import hashlib
+import hmac
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -235,8 +237,15 @@ def _build_inner(rt, project):
 
     docs_root = os.path.join(project.docs, "project")
     backlog_rel = os.path.join(docs_root, "backlog.md")
-    backlog = rt.read(project.path(backlog_rel))
+    backlog = project.records("backlog.md") if hasattr(project, "records") else rt.read(project.path(backlog_rel))
     rows = backlog_tables(backlog)
+    try:
+        shards_mod = rt.runtime_module("shards")
+        shard_items = shards_mod.load_items(project)
+        wl_shards = shards_mod.load_worklog_shards(project)
+        sharded_mode = shards_mod.has_shards(project)
+    except Exception:
+        shard_items, wl_shards, sharded_mode = {}, [], False
 
     known_ids = set()
     for section, line, row in rows:
@@ -303,27 +312,42 @@ def _build_inner(rt, project):
         status = plain(row.get("Status", ""))
         known = ("ID", "Task", "Tier", "Owner role", "Depends on", "Status")
         item = model["items"].setdefault(raw_id, {"id": raw_id})
+        sh = shard_items.get(raw_id) or {}
         item.update({
-            "title": plain(row.get("Task", "")), "tier": plain(row.get("Tier", "")),
+            "title": sh.get("title") or plain(row.get("Task", "")),
+            "tier": plain(row.get("Tier", "")),
             "owner": plain(row.get("Owner role", "")),
             "depends": id_re.findall(row.get("Depends on", "")),
             "depends_text": plain(row.get("Depends on", "")),
             "status": status, "column": column_of(status), "section": section,
-            "row": "%s:%d" % (backlog_rel, line),
+            "row": ("%s/project/items/%s.json" % (project.docs, raw_id)) if sh else ("%s:%d" % (backlog_rel, line)),
             "extra": dict((k, plain(v)) for k, v in row.items() if k not in known and v),
         })
+        if sh:
+            item["type"] = sh.get("type", "feat")
+            item["touch"] = sh.get("touch", [])
+            item["effort"] = sh.get("effort", "")
         if raw_id not in model["order"]:
             model["order"].append(raw_id)
     model["epics"] = epics(backlog, id_re)
+    model["shards"] = {"enabled": sharded_mode, "items": len(shard_items), "worklogs": len(wl_shards)}
 
-    # Worklog, active then archive.
+    # Worklog: per-item shards first (deduplicated against rendered worklog.md), then active and archive.
+    seen_wl_ids = set()
+    for wl_id, wl_rel, wl_body in wl_shards:
+        for entry in worklog_entries(wl_body, wl_rel, id_re):
+            model["worklog"].append(entry)
+        seen_wl_ids.add(wl_id)
     sources = [os.path.join(docs_root, "worklog.md")]
     archive = project.path(os.path.join(docs_root, "worklog-archive"))
     if os.path.isdir(archive):
         sources += [os.path.join(docs_root, "worklog-archive", n)
                     for n in sorted(os.listdir(archive)) if n.endswith(".md")]
     for rel in sources:
-        model["worklog"].extend(worklog_entries(rt.read(project.path(rel)), rel, id_re))
+        for entry in worklog_entries(rt.read(project.path(rel)), rel, id_re):
+            if entry.get("id") and entry["id"] in seen_wl_ids:
+                continue
+            model["worklog"].append(entry)
 
     # Every markdown record under project/, plus the contract and the card.
     doc_paths = ["AGENTS.md", os.path.join(project.docs, "CARD.md")]
@@ -577,6 +601,23 @@ def _build_inner(rt, project):
     except Exception as exc:  # claims are a convenience; the page opens without them
         model["claims"], model["parallel"] = [], {"groups": [], "conflicts": [], "plan_first": [], "candidates": [],
                                                   "error": str(exc)}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import shards as shards_mod
+        import dispatch as dispatch_mod
+        items_d = shards_mod.items_dir(project)
+        wl_d = shards_mod.worklog_dir(project)
+        ldg_d = shards_mod.ledger_dir(project)
+        model["factory"] = {
+            "sharded": shards_mod.has_shards(project),
+            "item_shards": len([n for n in os.listdir(items_d) if n.endswith(".json")]) if os.path.isdir(items_d) else 0,
+            "worklog_shards": len([n for n in os.listdir(wl_d) if n.endswith(".md")]) if os.path.isdir(wl_d) else 0,
+            "ledger_shards": len([n for n in os.listdir(ldg_d) if n.endswith(".jsonl")]) if os.path.isdir(ldg_d) else 0,
+            "dispatch_runs": dispatch_mod.load_dispatch_runs(project, limit=20),
+        }
+    except Exception as exc:
+        model["factory"] = {"sharded": False, "item_shards": 0, "worklog_shards": 0, "ledger_shards": 0,
+                            "dispatch_runs": [], "error": str(exc)}
     model["metrics"] = metrics(rt, project, model)
     try:
         model["flow"] = flow(rt, project, model)
@@ -894,8 +935,7 @@ def save_run(rt, project, record):
     """Keep one command the live page ran, redacted, under the git-ignored runs folder,
     so the cockpit can show it after the response is gone. Only the newest MAX_RUNS stay."""
     folder = runs_folder(project)
-    if not os.path.isdir(folder):
-        os.makedirs(folder)
+    os.makedirs(folder, exist_ok=True)
     ignore = os.path.join(folder, ".gitignore")
     if not os.path.exists(ignore):
         with open(ignore, "w", encoding="utf-8") as handle:
@@ -1128,7 +1168,7 @@ def watched_paths(project):
         project.path(".ai-sdlc/bite/active.json"),
     ]
     for base, _, files in os.walk(project.path(os.path.join(project.docs, "project"))):
-        paths.extend(os.path.join(base, n) for n in files if n.endswith(".md"))
+        paths.extend(os.path.join(base, n) for n in files if n.endswith((".md", ".json", ".jsonl")))
     evidence = project.path(os.path.join(".ai-sdlc", "evidence"))
     if os.path.isdir(evidence):
         paths.extend(os.path.join(evidence, n, "summary.json") for n in os.listdir(evidence))
@@ -1142,6 +1182,9 @@ def watched_paths(project):
     runs = runs_folder(project)
     if os.path.isdir(runs):
         paths.extend(os.path.join(runs, n) for n in os.listdir(runs) if n.endswith(".json"))
+    disp = project.path(os.path.join(".ai-sdlc", "dispatch"))
+    if os.path.isdir(disp):
+        paths.extend(os.path.join(disp, n) for n in os.listdir(disp) if n.endswith(".json"))
     return sorted(paths)
 
 
@@ -1269,7 +1312,7 @@ class Live(object):
             if self.lens_full is not None:
                 model["lens"] = lens_summary(self.lens_full)
             model["live_interval"] = self.interval
-            model["action_token"] = self.token
+            model["live_actions"] = True
             new_json = json.dumps(model, ensure_ascii=False,
                                   separators=(",", ":")).encode("utf-8")
             new_page = render(model, self.template).encode("utf-8")
@@ -1297,6 +1340,43 @@ def _parse_host(raw_host):
     return raw.split(":", 1)[0]
 
 
+def _session_cookie(raw_cookie):
+    for part in (raw_cookie or "").split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            if k.strip() == "nuhut_session":
+                return v.strip()
+    return ""
+
+
+def _valid_origin(raw_origin, port):
+    origin = (raw_origin or "").strip().lower().rstrip("/")
+    if not origin:
+        return False
+    allowed = (
+        "http://127.0.0.1:%d" % port,
+        "http://localhost:%d" % port,
+        "http://[::1]:%d" % port,
+    )
+    return origin in allowed
+
+
+def _kill_proc_tree(proc):
+    if os.name == "posix":
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+    try:
+        proc.communicate(timeout=2)
+    except Exception:
+        pass
+
+
 def serve(rt, project, template, opts):
     try:
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1314,7 +1394,7 @@ def serve(rt, project, template, opts):
     class Handler(BaseHTTPRequestHandler):
         server_version = "nuhut-view"
 
-        def _send(self, code, body, ctype):
+        def _send(self, code, body, ctype, extra_headers=()):
             try:
                 self.send_response(code)
                 self.send_header("Content-Type", ctype)
@@ -1322,6 +1402,8 @@ def serve(rt, project, template, opts):
                 self.send_header("Cache-Control", "no-store")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Referrer-Policy", "no-referrer")
+                for hk, hv in extra_headers:
+                    self.send_header(hk, hv)
                 self.end_headers()
                 if self.command != "HEAD":
                     self.wfile.write(body)
@@ -1337,7 +1419,9 @@ def serve(rt, project, template, opts):
             path = self.path.split("?", 1)[0]
             if path in ("/", "/index.html"):
                 live.refresh()
-                return self._send(200, live.page, "text/html; charset=utf-8")
+                cookie = "nuhut_session=%s; HttpOnly; SameSite=Strict; Path=/" % live.token
+                return self._send(200, live.page, "text/html; charset=utf-8",
+                                  extra_headers=(("Set-Cookie", cookie),))
             if path == "/version":
                 return self._send(200, (live.refresh() or "").encode("utf-8"),
                                   "text/plain; charset=utf-8")
@@ -1370,8 +1454,13 @@ def serve(rt, project, template, opts):
             host = _parse_host(self.headers.get("Host"))
             if host not in ("127.0.0.1", "localhost", "::1"):
                 return self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
-            if self.headers.get("X-Action-Token") != live.token:
-                return self._send(403, b'{"ok":false,"error":"invalid action token"}\n',
+            port = self.server.server_address[1]
+            if not _valid_origin(self.headers.get("Origin"), port):
+                return self._send(403, b'{"ok":false,"error":"invalid or missing Origin"}\n',
+                                  "application/json; charset=utf-8")
+            cookie_tok = _session_cookie(self.headers.get("Cookie"))
+            if not cookie_tok or not hmac.compare_digest(cookie_tok, live.token):
+                return self._send(403, b'{"ok":false,"error":"invalid or missing session cookie"}\n',
                                   "application/json; charset=utf-8")
             path = self.path.split("?", 1)[0]
             if path not in ("/api/config", "/api/fix", "/api/run"):
@@ -1383,7 +1472,16 @@ def serve(rt, project, template, opts):
             except ValueError:
                 return self._send(400, b'{"ok":false,"error":"invalid json"}\n',
                                   "application/json; charset=utf-8")
+            if not isinstance(payload, dict):
+                return self._send(400, b'{"ok":false,"error":"json payload must be an object"}\n',
+                                  "application/json; charset=utf-8")
             if path == "/api/config":
+                if "checks" in payload and payload["checks"] is not None:
+                    return self._send(
+                        403,
+                        b'{"ok":false,"error":"checks commands cannot be modified over HTTP; run sdlc.py config --set-check in a terminal"}\n',
+                        "application/json; charset=utf-8",
+                    )
                 with live.lock:
                     res, err = rt.configure_kit(live.project, payload)
                     if err:
@@ -1478,19 +1576,26 @@ def serve(rt, project, template, opts):
                         cmd_args.extend(["--agent", ag])
                 sdlc_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sdlc.py")
                 t0 = time.time()
+                proc = None
                 try:
-                    proc = subprocess.Popen(
-                        [sys.executable, sdlc_bin] + cmd_args,
+                    popen_kw = dict(
                         cwd=live.project.root,
                         stdin=subprocess.DEVNULL,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                     )
+                    if os.name == "posix":
+                        popen_kw["start_new_session"] = True
+                    proc = subprocess.Popen(
+                        [sys.executable, sdlc_bin] + cmd_args,
+                        **popen_kw
+                    )
                     out_bytes, _ = proc.communicate(timeout=120)
                     exit_code = proc.returncode
                     output_text = out_bytes.decode("utf-8", "replace")
                 except subprocess.TimeoutExpired:
-                    proc.kill()
+                    if proc is not None:
+                        _kill_proc_tree(proc)
                     exit_code = 124
                     output_text = "Command timed out after 120s.\n"
                 except Exception as exc:
@@ -1869,8 +1974,7 @@ def run(rt, project, opts):
     # A static page carries the lens's counts and worst findings only, never user-level items.
     model["lens"] = lens_summary(lens_report(rt, project, model, include_user=False))
     out_dir = project.path(os.path.join(".ai-sdlc", "view"))
-    if not os.path.isdir(out_dir):
-        os.makedirs(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
     ignore = os.path.join(out_dir, ".gitignore")
     if not os.path.exists(ignore):
         # The page copies the records' contents; it is a view, not a record.

@@ -26,17 +26,22 @@ python3 .ai-sdlc/bin/sdlc.py release ACME-12 --remove-worktree
   (`<git-common-dir>/nuhut/claims/ACME-12.json`), created with an exclusive create. A
   second agent asking for ACME-12 is refused, and told who holds it and since when.
 - **Every worktree sees it.** All worktrees of a clone share the git directory, so
-  parallel sessions on one machine see each other's claims. Across machines, the
-  claim's branch (`ACME-12-<slug>`, pushed) is what others see.
+  parallel sessions on one machine see each other's claims. Across machines, add
+  `--sync-refs` on `claim`, `release`, `claims`, `parallel` and `next-id` to publish
+  compare-and-swap claim leases under `refs/nuhut/claims/<ID>` and atomic sequence
+  allocations under `refs/nuhut/seq` on `origin`.
 - **Each item gets its own worktree.** Parallel sessions in one checkout overwrite each
-  other's files between commands, so `claim` creates a separate checkout by default.
-  `--no-worktree` makes the branch only.
-- **The backlog row is optional.** `claim --mark` sets the row to In progress, but only
-  from the main worktree. Every worktree has its own copy of `backlog.md`, and marking rows
-  in several of them produces conflicting backlog edits at merge time.
+  other's files between commands, so `claim` creates a separate checkout by default
+  (on `<type>/<ID>-<slug>`). `--no-worktree` makes the branch only.
+- **Zero-conflict sharded records.** Each item writes its own state under
+  `docs/project/items/<ID>.json`, its own worklog entry under `docs/project/worklog/<ID>.md`,
+  and its own evidence lines under `docs/project/ledger/<run>.jsonl`. Parallel branches
+  never touch the same line of `backlog.md`, `worklog.md`, or `evidence-ledger.jsonl`.
+  Run `sdlc.py render` on the main branch when you want fresh Markdown summaries, and
+  `sdlc.py fix migrate-shards --apply` to migrate an existing 4.x repository.
 - **It refuses the obvious mistakes:** an item already claimed, one whose dependencies are
-  unfinished, one that is Done or Dropped. `release --remove-worktree` refuses a worktree
-  with uncommitted changes.
+  unfinished, one that is Done or Dropped, or releasing a claim owned by another agent
+  without `--force`. `release --remove-worktree` refuses a worktree with uncommitted changes.
 
 `python3 .ai-sdlc/bin/sdlc.py claims` lists who holds what.
 
@@ -55,10 +60,45 @@ plan first (no Files that change): ACME-11
 
 `parallel` takes the Ready items nobody holds whose dependencies are done. It groups them
 so that no two in a group touch the same files, judging by each plan's **Files that
-change**, with globs compared both ways. The charter, migrations and lockfiles each count
-as one shared file: two items with different migration files still conflict, because
-migrations are ordered. Items with no plan are listed separately; their files are
+change** or, for Tier 2 and Tier 3 items without a full plan file, the item shard's
+`touch` globs (`sdlc.py item add --touch "src/mail/*,tests/test_mail.py"`), with globs
+compared both ways. The charter, migrations and lockfiles each count as one shared file:
+two items with different migration files still conflict, because migrations are ordered.
+Items with neither a plan nor `touch` globs are listed separately; their files are
 unknown, so they run alone.
+
+## Headless queue execution (`dispatch`)
+
+When a queue of scoped Tier 2 and Tier 3 items is Ready, `dispatch` runs conflict-free
+waves across isolated worktrees (`<git-common-dir>/nuhut/worktrees/<ID>`):
+
+```sh
+python3 .ai-sdlc/bin/sdlc.py dispatch --dry-run --workers 3
+python3 .ai-sdlc/bin/sdlc.py dispatch --workers 3 --by claude --reviewer codex
+python3 .ai-sdlc/bin/sdlc.py dispatch --workers 2 --by codex --pr --sync-refs
+```
+
+Each worker claims its item, runs the configured builder CLI (`claude`, `codex`, `gemini`,
+or `cmd:<command>`), executes `verify --item <ID>` (plus `slop --strict` when configured)
+with bounded repair retries (`--max-retries`), runs optional independent `review`, closes
+sharded records through `finish`, and either merges Done Tier 2/3 branches back to the
+default branch between waves or opens pull requests with `--pr`. Tier 1 items without an
+approved plan file are skipped, and finished Tier 1 items stop at `Parked` for human
+approval. Redacted run telemetry is written to `.ai-sdlc/dispatch/<run>.json` and shown in
+the viewer.
+
+## Controlled self-healing (`Discovered defects`)
+
+When a worker or agent spots an out-of-scope bug (`Discovered: <description>` in `dispatch`,
+or `sdlc.py item add --discovered`), the charter's **Discovered defects** row decides
+whether it enters the queue automatically:
+
+- **`Parked`** (the default): every newly discovered defect waits in `Parked` for human
+  triage.
+- **`Auto-Ready (bite)`**: a Tier 2 or Tier 3 defect promotes to `Ready` via
+  `sdlc.py item triage <ID>` only after `sdlc.py bite --item <ID> <test cmd>` records a
+  reproducing test that failed before the fix and passed with it. Tier 1 defects stay
+  `Parked`.
 
 The Dashboard shows the same thing under **Parallel work**, and Board cards carry a claim
 badge.

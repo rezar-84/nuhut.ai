@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-001",
+  "title": "M1: Control-plane security hardening, unified Python hook engine, runtime bug fixes & contract reconciliation",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "security",
+  "status": "Done",
+  "depends": [],
+  "touch": [],
+  "created": "2026-11-13",
+  "updated": "2026-11-21",
+  "completed": "2026-11-21",
+  "summary": "",
+  "approvers": [
+    "rezar-84"
+  ],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

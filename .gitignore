@@ -9,7 +9,15 @@ __pycache__/
 .pytest_cache/
 
 # Local agent / tool caches and handoff notes
-.ai-sdlc/
+.ai-sdlc/backups/
+.ai-sdlc/bite/
+.ai-sdlc/cache/
+.ai-sdlc/dispatch/
+.ai-sdlc/evidence/
+.ai-sdlc/guard/
+.ai-sdlc/runs/
+.ai-sdlc/session/
+.ai-sdlc/view/
 .impeccable/
 HANDOFF.md
 

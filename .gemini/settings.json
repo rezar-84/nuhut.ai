@@ -1,0 +1,72 @@
+{
+  "hooks": {
+    "BeforeTool": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$GEMINI_PROJECT_DIR\"/.claude/hooks/adapter.sh gemini work-item-id.sh",
+            "description": "Checking the commit carries a work item ID",
+            "name": "ai-sdlc work-item-id",
+            "type": "command"
+          }
+        ],
+        "matcher": "run_shell_command"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$GEMINI_PROJECT_DIR\"/.claude/hooks/adapter.sh gemini protected-paths.sh",
+            "description": "Checking the path is not single-writer",
+            "name": "ai-sdlc protected-paths",
+            "type": "command"
+          }
+        ],
+        "matcher": "write_file|replace"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$GEMINI_PROJECT_DIR\"/.claude/hooks/adapter.sh gemini test-lock.sh",
+            "description": "Checking the path is not a locked reproducing test",
+            "name": "ai-sdlc test-lock",
+            "type": "command"
+          }
+        ],
+        "matcher": "write_file|replace"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$GEMINI_PROJECT_DIR\"/.claude/hooks/adapter.sh gemini secret-guard.sh",
+            "description": "Checking the commit adds no credential",
+            "name": "ai-sdlc secret-guard",
+            "type": "command"
+          }
+        ],
+        "matcher": "run_shell_command"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$GEMINI_PROJECT_DIR\"/.claude/hooks/adapter.sh gemini doc-leak-guard.sh",
+            "description": "Checking the write holds no credential",
+            "name": "ai-sdlc doc-leak-guard",
+            "type": "command"
+          }
+        ],
+        "matcher": "write_file|replace"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$GEMINI_PROJECT_DIR\"/.claude/hooks/adapter.sh gemini approval-gate.sh",
+            "description": "Checking the command needs no human approval",
+            "name": "ai-sdlc approval-gate",
+            "type": "command"
+          }
+        ],
+        "matcher": "run_shell_command|write_file|replace"
+      }
+    ]
+  }
+}

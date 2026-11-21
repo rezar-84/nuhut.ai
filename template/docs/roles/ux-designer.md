@@ -71,8 +71,10 @@ Every view must define all of these before it is designed as "done":
 
 ## Ship-review checklist
 
-- [ ] Exercise the real flow, not a description of it. Including on the smallest
-      supported viewport or terminal width.
+- [ ] Exercise the real flow, not a description of it (in a browser/terminal, or via
+      headless browser/CLI automation when running unattended; if neither is available,
+      report interactive verification as `Not run`). Including on the smallest supported
+      viewport or terminal width.
 - [ ] Every state above actually renders. Force them — empty the data, kill the network,
       sign out mid-flow, paste 500 characters into the name field.
 - [ ] No dead affordance: every control does something. A button that logs to the

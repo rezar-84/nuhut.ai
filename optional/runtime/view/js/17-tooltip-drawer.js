@@ -332,7 +332,7 @@
         el("span", { text: drawerNext.cmd })
       ]),
       el("div", { style: "display: flex; align-items: center; gap: 6px; flex-wrap: wrap;" }, [
-        LIVE && M.action_token && drawerNext.runSub ? el("button", {
+        LIVE && M.live_actions && drawerNext.runSub ? el("button", {
           cls: "btn primary",
           style: "font-size: 11px; padding: 4px 10px;",
           text: "▶ Run in Project",
@@ -347,7 +347,7 @@
           } }
         }) : null,
         el("button", {
-          cls: "btn" + (!(LIVE && M.action_token && drawerNext.runSub) ? " primary" : ""),
+          cls: "btn" + (!(LIVE && M.live_actions && drawerNext.runSub) ? " primary" : ""),
           style: "font-size: 11px; padding: 4px 10px;",
           text: "⧉ Copy CLI Command",
           on: { click: function (ev) {

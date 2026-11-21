@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INSTALL = os.path.join(ROOT, "install.py")
@@ -189,6 +190,15 @@ def test_guards():
         os.environ["TERM"] = "dumb"
         term_dumb = installer.Term()
         check("TERM=dumb disables bold ANSI", term_dumb.B == "")
+        # Python 3.8-3.10 return a 0x0 size, not the fallback, for a terminal that reports 0.
+        real_size = shutil.get_terminal_size
+        shutil.get_terminal_size = lambda fallback=(80, 24): os.terminal_size((0, 0))
+        try:
+            check("a terminal that reports size 0 is drawn at the 80x24 fallback, not 40 columns",
+                  term_dumb.width() == 80 and term_dumb.height() == 24,
+                  "%sx%s" % (term_dumb.width(), term_dumb.height()))
+        finally:
+            shutil.get_terminal_size = real_size
     finally:
         if orig_no_color is not None:
             os.environ["NO_COLOR"] = orig_no_color
@@ -676,13 +686,25 @@ def test_hooks():
         o, _ = p.communicate(json.dumps(payload).encode())
         return o.decode("utf-8", "replace")
 
-    if shutil.which("jq"):
+    if True:  # hooks run via Python 3 stdlib (.ai-sdlc/bin/hooks.py); jq is no longer required
+        bad_p = subprocess.Popen(["sh", os.path.join(d, ".claude", "hooks", "work-item-id.sh")],
+                                 cwd=d, env=dict(os.environ, CLAUDE_PROJECT_DIR=d),
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        bad_out = bad_p.communicate(b"{not-valid-json")[0].decode("utf-8", "replace")
+        check("malformed hook JSON fails closed with deny", '"permissionDecision":"deny"' in bad_out, bad_out)
         out = fire("work-item-id.sh", {"tool_input": {"command": 'git commit -m "fix"'}})
         check("a commit with no ID is denied", '"permissionDecision":"deny"' in out, out)
         out = fire("work-item-id.sh", {"tool_input": {"command": 'git commit -m "HKT-9 fix"'}})
         check("a commit with an ID is allowed", "deny" not in out, out)
         out = fire("work-item-id.sh", {"tool_input": {"command": "ls"}})
         check("an unrelated command is allowed", "deny" not in out, out)
+        foreign = tempfile.mkdtemp(prefix="sdlc-foreign-")
+        subprocess.call(["git", "init", "-q", foreign])
+        out = fire("work-item-id.sh", {"tool_input": {"command": 'cd %s && git commit -m "init"' % foreign}})
+        check("a commit provably in another repository is not traced", "deny" not in out, out)
+        out = fire("work-item-id.sh", {"tool_input": {"command": 'cd $SOMEWHERE && git commit -m "init"'}})
+        check("a commit whose target cannot be resolved stays enforced", '"permissionDecision":"deny"' in out, out)
+        shutil.rmtree(foreign, ignore_errors=True)
         out = fire("protected-paths.sh", {"tool_input": {"file_path": "package-lock.json"}})
         check("an unlisted path is allowed", "deny" not in out, out)
         out = fire("protected-paths.sh", {"tool_input": {"file_path": ".ai-sdlc/protected.txt"}})
@@ -789,8 +811,43 @@ def test_hooks():
         check("a MultiEdit is scanned", '"permissionDecision":"deny"' in out, out)
         check("a denial is one line", len([l for l in out.splitlines() if l.strip()]) == 1
               and "\\n" not in out, out)
-    else:
-        check("jq present for hook behaviour tests", True, "skipped: jq not installed")
+
+        # Symlinked directory resolution on newly created test files
+        os.makedirs(os.path.join(d, "tests"), exist_ok=True)
+        link_dir = os.path.join(d, "linked_tests")
+        if not os.path.exists(link_dir):
+            os.symlink(os.path.join(d, "tests"), link_dir)
+        out = fire("test-lock.sh", {"tool_input": {"file_path": "linked_tests/q_new_locked.py"}})
+        check("a symlinked directory does not bypass test-lock on a new file",
+              '"permissionDecision":"deny"' in out, out)
+
+        # Built-in test-lock / unlock-tests protection in approval-gate
+        out = fire("approval-gate.sh", {"tool_input": {"command": "echo 'tests/repro.py' >> .ai-sdlc/test-lock.txt"}})
+        check("appending a new test lock via >> is allowed", "deny" not in out, out)
+        out = fire("approval-gate.sh", {"tool_input": {"command": ": > .ai-sdlc/test-lock.txt"}})
+        check("truncating test-lock.txt from shell is denied", '"permissionDecision":"deny"' in out, out)
+        out = fire("approval-gate.sh", {"tool_input": {"command": "python3 .ai-sdlc/bin/sdlc.py fix unlock-tests --apply"}})
+        check("unapproved unlock-tests CLI call from shell is denied", '"permissionDecision":"deny"' in out, out)
+        out = fire("approval-gate.sh", {"tool_input": {"command": "python3 .ai-sdlc/bin/sdlc.py fix unlock-tests --apply"}},
+                   AI_SDLC_APPROVAL="CHG-99")
+        check("approved unlock-tests CLI call passes approval-gate", out.strip() == "", out)
+
+        # Linked git worktree secret-guard check
+        subprocess.call(git + ["commit", "-qm", "HKT-1 init", "--no-verify"], cwd=d)
+        wt_hook = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-hook-wt-"))
+        shutil.rmtree(wt_hook, ignore_errors=True)
+        subprocess.call(git + ["worktree", "add", "-q", "-b", "feat/HKT-2-wt", wt_hook], cwd=d)
+        try:
+            write(wt_hook, "wt_secret.py", "S = 'AKIA" + "ZYXWVUTSRQPONMLK'\n")
+            subprocess.call(git + ["add", "wt_secret.py"], cwd=wt_hook)
+            out = fire("secret-guard.sh", {"tool_input": {"command": 'git -C "%s" commit -m "HKT-2 wt"' % wt_hook}})
+            check("secret-guard inspects git -C worktree staged diff", '"permissionDecision":"deny"' in out, out)
+            out = fire("secret-guard.sh", {"tool_input": {"command": 'cd "%s" && git commit -m "HKT-2 wt"' % wt_hook}})
+            check("secret-guard inspects cd <worktree> && git commit staged diff",
+                  '"permissionDecision":"deny"' in out, out)
+        finally:
+            subprocess.call(git + ["worktree", "remove", "--force", wt_hook], cwd=d)
+            shutil.rmtree(wt_hook, ignore_errors=True)
 
     profile = json.loads(read(d, ".ai-sdlc/profile.json"))
     profile["facts"]["marker_from_setup"] = True
@@ -1133,6 +1190,56 @@ def test_runtime():
     check("plan-check --strict fails on a gap", code == 1, out)
     code, out = sdlc("plan-check", "RTX-404", "--base", base)
     check("plan-check explains a missing plan", code == 2 and "no plan" in out, out)
+    write(d, ".ai-sdlc/bin/extra.py", "z = 3\n")
+    write(d, ".ai-sdlc/cache/junk.json", "{}\n")
+    code, out = sdlc("plan-check", "RTX-9", "--base", base, "--json")
+    try:
+        changed = json.loads(out).get("changed", [])
+    except ValueError:
+        changed = []
+    check("plan-check counts the kit runtime but not its cache",
+          ".ai-sdlc/bin/extra.py" in changed and ".ai-sdlc/cache/junk.json" not in changed, out)
+    os.remove(os.path.join(d, ".ai-sdlc/bin/extra.py"))
+    write(d, "docs/project/plans/RTX-8.md", "# Plan\n## Files that change\n- `**`\n## Order of work\n")
+    code, out = sdlc("plan-check", "RTX-8", "--base", base, "--json")
+    try:
+        broad = json.loads(out).get("broad")
+    except ValueError:
+        broad = None
+    check("plan-check flags a plan whose paths match most of the repository", broad == ["**"], out)
+    code, out = sdlc("plan-check", "RTX-8", "--base", base, "--strict")
+    check("plan-check --strict fails a plan that is too broad to check", code == 1 and "too broad" in out, out)
+    # --pre: before the build, every planned path must exist or be marked (new).
+    write(d, "docs/project/plans/RTX-7.md",
+          "# Plan\n## Files that change\n- `src/pay/**`\n- `docs/api.md`\n"
+          "- `src/refund.py` (new)\n- `AGENTS.md`\n## Order of work\n")
+    code, out = sdlc("plan-check", "RTX-7", "--pre", "--json")
+    try:
+        pre = json.loads(out)
+    except ValueError:
+        pre = {}
+    check("plan-check --pre names a planned path that does not exist and is not marked new",
+          code == 1 and pre.get("missing") == ["docs/api.md"] and pre.get("new") == ["src/refund.py"], out)
+    code, out = sdlc("plan-check", "RTX-7", "--pre")
+    check("plan-check --pre says how to resolve a missing path", code == 1 and "(new)" in out and "docs/api.md" in out, out)
+    write(d, "docs/project/plans/RTX-7.md",
+          "# Plan\n## Files that change\n- `src/pay/**`\n- `src/refund.py` (new)\n## Order of work\n")
+    code, out = sdlc("plan-check", "RTX-7", "--pre")
+    check("plan-check --pre passes a plan whose paths exist or are marked new", code == 0, out)
+    code, out = sdlc("plan-check", "RTX-8", "--pre")
+    check("plan-check --pre fails a plan that is too broad", code == 1 and "too broad" in out, out)
+    write(d, "src/caf\u00e9.py", "c = 1\n")
+    write(d, "docs/project/plans/RTX-6.md",
+          "# Plan\n## Files that change\n- `src/caf*.py`\n- `src/later.py (new)`\n## Order of work\n")
+    code, out = sdlc("plan-check", "RTX-6", "--pre", "--json")
+    try:
+        pre = json.loads(out)
+    except ValueError:
+        pre = {}
+    check("plan-check --pre matches a glob against a non-ASCII file name",
+          code == 0 and pre.get("missing") == [], out)
+    check("a (new) marker inside the backticks still plans the path, as new",
+          "src/later.py" in pre.get("planned", []) and pre.get("new") == ["src/later.py"], out)
 
     # An older install gains the runtime on upgrade; a local edit blocks it.
     os.remove(script)
@@ -1308,6 +1415,11 @@ def test_view():
         check("the live page is served with the model inside",
               code == 200 and "VWX-2" in page and "/*NUHUT_MODEL*/" not in page, str(code))
         check("the live page is never cached", headers.get("Cache-Control") == "no-store", str(headers))
+        set_cookie = headers.get("Set-Cookie") or headers.get("set-cookie") or ""
+        m_cookie = _re.search(r"nuhut_session=([0-9a-f]+)", set_cookie)
+        token = m_cookie.group(1) if m_cookie else ""
+        check("GET / sets an HttpOnly SameSite=Strict session cookie",
+              len(token) == 32 and "HttpOnly" in set_cookie and "SameSite=Strict" in set_cookie, set_cookie)
         code, v1, _ = get("/version")
         code, body, _ = get("/model.json")
         check("the model endpoint carries the same version",
@@ -1324,22 +1436,35 @@ def test_view():
         code, _, _ = get("/../../AGENTS.md")
         check("nothing but the page, version and model is served", code == 404, str(code))
 
-        # Test POST /api/config and /api/fix with session token protection
+        # Test POST /api/config and /api/fix with HttpOnly cookie + Origin CSRF protection
         live_model = json.loads(body)
-        token = live_model.get("action_token", "")
-        check("live model carries an action token", len(token) == 32, token)
+        check("live model advertises live_actions without exposing action_token",
+              live_model.get("live_actions") is True and "action_token" not in live_model,
+              str(list(live_model.keys())))
 
-        def post(path, payload, tok=token):
+        def post(path, payload, tok=token, origin="http://127.0.0.1:%d" % port):
             c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
             raw = json.dumps(payload).encode("utf-8")
             hdrs = {"Host": "127.0.0.1:%d" % port, "Content-Type": "application/json",
-                    "Content-Length": str(len(raw)), "X-Action-Token": tok}
+                    "Content-Length": str(len(raw))}
+            if tok is not None:
+                hdrs["Cookie"] = "nuhut_session=%s" % tok
+            if origin is not None:
+                hdrs["Origin"] = origin
             c.request("POST", path, body=raw, headers=hdrs)
             r = c.getresponse()
             return r.status, r.read().decode("utf-8", "replace")
 
         code_bad, _ = post("/api/config", {"effort": "Lean"}, tok="wrong")
-        check("POST without valid action token is refused", code_bad == 403, str(code_bad))
+        check("POST without valid session cookie is refused", code_bad == 403, str(code_bad))
+        code_bad_origin, _ = post("/api/config", {"effort": "Lean"}, origin="http://evil.example")
+        check("POST with cross-origin Origin header is refused", code_bad_origin == 403, str(code_bad_origin))
+        code_no_origin, _ = post("/api/config", {"effort": "Lean"}, origin=None)
+        check("POST without Origin header is refused", code_no_origin == 403, str(code_no_origin))
+        code_nondict, _ = post("/api/config", ["not", "a", "dict"])
+        check("POST with non-object JSON payload returns 400", code_nondict == 400, str(code_nondict))
+        code_checks, _ = post("/api/config", {"checks": {"unit": "echo pwned"}})
+        check("POST /api/config refuses checks.* shell command mutations", code_checks == 403, str(code_checks))
         code_cfg, out_cfg = post("/api/config", {"token_saving": "on"})
         check("POST /api/config enables token-saving mode",
               code_cfg == 200 and json.loads(out_cfg).get("ok") is True, out_cfg)
@@ -2597,9 +2722,6 @@ def test_review_fixes():
           and installer.normalize_prefix("AB\n") == "AB"
           and installer.validate_prefix(None, "acme1")[0] is False)
 
-    if not shutil.which("jq"):
-        check("jq present for hook review tests", True, "skipped: jq not installed")
-        return
     d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-hooks2-"))
     code, out = run([d, "HKT", "-y", "--hooks"])
 
@@ -2641,6 +2763,10 @@ def test_review_fixes():
     subprocess.call(git + ["add", "cfg.py"], cwd=d)
     out = fire("secret-guard.sh", 'git commit -m "HKT-1 cfg"')
     check("a real-shaped OpenAI key is still denied", '"permissionDecision":"deny"' in out, out)
+    write(d, "cfg.py", "KEY = 'sk-svcacct-" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0'\n")
+    subprocess.call(git + ["add", "cfg.py"], cwd=d)
+    out = fire("secret-guard.sh", 'git commit -m "HKT-1 cfg"')
+    check("an OpenAI service-account key is denied", '"permissionDecision":"deny"' in out, out)
     subprocess.call(git + ["commit", "-qm", "HKT-1 base", "--no-verify"], cwd=d)
     write(d, "notes.md", "AKIA" + "ABCDEFGHIJKLMNOP\n")
     for cmd in ('git commit -asm "HKT-1 x"', '  git commit -am "HKT-1 x"',
@@ -3153,7 +3279,8 @@ def test_claims():
     check("an item without a plan is listed as plan first", [x["id"] for x in par.get("plan_first", [])] == ["CLX-7"], out[:300])
     code, out = sdlc(repo, "claim", "CLX-1", "--agent", "agent-a", "--mark")
     wt = os.path.join(d, "repo-CLX-1")
-    check("claim creates the branch and its own worktree", code == 0 and os.path.isdir(wt) and "CLX-1-login-form" in out, out)
+    check("claim creates the branch and its own worktree",
+          code == 0 and os.path.isdir(wt) and "feat/CLX-1-login-form" in out, out)
     check("--mark sets the row to In progress in the main worktree",
           re.search(r"\| CLX-1 \|.*\|\s*In progress\s*\|", read(repo, "docs/project/backlog.md")) is not None)
     code, out = sdlc(repo, "claim", "CLX-1", "--agent", "agent-b", "--no-worktree")
@@ -3170,7 +3297,7 @@ def test_claims():
     code, out = sdlc(repo, "claim", "CLX-6", "--no-worktree")
     check("an item with an unfinished dependency cannot be claimed", code == 1 and "CLX-9" in out, out)
     write(wt, "scratch.txt", "work in progress\n")
-    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree")
+    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree", "--agent", "agent-a")
     check("release refuses to remove a dirty worktree", code == 1 and "uncommitted" in out and os.path.isdir(wt), out)
     os.remove(os.path.join(wt, "scratch.txt"))
     # A claim on a finished item is reported until it is released.
@@ -3181,12 +3308,17 @@ def test_claims():
         "| CLX-2 | Billing page | 2 | software-engineer |  | Ready |", "| CLX-2 | Billing page | 2 | software-engineer |  | Done |"))
     code, out = sdlc(repo, "doctor")
     check("doctor flags a claim on a finished item", "claim CLX-2" in out and "still claimed" in out, out[-600:])
-    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree")
+    code, out = sdlc(repo, "release", "CLX-1", "--remove-worktree", "--agent", "agent-a")
     check("release frees the claim and removes a clean worktree", code == 0 and not os.path.isdir(wt), out)
+    code_wrong, out_wrong = sdlc(repo, "release", "CLX-2", "--agent", "agent-other")
+    check("release refuses another agent's claim without --force",
+          code_wrong == 1 and "claimed by agent-c" in out_wrong, out_wrong)
     code, out = sdlc(repo, "view", "--json")
     model = json.loads(out) if code == 0 else {}
     check("the viewer model carries claims and the parallel report",
           [c["id"] for c in model.get("claims", [])] == ["CLX-2"] and "groups" in model.get("parallel", {}), out[:300])
+    code_force, out_force = sdlc(repo, "release", "CLX-2", "--agent", "agent-other", "--force")
+    check("release --force overrides agent ownership check", code_force == 0, out_force)
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -3235,6 +3367,24 @@ def test_specs():
     code, out = sdlc("spec", "apply", "SPX-2", "--write")
     check("a MODIFIED name that does not exist is refused, nothing written", code == 1 and "not found" in out
           and os.path.exists(os.path.join(d, "docs/project/specs/changes/SPX-2.md")), out)
+    # Test RENAMED requirements + missing trailing EOF newline + path traversal rejection
+    write(d, "docs/project/specs/login.md", read(d, "docs/project/specs/login.md").rstrip("\n"))
+    write(d, "docs/project/specs/changes/SPX-3.md",
+          "Capability: `login`\n\n## RENAMED Requirements\n\n"
+          "- FROM: `### Requirement: Two-factor`\n"
+          "- TO: `### Requirement: Multi-factor`\n\n"
+          "## MODIFIED Requirements\n\n### Requirement: Multi-factor\nThe system MUST ask for a second factor.\n\n"
+          "#### Scenario: code\n- **WHEN** a password matches\n- **THEN** a second factor is requested")
+    code_ren, out_ren = sdlc("spec", "apply", "SPX-3", "--write")
+    spec_ren = read(d, "docs/project/specs/login.md")
+    check("spec apply handles RENAMED + MODIFIED even without trailing EOF newline",
+          code_ren == 0 and "### Requirement: Multi-factor" in spec_ren
+          and "### Requirement: Two-factor" not in spec_ren and "second factor" in spec_ren, out_ren + spec_ren[-300:])
+    write(d, "docs/project/specs/changes/SPX-BAD.md",
+          "Capability: `../outside`\n\n## ADDED Requirements\n\n### Requirement: Bad\nSHALL fail.\n\n#### Scenario: s\n- **WHEN** x\n- **THEN** y\n")
+    code_trav, out_trav = sdlc("spec", "apply", "SPX-BAD", "--write")
+    check("spec apply rejects capability path traversal", code_trav == 1, out_trav)
+    os.remove(os.path.join(d, "docs/project/specs/changes/SPX-BAD.md"))
     backlog = read(d, "docs/project/backlog.md")
     head, sep, tail = backlog.partition("## Done")
     t1, s2, t2 = tail.partition("| --- |")
@@ -3369,7 +3519,7 @@ def test_sync():
         return p.returncode, p.stdout
 
     remote, a, b = (os.path.join(base, n) for n in ("remote.git", "a", "b"))
-    git(base, "init", "-q", "--bare", remote)
+    git(base, "init", "-q", "--bare", "-b", "main", remote)
     git(base, "clone", "-q", remote, a)
     git(a, "checkout", "-q", "-b", "main")
     run([a, "SYN", "-y"])
@@ -3549,7 +3699,8 @@ def test_upgrade_to_41():
               all(os.path.isfile(os.path.join(d, "docs", rel)) for rel in ("templates/spec.md", "templates/spec-change.md", "process/15-specs.md")))
         after = read(d, "docs/project/charter.md").splitlines()
         added = [l for l in after if l not in charter_before.splitlines()]
-        new_rows = ("| **Specs** |", "| **Slop filter** |", "| **Updating a branch** |", "| **Finish guard** |", "| **Allowed in records** |")
+        new_rows = ("| **Specs** |", "| **Slop filter** |", "| **Updating a branch** |",
+                    "| **Finish guard** |", "| **Allowed in records** |", "| **Discovered defects** |")
         check("project records keep every line; the charter only gains the new rows",
               all(l in after for l in charter_before.splitlines()) and len(added) == len(new_rows)
               and all(any(l.startswith(r) for l in added) for r in new_rows)
@@ -3602,8 +3753,12 @@ def test_semver():
     write(d, "VERSION", "4.0.0\n")
     write(d, ".claude-plugin/plugin.json", '{\n  "name": "x",\n  "version": "4.0.0"\n}\n')
     write(d, "CHANGELOG.md", "# Changelog\n\n## Unreleased\n\n## 4.0.0 — 2026-10-19\n\n- first\n")
+    os.makedirs(os.path.join(d, "tools"))
+    shutil.copy(tool, os.path.join(d, "tools", "semver.py"))
     subprocess.call(["git", "add", "-A"], cwd=d)
     subprocess.call(git + ["commit", "-qm", "docs(release): 4.0.0"], cwd=d)
+    check("the installer names a released checkout by VERSION alone",
+          installer.display_version(Path(d)) == "4.0.0", installer.display_version(Path(d)))
 
     def commit(msg, name):
         write(d, name, msg)
@@ -3624,6 +3779,9 @@ def test_semver():
           nxt("--prerelease"))
     commit("refactor(api)!: drop the old flag", "c.txt")
     check("a ! after the type is a major", nxt() == "5.0.0", nxt())
+    check("the installer says a checkout ahead of VERSION is unreleased, and what it becomes",
+          installer.display_version(Path(d)) == "4.0.0 + 3 unreleased commits (next release: 5.0.0)",
+          installer.display_version(Path(d)))
     out = subprocess.run([sys.executable, tool, "bump", "--root", d], stdout=subprocess.PIPE,
                          universal_newlines=True).stdout.strip()
     changelog = read(d, "CHANGELOG.md")
@@ -3635,6 +3793,22 @@ def test_semver():
     subprocess.call(["git", "add", "-A"], cwd=d)
     subprocess.call(git + ["commit", "-qm", "chore(release): v5.0.0 [skip ci]"], cwd=d)
     check("the release commit itself starts no new release", nxt() == "5.0.0", nxt())
+    check("after the release the installer names the new VERSION alone",
+          installer.display_version(Path(d)) == "5.0.0", installer.display_version(Path(d)))
+    commit("feat(x): after the release", "e.txt")
+    commit("fix(x): another", "f.txt")
+    shallow = tempfile.mkdtemp()
+    subprocess.call(["git", "clone", "-q", "--depth", "1", "file://" + d, shallow],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    check("a shallow clone says its unreleased state is unknown rather than guessing",
+          installer.display_version(Path(shallow)) == "5.0.0 (shallow clone: unreleased commits unknown)",
+          installer.display_version(Path(shallow)))
+    shutil.rmtree(shallow, ignore_errors=True)
+    plain = tempfile.mkdtemp()
+    write(plain, "VERSION", "5.0.0\n")
+    check("a copy with no git history falls back to VERSION",
+          installer.display_version(Path(plain)) == "5.0.0", installer.display_version(Path(plain)))
+    shutil.rmtree(plain, ignore_errors=True)
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -3801,7 +3975,51 @@ def test_finish():
     check("a Tier 1 item cannot waive verify and owes a ship review",
           code == 1 and "cannot be waived" in out and "ship review" in out, out)
     sdlc("verify", "--item", "FIN-3")
-    write(d, "docs/project/reviews/FIN-3-ship-qa.md", "# Ship review\n\nPass.\n")
+    responses = ("# Ship review\n\nPass.\n\n## Responses\n\n"
+                 "| # | Response | Evidence or decision | Decided by |\n| --- | --- | --- | --- |\n"
+                 "| 1 | Escalate | the retention period is a legal call | |\n"
+                 "| 2 | Contest | | |\n| 3 | Fix | `src/a.py` changed | |\n"
+                 "| _(#)_ | _(Fix / Contest / Escalate / Decline)_ | _(evidence)_ | _(name)_ |\n")
+    write(d, "docs/project/reviews/FIN-3-ship-qa.md", responses)
+    code, out, err = sdlc("finish", "FIN-3")
+    check("finish refuses while a review finding is escalated to a person with no decision",
+          code == 1 and "escalated" in out and "FIN-3-ship-qa.md" in out, out)
+    code, out, err = sdlc("doctor", "--json")
+    found = json.loads(out) if code in (0, 1) and out.strip().startswith("[") else []
+    esc = [f for f in found if f.get("check") == "escalation"]
+    con = [f for f in found if f.get("check") == "contest"]
+    check("doctor lists the open escalation as the owner's decision, once",
+          len(esc) == 1 and esc[0].get("who") == "owner" and "#1" in esc[0].get("where", ""), out[:600])
+    check("doctor flags a contest with no evidence the reviewer could read",
+          len(con) == 1 and "#2" in con[0].get("where", ""), out[:600])
+    code, out, err = sdlc("view", "--json")
+    model = json.loads(out) if code == 0 else {}
+    check("the viewer model carries the escalation for Needs you",
+          any(a.get("check") == "escalation" and a.get("who") == "owner" for a in model.get("alerts", [])),
+          str(model.get("alerts"))[:400])
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import sdlc as rt
+    hdr = "| # | Response | Evidence or decision | Decided by |\n| --- | --- | --- | --- |\n"
+    def esc_open(text):
+        return [r for r in rt.review_responses(text) if r["response"] == "escalate" and not r["decided_by"]]
+    check("a pipe inside the evidence does not shift Decided by",
+          len(esc_open("## Responses\n\n" + hdr + "| 1 | Escalate | the `a\\|b` convention | |\n")) == 1)
+    check("pending, TBD or owner under Decided by is not a decision",
+          all(len(esc_open("## Responses\n\n" + hdr + "| 1 | Escalate | x | %s |\n" % w)) == 1
+              for w in ("pending", "TBD", "owner", "_pending_", "n/a", "?")))
+    check("Escalated, or Escalate with a note, is still an escalation",
+          len(esc_open("## Responses\n\n" + hdr + "| 1 | Escalated | x | |\n| 2 | **Escalate** — owner | y | |\n")) == 2)
+    check("columns are read from the header row, not by position",
+          len(esc_open("## Responses\n\n| Finding | Sev | Response | Evidence | Decided by |\n| --- | --- | --- | --- | --- |\n"
+                       "| **3** | S3 | Escalate | legal | |\n")) == 1)
+    check("a Responses heading with a suffix, or a role's ### Responses, is read",
+          len(esc_open("## Responses (author)\n\n" + hdr + "| 1 | Escalate | x | |\n")) == 1
+          and len(esc_open("## qa\n\n### Responses\n\n" + hdr + "| 1 | Escalate | x | |\n\n## Outcome\n")) == 1)
+    check("a finding number in bold is reported plainly",
+          [r["n"] for r in rt.review_responses("## Responses\n\n" + hdr + "| **4** | Fix | abc | |\n")] == ["4"])
+    write(d, "docs/project/reviews/FIN-3-ship-qa.md",
+          responses.replace("legal call | |", "legal call; keep 30 days | Sam |")
+          .replace("| 2 | Contest | | |", "| 2 | Contest | `src/a.py:3` already checks it | |"))
     sdlc("finish", "FIN-3")
     write(d, "docs/project/worklog.md",
           re.sub(r"(?m)^TODO\(finish\): .*$", "none.", read(d, "docs/project/worklog.md")))
@@ -3860,6 +4078,509 @@ def test_finish():
     code, out, err = sdlc("guard", "stop", stdin='{"session_id": "t2"}')
     check("the charter's Finish guard row turns the guard off", code == 0 and not err, err)
 
+    # Single-shot finish (--why), Strict Tier 2 Parked, defect test-lock auto-release & unlock-tests guard
+    backlog = read(d, "docs/project/backlog.md")
+    i = backlog.index("## Now")
+    j = backlog.index("\n", backlog.index("| --- ", i)) + 1
+    extra_rows = (
+        "| FIN-5 | Defect with locked repro | 2 | qa | | In progress |\n"
+        "| FIN-6 | Strict Tier 2 change | 2 | qa | | In progress |\n"
+    )
+    write(d, "docs/project/backlog.md", backlog[:j] + extra_rows + backlog[j:])
+    write(d, "docs/project/defects/FIN-5.md", "# Defect FIN-5\n")
+    write(d, "src/bug5.py", "VAL = 0\n")
+    os.makedirs(os.path.join(d, "tests"), exist_ok=True)
+    write(d, "tests/test_fin5.py", "import sys\nsys.path.insert(0, 'src')\nimport bug5\nsys.exit(0 if bug5.VAL == 1 else 1)\n")
+    write(d, ".ai-sdlc/test-lock.txt", "tests/test_fin5.py\n")
+    commit("test(FIN-5): repro")
+    write(d, "src/bug5.py", "VAL = 1\n")
+    commit("fix(FIN-5): fix defect")
+    code_bt, out_bt, err_bt = sdlc("bite", "--item", "FIN-5", sys.executable, "tests/test_fin5.py")
+    check("bite --item FIN-5 proves the locked test catches the defect", code_bt == 0, out_bt + err_bt)
+    sdlc("verify", "--item", "FIN-5")
+    code_ss, out_ss, _ = sdlc("finish", "FIN-5", "--why", "Fixed root cause in parser.")
+    fin5_entry = read(d, "docs/project/worklog.md").split("## FIN-5")[1].split("\n## ")[0] if "## FIN-5" in read(d, "docs/project/worklog.md") else ""
+    check("single-shot finish --why closes FIN-5 in one pass without TODO(finish)",
+          code_ss == 0 and "set Done" in out_ss and fin5_entry and "TODO(finish)" not in fin5_entry, out_ss + fin5_entry)
+    check("verified defect finish auto-releases the item's locked test",
+          "tests/test_fin5.py" not in read(d, ".ai-sdlc/test-lock.txt"), read(d, ".ai-sdlc/test-lock.txt"))
+
+    # Strict tier rules park Tier 2 for human approval
+    write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
+        "| **Tier rules** | `Standard` · `Strict`", "| **Tier rules** | `Strict`"))
+    write(d, "src/f6.txt", "strict\n")
+    commit("feat(FIN-6): strict change")
+    sdlc("verify", "--item", "FIN-6")
+    write(d, "docs/project/reviews/FIN-6-ship-qa.md", "# Ship review\n\nPass.\n")
+    code_st, out_st, _ = sdlc("finish", "FIN-6", "--why", "Strict tier 2 verification.")
+    backlog_st = read(d, "docs/project/backlog.md")
+    check("Strict tier rules park a finished Tier 2 item for human approval",
+          code_st == 0 and "Parked" in out_st
+          and re.search(r"\| FIN-6 \|[^\n]*\| Parked \|", backlog_st[backlog_st.index("## Parked"):]) is not None, out_st)
+
+    # Agent session env guard on unlock-tests
+    write(d, ".ai-sdlc/test-lock.txt", "tests/locked_again.py\n")
+    agent_env = dict(os.environ, CLAUDECODE="1")
+    agent_env.pop("AI_SDLC_APPROVAL", None)
+    p_blk = subprocess.run([sys.executable, script, "fix", "unlock-tests", "--apply"], cwd=d, env=agent_env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("fix unlock-tests refuses inside an agent session without AI_SDLC_APPROVAL",
+          p_blk.returncode == 1 and "AI_SDLC_APPROVAL" in p_blk.stdout and "locked_again.py" in read(d, ".ai-sdlc/test-lock.txt"),
+          p_blk.stdout)
+    human_env = dict(os.environ)
+    for k in ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_PROJECT_DIR", "GEMINI_CLI",
+              "GEMINI_PROJECT_DIR", "CODEX_SANDBOX", "CODEX_CI", "CURSOR_AGENT",
+              "CURSOR_TRACE_ID", "AIDER", "ANTIGRAVITY_AGENT"):
+        human_env.pop(k, None)
+    p_ok = subprocess.run([sys.executable, script, "fix", "unlock-tests", "--apply"], cwd=d, env=human_env,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("fix unlock-tests succeeds for a direct human CLI run",
+          p_ok.returncode == 0 and "locked_again.py" not in read(d, ".ai-sdlc/test-lock.txt"), p_ok.stdout)
+
+
+def test_shards_and_parallel_worktrees():
+    print("sharded store, Tier 2 touch globs, and 3-way conflict-free worktree merges")
+    d = tempfile.mkdtemp(prefix="sdlc-shards-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", repo])
+    code, out = run([repo, "SHD", "-y"])
+    check("sharded test repo installs", code == 0, out[-300:])
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(cwd, *args):
+        s_path = os.path.join(cwd, ".ai-sdlc", "bin", "sdlc.py")
+        p = subprocess.run([sys.executable, s_path] + list(args), cwd=cwd,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    # Configure unit check so verify runs cleanly in every worktree.
+    sdlc(repo, "config", "--set-check", "unit=python3 -c 'print(1)'")
+    for s in ("lint", "typecheck", "integration", "e2e", "a11y", "eval", "build", "scan", "format"):
+        sdlc(repo, "config", "--set-check", "%s=absent" % s)
+
+    # Create sharded items via `sdlc.py item add`: 3 non-overlapping Tier 2, 1 conflicting Tier 2, 1 Tier 1 without plan.
+    for title, tier, touch in (
+        ("Module A", "2", "src/a.py"),
+        ("Module B", "2", "src/b.py"),
+        ("Module C", "2", "src/c.py"),
+        ("Module A extra", "2", "src/a.py"),
+        ("Core schema", "1", "src/schema.py"),
+    ):
+        rc_i, out_i = sdlc(repo, "item", "add", "--title", title, "--tier", tier, "--touch", touch, "--json")
+        check("item add creates %s shard" % title, rc_i == 0 and '"id": "SHD-' in out_i, out_i)
+
+    # Render initial backlog.md & worklog.md on main so worktrees branch from a clean commit.
+    sdlc(repo, "render")
+    for f in ("src/a.py", "src/b.py", "src/c.py"):
+        write(repo, f, "X = 0\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore(SHD-001): initial sharded backlog"], cwd=repo)
+
+    rc_par, out_par = sdlc(repo, "parallel", "--json")
+    par = json.loads(out_par) if rc_par == 0 else {}
+    top_group = set(par.get("groups", [[]])[0]) if par.get("groups") else set()
+    check("Tier 2 items with touch globs schedule together without plans/*.md",
+          {"SHD-001", "SHD-002", "SHD-003"}.issubset(top_group) or len(top_group) >= 3, out_par[:400])
+    check("conflicting touch globs on src/a.py report a conflict",
+          any({c["a"], c["b"]} == {"SHD-001", "SHD-004"} for c in par.get("conflicts", [])), out_par[:400])
+    check("Tier 1 item without plans/<ID>.md stays in plan_first even with touch globs",
+          any(x["id"] == "SHD-005" for x in par.get("plan_first", [])), out_par[:400])
+
+    # Claim SHD-001, SHD-002, SHD-003 into 3 concurrent linked git worktrees.
+    branches = []
+    for item_id, target_file in (("SHD-001", "src/a.py"), ("SHD-002", "src/b.py"), ("SHD-003", "src/c.py")):
+        rc_c, out_c = sdlc(repo, "claim", item_id, "--agent", "worker-" + item_id.lower(), "--json")
+        rec = json.loads(out_c)
+        wt = rec["worktree"]
+        branches.append((item_id, rec["branch"], wt))
+        write(wt, target_file, "X = %r\n" % item_id)
+        rc_v, out_v = sdlc(wt, "verify", "--item", item_id, "--json")
+        v_obj = json.loads(out_v)
+        check("verify --json succeeds in worktree %s" % item_id, rc_v == 0 and v_obj.get("passed") is True, out_v[:300])
+        subprocess.call(["git", "add", "-A"], cwd=wt)
+        subprocess.call(git + ["commit", "-qm", "feat(%s): implement %s\n\nWork-Item: %s\nAgent: test\nModel: test" % (
+            item_id, target_file, item_id)], cwd=wt)
+        rc_f, out_f = sdlc(wt, "finish", item_id, "--why", "Implemented %s cleanly in isolated worktree." % item_id, "--json")
+        f_obj = json.loads(out_f)
+        check("finish --json closes %s inside worktree" % item_id,
+              rc_f == 0 and f_obj.get("finished") is True and f_obj.get("status") == "Done", out_f[:300])
+        # Ensure neither backlog.md nor worklog.md was modified on the worktree branch!
+        wt_diff = subprocess.check_output(["git", "status", "--porcelain"], cwd=wt, universal_newlines=True)
+        check("worktree %s touched only shards and never dirtied backlog.md or worklog.md" % item_id,
+              "backlog.md" not in wt_diff and "worklog.md" not in wt_diff and ("items/%s.json" % item_id) in wt_diff,
+              wt_diff)
+        subprocess.call(["git", "add", "-A"], cwd=wt)
+        subprocess.call(git + ["commit", "-qm", "chore(%s): close shard records\n\nWork-Item: %s" % (item_id, item_id)], cwd=wt)
+
+    # Merge all 3 branches sequentially into main with zero conflicts!
+    for item_id, br, wt in branches:
+        m_rc = subprocess.call(git + ["merge", "--no-edit", "-q", br], cwd=repo)
+        check("branch %s merges into main with zero conflicts" % br, m_rc == 0)
+        subprocess.call(["git", "worktree", "remove", "--force", wt], cwd=repo)
+
+    rc_doc, out_doc = sdlc(repo, "doctor", "--strict")
+    check("doctor --strict passes on merged sharded main before render", rc_doc == 0, out_doc)
+    rc_rc1, out_rc1 = sdlc(repo, "render", "--check", "--json")
+    check("render --check detects summary drift before render", rc_rc1 == 1 and not json.loads(out_rc1)["in_sync"], out_rc1)
+    rc_ren, out_ren = sdlc(repo, "render", "--json")
+    check("render materializes backlog.md and worklog.md", rc_ren == 0, out_ren)
+    rc_rc2, out_rc2 = sdlc(repo, "render", "--check")
+    check("render --check exits 0 after render", rc_rc2 == 0, out_rc2)
+    rendered_wl = read(repo, "docs/project/worklog.md")
+    check("rendered worklog.md contains all 3 merged items",
+          all(i in rendered_wl for i in ("SHD-001", "SHD-002", "SHD-003")), rendered_wl[:400])
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_distributed_git_refs():
+    print("distributed git-ref CAS leases and atomic next-id across clones")
+    d = tempfile.mkdtemp(prefix="sdlc-gitrefs-")
+    origin = os.path.join(d, "origin.git")
+    seed = os.path.join(d, "seed")
+    clone_a = os.path.join(d, "clone_a")
+    clone_b = os.path.join(d, "clone_b")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "--bare", "-b", "main", "-q", origin])
+    os.makedirs(seed)
+    subprocess.call(["git", "init", "-b", "main", "-q", seed])
+    run([seed, "DST", "-y"])
+    seed_script = os.path.join(seed, ".ai-sdlc", "bin", "sdlc.py")
+    subprocess.run([sys.executable, seed_script, "item", "add", "DST-001", "--title", "Distributed job", "--touch", "a.py"],
+                   cwd=seed, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    subprocess.run([sys.executable, seed_script, "render"], cwd=seed, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    subprocess.call(["git", "add", "-A"], cwd=seed)
+    subprocess.call(git + ["commit", "-qm", "chore(DST-001): init"], cwd=seed)
+    subprocess.call(["git", "remote", "add", "origin", origin], cwd=seed)
+    subprocess.call(["git", "push", "-q", "-u", "origin", "main"], cwd=seed)
+
+    subprocess.call(["git", "clone", "-q", origin, clone_a])
+    subprocess.call(["git", "clone", "-q", origin, clone_b])
+
+    def sdlc(cwd, *args):
+        s_path = os.path.join(cwd, ".ai-sdlc", "bin", "sdlc.py")
+        p = subprocess.run([sys.executable, s_path] + list(args), cwd=cwd,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    # Alternating & concurrent next-id --sync-refs across two independent clones.
+    rc1, o1 = sdlc(clone_a, "next-id", "--sync-refs", "--json")
+    rc2, o2 = sdlc(clone_b, "next-id", "--sync-refs", "--json")
+    rc3, o3 = sdlc(clone_a, "next-id", "--sync-refs", "--json")
+    ids = [json.loads(o)["id"] for o in (o1, o2, o3) if o.strip().startswith("{")]
+    check("next-id --sync-refs allocates strictly monotonic IDs across clones",
+          rc1 == 0 and rc2 == 0 and rc3 == 0 and ids == ["DST-002", "DST-003", "DST-004"], str(ids))
+    rc_adr, o_adr = sdlc(clone_b, "next-id", "--kind", "adr", "--sync-refs", "--json")
+    check("next-id --kind adr --sync-refs allocates 4-digit ADR ID",
+          rc_adr == 0 and json.loads(o_adr)["id"] == "0001", o_adr)
+
+    # Distributed claim CAS mutex across clone_a and clone_b.
+    rc_ca, out_ca = sdlc(clone_a, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-a", "--json")
+    check("clone_a acquires remote claim lease on DST-001", rc_ca == 0 and json.loads(out_ca)["agent"] == "worker-a", out_ca)
+    rc_cb, out_cb = sdlc(clone_b, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-b")
+    check("clone_b is refused remote claim on DST-001 held by worker-a",
+          rc_cb == 1 and "worker-a" in out_cb, out_cb)
+    rc_ls, out_ls = sdlc(clone_b, "claims", "--sync-refs", "--json")
+    check("clone_b lists remote claim via claims --sync-refs",
+          rc_ls == 0 and any(c["id"] == "DST-001" and c.get("agent") == "worker-a" for c in json.loads(out_ls)), out_ls)
+    rc_bad_rel, out_bad_rel = sdlc(clone_b, "release", "DST-001", "--sync-refs", "--agent", "worker-b")
+    check("clone_b cannot release worker-a's remote claim without --force",
+          rc_bad_rel == 1 and "worker-a" in out_bad_rel, out_bad_rel)
+    rc_rel, out_rel = sdlc(clone_a, "release", "DST-001", "--sync-refs", "--agent", "worker-a", "--json")
+    check("clone_a releases remote claim cleanly with --json",
+          rc_rel == 0 and json.loads(out_rel)["released"] == "DST-001", out_rel)
+    rc_cb2, out_cb2 = sdlc(clone_b, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-b", "--json")
+    check("clone_b can claim DST-001 once worker-a releases it", rc_cb2 == 0, out_cb2)
+
+    # Stale local record: worker-a's claim is force-released and re-taken by worker-b on
+    # another clone. worker-a's later release must not delete worker-b's lease.
+    sdlc(clone_b, "release", "DST-001", "--sync-refs", "--agent", "worker-b")
+    rc_a2, out_a2 = sdlc(clone_a, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-a")
+    rc_fr, out_fr = sdlc(clone_b, "release", "DST-001", "--sync-refs", "--force")
+    rc_b3, out_b3 = sdlc(clone_b, "claim", "DST-001", "--no-worktree", "--sync-refs", "--agent", "worker-b")
+    check("setup: worker-b re-claims DST-001 after force-release",
+          rc_a2 == 0 and rc_fr == 0 and rc_b3 == 0, out_a2 + out_fr + out_b3)
+    rc_stale, out_stale = sdlc(clone_a, "release", "DST-001", "--sync-refs", "--agent", "worker-a")
+    remote_ref = subprocess.run(["git", "--git-dir", origin, "for-each-ref", "refs/nuhut/claims/DST-001"],
+                                stdout=subprocess.PIPE, universal_newlines=True).stdout.strip()
+    check("stale release is refused and leaves worker-b's remote lease intact",
+          rc_stale == 1 and "worker-b" in out_stale and remote_ref, out_stale + remote_ref)
+
+    # release without --agent defaults to the caller's identity, so it cannot free
+    # another agent's claim without --force.
+    rc_noag, out_noag = sdlc(clone_b, "release", "DST-001", "--sync-refs")
+    check("release without --agent does not free worker-b's claim",
+          rc_noag == 1 and "worker-b" in out_noag, out_noag)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_json_and_doctor_cache():
+    import datetime as _dt
+    print("universal --json contract, 4.x shard migration, and incremental doctor cache")
+    d = tempfile.mkdtemp(prefix="sdlc-cache-")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", d])
+    run([d, "JSC", "-y"])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    sdlc("config", "--set-check", "unit=python3 -c 'print(1)'")
+    # Seed a 4.x-style backlog row, commit, verify, and migrate to shards.
+    bl = read(d, "docs/project/backlog.md")
+    head, sep, tail = bl.partition("| --- | --- | --- | --- | --- | --- |\n")
+    write(d, "docs/project/backlog.md", head + sep + "| JSC-001 | Legacy item | 2 | software-engineer | | Ready |\n" + tail)
+    write(d, "app.py", "V = 1\n")
+    subprocess.call(["git", "add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "feat(JSC-001): initial\n\nWork-Item: JSC-001\nAgent: claude-code\nModel: claude-sonnet-4-6"], cwd=d)
+
+    rc_tr, out_tr = sdlc("trailers", "JSC-001", "--agent", "claude", "--model", "sonnet", "--json")
+    check("trailers --json outputs valid JSON", rc_tr == 0 and json.loads(out_tr)["Work-Item"] == "JSC-001", out_tr)
+    rc_lg, out_lg = sdlc("log", "--id", "JSC-001", "--since", "HEAD~0", "--json")
+    # JSC-001 is root commit so test --since against a second commit
+    write(d, "app.py", "V = 2\n")
+    subprocess.call(["git", "add", "app.py"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "feat(JSC-001): update\n\nWork-Item: JSC-001\nAgent: claude-code\nModel: claude-sonnet-4-6"], cwd=d)
+    rc_lg, out_lg = sdlc("log", "--since", "HEAD~1", "--json")
+    check("log --json outputs valid JSON", rc_lg == 0 and len(json.loads(out_lg)["entries"]) == 1, out_lg)
+
+    fake_rev = "cmd:%s -c \"import sys; sys.stdin.read(); print('Model: gpt-5.4\\nVerdict: Pass\\nChecked: diff\\nNot checked: none\\nFindings:\\n| # | Sev | Location | Finding | Consequence | Fix |')\"" % sys.executable
+    rc_rv, out_rv = sdlc("review", "JSC-001", "--role", "qa", "--by", fake_rev, "--json")
+    check("review --json outputs valid JSON record",
+          rc_rv == 0 and json.loads(out_rv)["verdict"] == "Pass" and json.loads(out_rv)["independence"] == "independent",
+          out_rv)
+
+    rc_vf, out_vf = sdlc("verify", "--item", "JSC-001", "--stage", "unit", "--json")
+    check("verify --json outputs valid JSON summary", rc_vf == 0 and json.loads(out_vf)["passed"] is True, out_vf)
+
+    rc_mg, out_mg = sdlc("fix", "migrate-shards", "--apply", "--json")
+    check("fix migrate-shards --apply --json migrates 4.x records into shards",
+          rc_mg == 0 and os.path.isfile(os.path.join(d, "docs/project/items/JSC-001.json"))
+          and not os.path.exists(os.path.join(d, "docs/project/evidence-ledger.jsonl")), out_mg)
+
+    # Populate 120 item shards and verify warm doctor cache hit & invalidation.
+    today_s = _dt.date.today().isoformat()
+    for n in range(2, 122):
+        write(d, "docs/project/items/JSC-%03d.json" % n, json.dumps({
+            "id": "JSC-%03d" % n, "title": "Task %d" % n, "type": "feat", "tier": "2",
+            "owner": "software-engineer", "status": "Ready", "depends": [], "touch": ["src/m%d.py" % n],
+            "created": today_s, "updated": today_s,
+        }))
+    sdlc("doctor", "--json")
+    cache_path = os.path.join(d, ".ai-sdlc", "cache", "doctor.json")
+    check("doctor writes .ai-sdlc/cache/doctor.json", os.path.isfile(cache_path))
+    t0 = time.time()
+    rc_warm, out_warm = sdlc("doctor", "--json")
+    warm_ms = (time.time() - t0) * 1000.0
+    check("warm doctor run with 120 shards completes in <500ms",
+          rc_warm == 0 and warm_ms < 500.0, "took %.1fms" % warm_ms)
+
+    # Mutating a shard invalidates the cache immediately on the next doctor run.
+    write(d, "docs/project/items/JSC-050.json", json.dumps({
+        "id": "JSC-050", "title": "Self cycle", "type": "feat", "tier": "2",
+        "owner": "software-engineer", "status": "Blocked", "depends": ["JSC-050"], "touch": ["src/m50.py"],
+        "created": today_s, "updated": today_s,
+    }))
+    rc_inv, out_inv = sdlc("doctor", "--strict", "--json")
+    check("doctor cache invalidates immediately when a shard file changes",
+          rc_inv == 1 and any("cannot depend on itself" in f["message"] for f in json.loads(out_inv)), out_inv[:300])
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_dispatch_and_self_healing():
+    print("headless dispatch: multi-worker waves, repair loop, self-healing triage, and telemetry")
+    base = tempfile.mkdtemp(prefix="sdlc-dispatch-")
+    d = os.path.join(base, "repo")
+    os.makedirs(d)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", d])
+    write(d, ".gitignore", "__pycache__/\n*.pyc\n.ai-sdlc/evidence/\n")
+    write(d, "app.py", "def base_val():\n    return 1\n")
+    write(d, "tests/__init__.py", "")
+    write(d, "tests/test_base.py",
+          "import unittest\nfrom app import base_val\n\nclass T(unittest.TestCase):\n"
+          "    def test_ok(self):\n        self.assertEqual(base_val(), 1)\n")
+    run([d, "DSP", "-y"])
+    charter = read(d, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| \*\*Default branch\*\* \|.*$", "| **Default branch** | `main` |", charter)
+    charter = charter.replace("| `checks.unit` | |",
+                              "| `checks.unit` | `%s -m unittest discover -s tests` |" % sys.executable)
+    charter = re.sub(r"(?m)^(\| `checks\.(?!unit`)[a-z0-9]+` \|)[^|\n]*\|$",
+                     r"\1 absent _(test fixture)_ |", charter)
+    write(d, "docs/project/charter.md", charter)
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com",
+               PYTHONDONTWRITEBYTECODE="1")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    # 1. Controlled self-healing triage policy (Discovered defects: Parked vs Auto-Ready (bite)).
+    rc_d1, out_d1 = sdlc("item", "add", "--discovered", "--type", "defect", "--tier", "2",
+                         "--title", "Edge rounding bug", "--json")
+    d1 = json.loads(out_d1)
+    check("default Discovered defects policy parks discovered defect",
+          rc_d1 == 0 and d1["id"] == "DSP-001" and d1["status"] == "Parked", out_d1)
+
+    rc_cfg, out_cfg = sdlc("config", "--discovered-defects", "Auto-Ready (bite)")
+    check("config --discovered-defects sets Auto-Ready (bite)", rc_cfg == 0, out_cfg)
+    rc_tr0, out_tr0 = sdlc("item", "triage", "DSP-001", "--json")
+    check("Auto-Ready (bite) keeps item Parked without passing bite evidence",
+          rc_tr0 == 0 and json.loads(out_tr0)["promoted"] is False
+          and json.loads(out_tr0)["status"] == "Parked", out_tr0)
+
+    # Plant a defect, commit baseline, add biting test + fix, run bite --item DSP-001, then triage.
+    write(d, "edge.py", "def half(x):\n    return x\n")
+    subprocess.call(["git", "add", "-A"], cwd=d, env=env)
+    subprocess.call(git + ["commit", "-qm", "init baseline"], cwd=d, env=env)
+    write(d, "edge.py", "def half(x):\n    return x / 2.0\n")
+    write(d, "tests/test_edge.py",
+          "import unittest\nfrom edge import half\n\nclass E(unittest.TestCase):\n"
+          "    def test_half(self):\n        self.assertEqual(half(4), 2.0)\n")
+    rc_bite, out_bite = sdlc("bite", "--item", "DSP-001", "%s -m unittest tests.test_edge" % sys.executable)
+    check("bite --item DSP-001 records passing bite evidence", rc_bite == 0, out_bite)
+    rc_tr1, out_tr1 = sdlc("item", "triage", "DSP-001", "--json")
+    check("Auto-Ready (bite) promotes Tier 2 defect to Ready once bite passes",
+          rc_tr1 == 0 and json.loads(out_tr1)["promoted"] is True
+          and json.loads(out_tr1)["status"] == "Ready", out_tr1)
+
+    rc_t1d, out_t1d = sdlc("item", "add", "--discovered", "--type", "defect", "--tier", "1",
+                           "--title", "Auth boundary bug", "--json")
+    check("Tier 1 discovered defect stays Parked even under Auto-Ready (bite)",
+          rc_t1d == 0 and json.loads(out_t1d)["status"] == "Parked", out_t1d)
+
+    # Park DSP-001 and reset Discovered defects policy to Parked before testing dispatch waves.
+    sdlc("item", "set", "DSP-001", "--status", "Parked", "--waiting-on", "backlog owner",
+         "--park-reason", "Held for next sprint")
+    sdlc("config", "--discovered-defects", "Parked")
+    subprocess.call(["git", "add", "-A"], cwd=d, env=env)
+    subprocess.call(git + ["commit", "-qm", "chore(DSP-001): park triaged edge defect\n\nWork-Item: DSP-001\nAgent: test\nModel: test"], cwd=d, env=env)
+
+    # 2. Multi-worker dispatch waves + repair retry + discovered defect filing.
+    sdlc("item", "add", "--id", "DSP-003", "--title", "Add mod_a", "--tier", "2", "--status", "Ready",
+         "--touch", "mod_a.py,tests/test_mod_a.py")
+    sdlc("item", "add", "--id", "DSP-004", "--title", "Add mod_b", "--tier", "2", "--status", "Ready",
+         "--touch", "mod_b.py,tests/test_mod_b.py")
+    sdlc("item", "add", "--id", "DSP-005", "--title", "Add mod_c after mod_a", "--tier", "2", "--status", "Ready",
+         "--depends", "DSP-003", "--touch", "mod_c.py,tests/test_mod_c.py")
+    sdlc("item", "add", "--id", "DSP-006", "--title", "Unplanned Tier 1", "--tier", "1", "--status", "Ready",
+         "--touch", "auth.py")
+    subprocess.call(["git", "add", "-A"], cwd=d, env=env)
+    subprocess.call(git + ["commit", "-qm", "chore(DSP-003): queue items\n\nWork-Item: DSP-003\nAgent: test\nModel: test"], cwd=d, env=env)
+
+    rc_dry, out_dry = sdlc("dispatch", "--dry-run", "--workers", "2", "--json")
+    dry = json.loads(out_dry)
+    check("dispatch --dry-run previews conflict-free Wave 1 and skips unplanned Tier 1",
+          rc_dry == 0 and dry["waves"] == [["DSP-003", "DSP-004"]]
+          and "DSP-006" in dry["skipped_tier1_unplanned"], out_dry)
+
+    fake_builder = os.path.join(base, "fake_builder.py")
+    with open(fake_builder, "w", encoding="utf-8") as fh:
+        fh.write(
+            "import os, sys\n"
+            "prompt = sys.stdin.read()\n"
+            "iid = os.environ['NUHUT_ITEM_ID']\n"
+            "attempt = int(os.environ['NUHUT_ATTEMPT'])\n"
+            "wt = os.environ['NUHUT_WORKTREE']\n"
+            "if iid == 'DSP-003':\n"
+            "    if attempt == 1:\n"
+            "        open(os.path.join(wt, 'mod_a.py'), 'w').write('def val_a():\\n    return 0\\n')\n"
+            "        open(os.path.join(wt, 'tests/test_mod_a.py'), 'w').write(\n"
+            "            'import unittest\\nfrom mod_a import val_a\\nclass TA(unittest.TestCase):\\n'\n"
+            "            '    def test_a(self): self.assertEqual(val_a(), 10)\\n')\n"
+            "        print('Summary: initial buggy draft')\n"
+            "    else:\n"
+            "        assert 'Repair Turn (Attempt 2)' in prompt, 'missing repair prompt'\n"
+            "        open(os.path.join(wt, 'mod_a.py'), 'w').write('def val_a():\\n    return 10\\n')\n"
+            "        print('Discovered: Minor help spacing glitch in legacy script')\n"
+            "        print('Summary: Implemented mod_a after repair retry')\n"
+            "elif iid == 'DSP-004':\n"
+            "    open(os.path.join(wt, 'mod_b.py'), 'w').write('def val_b():\\n    return 20\\n')\n"
+            "    open(os.path.join(wt, 'tests/test_mod_b.py'), 'w').write(\n"
+            "        'import unittest\\nfrom mod_b import val_b\\nclass TB(unittest.TestCase):\\n'\n"
+            "        '    def test_b(self): self.assertEqual(val_b(), 20)\\n')\n"
+            "    print('Summary: Implemented mod_b cleanly')\n"
+            "elif iid == 'DSP-005':\n"
+            "    from pathlib import Path\n"
+            "    assert Path(wt, 'mod_a.py').is_file(), 'DSP-005 wave 2 should see merged mod_a.py'\n"
+            "    open(os.path.join(wt, 'mod_c.py'), 'w').write('from mod_a import val_a\\ndef val_c():\\n    return val_a() + 5\\n')\n"
+            "    open(os.path.join(wt, 'tests/test_mod_c.py'), 'w').write(\n"
+            "        'import unittest\\nfrom mod_c import val_c\\nclass TC(unittest.TestCase):\\n'\n"
+            "        '    def test_c(self): self.assertEqual(val_c(), 15)\\n')\n"
+            "    print('Summary: Implemented mod_c depending on mod_a')\n"
+        )
+
+    rc_run, out_run = sdlc("dispatch", "--workers", "2", "--max-retries", "1",
+                           "--by", "cmd:%s %s" % (sys.executable, fake_builder), "--json")
+    rep = json.loads(out_run)
+    check("dispatch executes Wave 1 in parallel and Wave 2 after dependency merges",
+          rc_run == 0 and rep["passed"] == 3 and rep["failed"] == 0
+          and rep["waves"] == [["DSP-003", "DSP-004"], ["DSP-005"]], out_run[:600])
+    by_item = dict((r["item"], r) for r in rep["items"])
+    check("dispatch repaired DSP-003 on attempt 2 and merged all 3 items cleanly",
+          by_item["DSP-003"]["attempts"] == 2
+          and all(by_item[k].get("merged") is True for k in ("DSP-003", "DSP-004", "DSP-005"))
+          and all(os.path.isfile(os.path.join(d, f)) for f in ("mod_a.py", "mod_b.py", "mod_c.py")),
+          json.dumps(by_item)[:500])
+    check("dispatch filed discovered defect as Parked under charter policy",
+          len(rep["discovered_filed"]) == 1
+          and json.loads(read(d, "docs/project/items/%s.json" % rep["discovered_filed"][0]))["status"] == "Parked",
+          str(rep["discovered_filed"]))
+
+    rc_vw, out_vw = sdlc("view", "--json")
+    vw = json.loads(out_vw)
+    check("view --json surfaces factory shard counts and dispatch telemetry",
+          rc_vw == 0 and vw.get("factory", {}).get("sharded") is True
+          and len(vw.get("factory", {}).get("dispatch_runs", [])) == 1, out_vw[:300])
+    rc_doc, out_doc = sdlc("doctor", "--json")
+    doc_fails = [f for f in json.loads(out_doc) if f.get("level") == "fail"]
+    check("doctor reports zero failures after multi-wave dispatch",
+          rc_doc == 0 and not doc_fails, json.dumps(doc_fails)[:400])
+    shutil.rmtree(base, ignore_errors=True)
+
+
+def test_benchmarks_harnesses_and_effort_modes():
+    print("benchmarks: kit-value absent checks/shard accounting and effort-modes runner + scorer")
+    tmp = tempfile.mkdtemp(prefix="sdlc-bench-m3-")
+    kv_out = os.path.join(tmp, "kv")
+    p_kv = subprocess.run([
+        sys.executable, os.path.join(ROOT, "benchmarks", "kit-value", "run.py"),
+        "--tasks", "copy-fix", "--arms", "kit", "--runs", "1",
+        "--fake-agent", os.path.join(ROOT, "benchmarks", "kit-value", "fake_agent.py"),
+        "--out", kv_out,
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("kit-value runner succeeds with absent charter rows", p_kv.returncode == 0, p_kv.stdout[-400:])
+    kv_ws = os.path.join(kv_out, "copy-fix--kit--1", "workspace")
+    check("kit-value fill_charter marks unused checks absent",
+          "absent _(bare stdlib fixture)_" in read(kv_ws, "docs/project/charter.md"))
+
+    em_out = os.path.join(tmp, "em")
+    p_em = subprocess.run([
+        sys.executable, os.path.join(ROOT, "benchmarks", "effort-modes", "run.py"),
+        "--tasks", "stdlib-reuse,trust-boundary", "--modes", "lean,normal,beast", "--runs", "4",
+        "--fake-agent", os.path.join(ROOT, "benchmarks", "effort-modes", "fake_agent.py"),
+        "--out", em_out,
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("effort-modes runner completes 2 tasks x 3 modes x 4 runs", p_em.returncode == 0, p_em.stdout[-400:])
+    p_sc = subprocess.run([
+        sys.executable, os.path.join(ROOT, "benchmarks", "effort-modes", "score.py"),
+        os.path.join(em_out, "results.csv"),
+    ], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    sc_data = json.loads(p_sc.stdout) if p_sc.returncode == 0 else {}
+    check("effort-modes score.py validates and summarizes 100% pass across all 3 modes",
+          p_sc.returncode == 0
+          and all(sc_data[m][t]["acceptance_pass"] == 4 and sc_data[m][t]["safety_pass"] == 4
+                  for m in ("lean", "normal", "beast") for t in ("stdlib-reuse", "trust-boundary")),
+          p_sc.stdout[:400])
+    shutil.rmtree(tmp, ignore_errors=True)
+
 
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
@@ -3877,7 +4598,9 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project):
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
+                 test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
+                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes):
         test()
     print("")
     if failures:

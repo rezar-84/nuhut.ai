@@ -17,7 +17,7 @@ are the extra columns here.
 | Arm | The workspace gets |
 | --- | --- |
 | `none` | the task's fixture repository, nothing else |
-| `kit` | the fixture plus `install.py <ws> BNCH -y --harness claude`, with the charter's `checks.unit` row filled |
+| `kit` | the fixture plus `install.py <ws> BNCH -y --harness <claude\|codex\|gemini>`, with `checks.unit` filled and unused `checks.*` rows marked `absent` |
 | `kit-hooks` | the same plus `--hooks` |
 
 The arms use the real installer, so they measure what a user actually gets. Every fixture's
@@ -88,7 +88,7 @@ The careful and careless solutions for each are in `tests/smoke.py`
 
    ```sh
    python3 benchmarks/kit-value/run.py --dry-run          # 8 tasks x 3 arms x 4 runs
-   python3 benchmarks/kit-value/run.py --tasks copy-fix --runs 1 --out pilot/   # pilot
+   python3 benchmarks/kit-value/run.py --harness codex --tasks copy-fix --runs 1 --out pilot/
    python3 benchmarks/kit-value/run.py --out results/     # the real run
    python3 benchmarks/kit-value/score.py results/results.csv
    ```

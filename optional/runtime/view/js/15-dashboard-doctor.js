@@ -239,14 +239,31 @@
       })) : null]));
     var byId = {};
     (par.candidates || []).forEach(function (c) { byId[c.id] = c; });
-    main.appendChild(section("Can start together", "Unclaimed Ready items whose dependencies are done, grouped so that no two in a group touch the same files (from each plan's Files that change). Charter, migrations and lockfiles count as one shared file each.", [
+    main.appendChild(section("Can start together", "Unclaimed Ready items whose dependencies are done, grouped so that no two in a group touch the same files (from item touch globs, plan Files that change, or spec deltas). Charter, migrations and lockfiles count as one shared file each.", [
       (par.groups || []).length ? table(["Group", "Items", "Files they change"], par.groups.map(function (g, n) {
         return tr([String(n + 1), el("span", null, g.map(function (id, i) { return el("span", null, [i ? ", " : "", itemLink(id)]); })),
           el("span", { cls: "muted sum-txt", text: g.map(function (id) { return (byId[id] ? byId[id].files : []).slice(0, 3).join(" "); }).join(" · ") })]);
-      })) : el("p", { cls: "muted", text: "No unclaimed Ready item has a plan with Files that change." })]));
+      })) : el("p", { cls: "muted", text: "No unclaimed Ready item has declared touch globs or a plan with Files that change." })]));
     if ((par.conflicts || []).length) main.appendChild(section("Conflicts", "These pairs must run one after the other.", [
       table(["Items", "Shared"], par.conflicts.map(function (c) { return tr([c.a + " × " + c.b, c.files.concat(c.single_writer).join(", ")]); }))]));
-    if ((par.plan_first || []).length) main.appendChild(section("Plan first", "Ready items without a plan's Files that change; their files are unknown, so they run alone.", [
+    if ((par.plan_first || []).length) main.appendChild(section("Plan first", "Ready items without declared touch globs or a plan's Files that change; Tier 1 requires a written plan, while unscoped Tier 2–3 items run alone.", [
       el("p", null, par.plan_first.map(function (x, i) { return el("span", null, [i ? ", " : "", itemLink(x.id)]); }))]));
+    var fac = M.factory || {}, dRuns = (fac.dispatch_runs || []).slice().reverse();
+    main.appendChild(section("Factory store & dispatch telemetry", fac.sharded
+      ? ("Sharded zero-conflict store active: " + plural(fac.item_shards || 0, "item shard") + ", " + plural(fac.worklog_shards || 0, "worklog shard") + ", " + plural(fac.ledger_shards || 0, "ledger shard") + ".")
+      : "Legacy single-file store active. Run `python3 .ai-sdlc/bin/sdlc.py fix migrate-shards --apply` to enable zero-conflict worktree sharding.", [
+      dRuns.length ? table(["Run", "Builder", "Workers", "Waves", "Result", "Items", "Seconds"], dRuns.map(function (dr) {
+        var itemSummary = (dr.items || []).map(function (x) { return x.item + ":" + (x.ok ? (x.status || "Done") : (x.status || "fail")); }).join(", ");
+        return tr([
+          el("code", { text: dr.run_id || "" }),
+          dr.builder || "—",
+          String(dr.workers || 1),
+          String((dr.waves || []).length),
+          (dr.passed || 0) + " pass / " + (dr.failed || 0) + " fail",
+          el("span", { cls: "muted sum-txt", text: itemSummary || "none" }),
+          fmtDur(dr.seconds || 0)
+        ]);
+      })) : el("p", { cls: "muted", text: "No `sdlc.py dispatch` runs recorded yet." })
+    ]));
     if (par.error) main.appendChild(el("p", { cls: "quiet-note", text: "Parallel report unavailable: " + par.error }));
   }

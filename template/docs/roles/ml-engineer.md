@@ -19,7 +19,6 @@ predicted by reading the diff, so the only evidence about its behaviour is measu
 - An evaluation set, metric, threshold, or grading rubric changes.
 - A feature transformation, training set, split, or fine-tune is added or altered.
 - The system is given a tool, a permission, or the ability to take an action.
-- Any Tier 1 change in a project where the charter marks this role active.
 
 ## Skip when
 

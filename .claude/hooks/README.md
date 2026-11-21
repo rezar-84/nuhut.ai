@@ -1,0 +1,108 @@
+# Hooks — the rules that are not persuasion
+
+Everything else in this kit asks an agent to follow a rule. These make six of them
+mechanical, by running before the tool call rather than after the fact. A skill or a
+process document is advisory, since it makes the violation rare. A hook is what makes it
+close to impossible, so any rule that must hold without exception belongs here as well.
+
+**Opt-in**: `./install.sh <dir> <PREFIX> --hooks`. Nothing installs them by accident,
+because a hook executes on your machine on every matching tool call and that is not
+something to acquire without deciding to. They are written for Claude Code and run
+unchanged under Gemini CLI and Cursor through `adapter.sh` (below); the two commit-time
+rules also exist as git hooks for every other tool and for humans (`--git-hooks`).
+
+## What is here
+
+| Hook | Fires on | Does |
+| --- | --- | --- |
+| `work-item-id.sh` | `git commit` | Denies a commit whose message carries no `<PREFIX>-###`. `AGENTS.md` §6 requires the ID in the branch, the commit and the worklog; this is the one of the three a machine can check. |
+| `protected-paths.sh` | `Write` / `Edit` | Denies an edit to a path listed in `.ai-sdlc/protected.txt` — the charter's platform-owned files, generated files, or anything else single-writer. Does nothing until that file has entries. |
+| `test-lock.sh` | `Write` / `Edit` | Denies an edit to a reproducing test listed in `.ai-sdlc/test-lock.txt` while its defect is fixed, and an edit to that list itself. `process/05-change-control.md`, "Fixing a defect": the agent appends the lock from the shell (`>>`) after committing the failing test; `finish` releases the item's lock once `bite` and `verify` pass, or a human removes it. |
+| `secret-guard.sh` | `git commit` | Denies a commit whose staged additions in the target worktree contain a provider-shaped credential (private-key header, AWS, GitHub, GitLab, Slack, Stripe live, Anthropic, OpenAI, Google keys, or embedded URL password). Names the kind and never the value. A line containing `EXAMPLE` is skipped, for deliberate fixtures. |
+| `doc-leak-guard.sh` | `Write` / `Edit` / `MultiEdit` | Denies a write whose content holds a credential shape (the `secret-guard.sh` set, including a URL with an embedded password), in any file. Personal-data shapes in prose records are reported by `sdlc.py doctor`. Names the kind and never the value. A line containing `EXAMPLE`, and example.com/.org/.net addresses, are skipped. `process/12-sensitive-data-in-records.md`. |
+| `approval-gate.sh` | `Bash`, and `Write` / `Edit` of its list | Denies a command matching a glob in `.ai-sdlc/gates.txt` (production deploys, `terraform apply`, production migrations: whatever `AGENTS.md` §9 says needs a human), as well as unapproved shell truncation/unlocks of `.ai-sdlc/test-lock.txt`, `.ai-sdlc/protected.txt`, or `.ai-sdlc/gates.txt`. Passes when the session was started with `AI_SDLC_APPROVAL=<ticket or ID>`. |
+
+All six are **deterministic**. None asks a model whether the rule was followed. The three
+list files are seeded with comments only, so until the project adds a line, the hooks that
+read them do nothing.
+
+**Deny, never ask.** A `deny` is honoured in every permission mode, including bypass mode
+and headless `claude -p` runs. The harness documents no such guarantee for `ask`, and a
+gate that is only sometimes shut is not a gate.
+
+**What they cannot see.** They check the tool call, not the shell's side effects. A
+`sed -i` on a locked test, a new file staged and committed in one command, or a deploy
+wrapped in a script with an innocent name all get past them. These hooks are guard rails
+for an agent that is trying to comply. Anything that must hold against an agent that is not
+trying belongs in `permissions.deny` and the sandbox.
+
+## What is deliberately not here
+
+An evidence hook on `Stop` — "you claimed done without running anything" — was designed
+and dropped. A hook cannot reliably tell whether the command that mattered ran this
+session, so it would fire on turns that did nothing wrong. A guard that cries wolf gets
+switched off within a day, and it takes the two working guards with it when it goes.
+Evidence stays enforced where it can be enforced honestly: `sdlc-evidence-check`, and
+`/sdlc-verify` running the charter's real commands through `.ai-sdlc/bin/sdlc.py verify`,
+which records each stage's output and exit code under `.ai-sdlc/evidence/` for a claim to
+cite.
+
+What did ship is narrower: the **finish guard** (`sdlc.py guard`, registered on
+`SessionStart` and `Stop` by the installer when Claude Code is chosen, not part of
+`--hooks`). It does not judge whether checks ran. It asks one decidable question: did a
+commit made in this session name a Tier 1 or 2 item whose backlog row is still open? If
+so, it names the item once and asks for `sdlc.py finish <ID>`, or for the agent to say
+what is left. It never fires twice for the same item in a session, never on a session that
+committed nothing, and the charter's **Finish guard** row turns it off.
+
+The same reasoning applies to anything you add here. **Only automate a rule whose
+violation is decidable from the tool call itself.**
+
+## How they hold up
+
+Each `.sh` shim sources `lib.sh` and delegates directly to `.ai-sdlc/bin/hooks.py` (Python 3
+stdlib). Paths are resolved with `os.path.realpath` against the caller's directory —
+collapsing `.` and `..` segments and resolving symlinks on both existing files and parent
+directories of newly created files — before comparing with a guard list. `secret-guard`
+resolves `cd <dir>`, `git -C <dir>`, and linked git worktrees so it always inspects the
+staged diff of the worktree being committed. Every JSON decision is serialized by Python's
+`json` module on a single line.
+
+`--upgrade` keeps installed hooks current and re-anchors older `sh .claude/hooks/…`
+registrations. Hooks from before they were kit-managed are replaced only with `--adopt`,
+like the commands.
+
+## Requirements and failure mode
+
+The hooks need only POSIX `sh` and `python3` (the same Python 3 stdlib runtime the rest of
+Nuhut uses — **no external `jq` or GNU `sed` required**). If a hook receives malformed JSON
+or hits an unexpected evaluation error, it **fails closed** (`deny`) in the harness's JSON
+format rather than silently allowing the call. Anything that must hold against a hostile or
+sandboxed shell belongs in `permissions.deny` in `.claude/settings.json` as well.
+
+## The same rules under Gemini CLI and Cursor
+
+`--hooks` together with `--harness gemini` registers all six as `BeforeTool` hooks in
+`.gemini/settings.json`; with `--harness cursor`, the three shell rules as
+`beforeShellExecution` hooks in `.cursor/hooks.json`. Each entry calls
+`adapter.sh <harness> <hook>`, which reshapes the payload (Cursor sends the command at
+the top level) and the verdict (Gemini wants `decision`, Cursor wants `permission`) and
+nothing else. Both tools export `CLAUDE_PROJECT_DIR` as an alias of their own
+project-directory variable, so `lib.sh` anchors on the project root unchanged. Cursor has
+no event that sees a file write before it happens, so the three file rules are not
+registered there. Both merges are idempotent and leave existing entries alone.
+
+## The same rules without Claude Code
+
+`install.sh --git-hooks` installs the two commit-time rules, work-item ID and secret
+guard, as git `commit-msg` and `pre-commit` hooks under `.ai-sdlc/git-hooks/`. Git runs
+them for every agent and every human, so they are the portable half of this directory.
+They share `lib.sh` and the credential shapes, need no `jq`, and are chained onto the
+hook the project already has rather than replacing it. The other four rules need to see
+the tool call and stay here.
+
+## Escaping them
+
+Deliberately possible, and deliberately visible: commit outside the tool, or remove the
+hook from `.claude/settings.json`. The point is to make the wrong thing take a decision,
+not to make it impossible.

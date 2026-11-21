@@ -1,0 +1,7 @@
+# Reproducing tests locked while a defect is fixed: one shell glob per line.
+# The agent appends a line from the shell once the failing test is committed
+# (process/05-change-control.md, "Fixing a defect"). Edits to a listed
+# path, and to this file, are denied; a human removes the line when the fix
+# is verified.
+#
+# e.g.  tests/billing/test_rounding_regression.py

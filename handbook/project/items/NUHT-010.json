@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-010",
+  "title": "Guided installer draws 40 columns on Python 3.8-3.10 when the terminal reports size 0",
+  "type": "defect",
+  "tier": "2",
+  "effort": "",
+  "owner": "qa",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "install_ui.py",
+    "tests/smoke.py",
+    "CHANGELOG.md"
+  ],
+  "created": "2026-11-21",
+  "updated": "2026-11-21",
+  "completed": "2026-11-21",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

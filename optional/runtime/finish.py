@@ -3,9 +3,12 @@ the record repairs `sdlc.py fix` previews. Imported by sdlc.py, which passes its
 `rt`; nothing here runs on import."""
 
 import datetime
+import fnmatch
 import json
 import os
 import re
+
+import shards
 
 SDLC = "python3 .ai-sdlc/bin/sdlc.py"
 TODO = "TODO(finish)"
@@ -102,7 +105,8 @@ def move_row(project, item, status, extra):
 
 def verify_state(rt, project, item, commits):
     """('pass' | 'fail' | 'none', run name, its rows): the latest verify run behind the item."""
-    rows = rt.evidence_matches(project, item, None, commits)
+    all_rows = rt.evidence_matches(project, item, None, commits)
+    rows = [r for r in all_rows if r.get("stage") != "bite"]
     if not rows:
         return "none", "", []
     last = rows[-1].get("run") or ""
@@ -111,21 +115,97 @@ def verify_state(rt, project, item, commits):
     return ("fail" if failed else "pass"), last, run
 
 
+def bite_state(rt, project, item, commits):
+    """True when at least one `bite` ledger row for <item> (or its commits) passed."""
+    all_rows = rt.evidence_matches(project, item, None, commits)
+    bite_rows = [r for r in all_rows if r.get("stage") == "bite"]
+    if not bite_rows:
+        return False
+    return "pass" in str(bite_rows[-1].get("result", "")).lower()
+
+
+def release_item_test_locks(rt, project, item, commits, verify_ok, bite_ok):
+    """Automatically release <item>'s reproducing test locks in .ai-sdlc/test-lock.txt
+    once verify (and bite, for untagged branch test files) has passed."""
+    if not verify_ok:
+        return []
+    lock_path = project.path(".ai-sdlc/test-lock.txt")
+    if not os.path.isfile(lock_path):
+        return []
+    raw_text = rt.read(lock_path)
+    if not raw_text:
+        return []
+    touched = set()
+    for sha, _, _ in commits:
+        for p in project.git("show", "--name-only", "--format=", sha).splitlines():
+            if p.strip():
+                touched.add(p.strip())
+    kept, unlocked = [], []
+    tag_re = re.compile(r"#\s*%s\b" % re.escape(item), re.IGNORECASE)
+    for line in raw_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            kept.append(line)
+            continue
+        pat = re.split(r"\s+#", stripped, maxsplit=1)[0].strip()
+        tagged_for_item = bool(tag_re.search(stripped))
+        matched_branch_test = bite_ok and any(fnmatch.fnmatchcase(f, pat) for f in touched)
+        if tagged_for_item or matched_branch_test:
+            unlocked.append(pat)
+        else:
+            kept.append(line)
+    if unlocked:
+        with open(lock_path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(kept).rstrip("\n") + "\n")
+    return unlocked
+
+
+def resolve_effort(rt, project, item, cells):
+    """Resolve effort mode in contract order: item override -> plan override -> charter default -> Normal."""
+    sh = shards.load_item(project, item)
+    if sh and sh.get("effort") in rt.EFFORT:
+        return sh["effort"]
+    for cell in cells[2:] if len(cells) > 2 else ():
+        cleaned = plain(cell)
+        for mode in rt.EFFORT:
+            if re.search(r"(?:^|\beffort\s*:\s*)%s\b" % re.escape(mode), cleaned, re.IGNORECASE):
+                return mode
+    plans_dir = project.path(os.path.join(project.docs, "project", "plans"))
+    if os.path.isdir(plans_dir):
+        for name in sorted(os.listdir(plans_dir)):
+            if (name == item + ".md" or name.startswith(item + "-")) and name.endswith(".md"):
+                ptext = rt.read(os.path.join(plans_dir, name))
+                m = re.search(r"\*\*Effort(?:\s+mode)?\*\*:\s*`?(Lean|Normal|Beast)`?", ptext, re.I)
+                if not m:
+                    m = re.search(r"\|\s*\*\*Effort(?:\s+mode)?\*\*\s*\|\s*`?(Lean|Normal|Beast)`?", ptext, re.I)
+                if m:
+                    return m.group(1).capitalize()
+                break
+    effort, state = rt.choice(rt.labelled(project.charter, "Default effort mode") or "", rt.EFFORT)
+    return effort if state == "decided" else "Normal"
+
+
 def waivers(rt, project, item):
     return [r for r in rt.ledger(project) if r.get("waived_by") and r.get("item") == item]
 
 
 def worklog_entry(project, item):
-    """The text of the worklog.md entry headed by <item>, or ''."""
-    text = project.records("worklog.md")
+    """The text of the worklog entry headed by <item> (shard first, then worklog/archive), or ''."""
+    shard_text = shards.load_worklog_shard(project, item)
+    if shard_text:
+        return shard_text
+    text = project.worklog_texts() if hasattr(project, "worklog_texts") else project.records("worklog.md")
     for entry in re.split(r"(?m)^(?=## |- [0-9]{4}-[0-9]{2}-[0-9]{2} · )", text):
         if re.match(r"^(?:## |- [0-9-]+ · )(?:[^\n]*[ ,&/])?%s\b" % re.escape(item), entry):
             return entry
     return ""
 
 
-def insert_worklog(project, block):
-    """Put <block> above the newest worklog entry, as `sdlc.py log --write` does."""
+def insert_worklog(project, block, item=None):
+    """Write <block> to worklog/<item>.md when sharded, else above newest entry in worklog.md."""
+    if item and shards.is_sharded(project, for_write=True):
+        shards.save_worklog_shard(project, item, block)
+        return True
     path = project.path(os.path.join(project.docs, "project", "worklog.md"))
     try:
         with open(path, encoding="utf-8") as handle:
@@ -151,9 +231,56 @@ def changed_files(rt, project, commits):
     return files
 
 
-def draft_entry(rt, project, item, title, tier, effort, status, commits, run, waived, today):
+def _has_notes(notes):
+    return bool(notes and any(str(v or "").strip() for v in notes.values()))
+
+
+def _replace_worklog_todos(project, item, notes):
+    """Fill remaining TODO(finish) sections in an already-drafted worklog entry using <notes>."""
+    if not _has_notes(notes):
+        return False
+    shard_text = shards.load_worklog_shard(project, item)
+    entry = shard_text or worklog_entry(project, item)
+    if not entry or TODO not in entry:
+        return False
+    updated = entry
+    section_map = (
+        ("Why", notes.get("why")),
+        ("Not done", notes.get("not_done") or ("nothing deferred" if notes.get("why") else None)),
+        ("Discovered", notes.get("discovered") or ("nothing" if notes.get("why") else None)),
+        ("Decisions", notes.get("decisions") or ("none" if notes.get("why") else None)),
+        ("Assumptions used", notes.get("assumptions") or ("none" if notes.get("why") else None)),
+        ("Plan", notes.get("plan") or (notes.get("why") if notes.get("why") else None)),
+        ("Reviews", notes.get("reviews") or ("self-reviewed" if notes.get("why") else None)),
+    )
+    for heading, val in section_map:
+        if val and str(val).strip():
+            pat = re.compile(
+                r"(^###\s+" + re.escape(heading) + r"\s*\n+)" + re.escape(TODO) + r":[^\n]*",
+                re.MULTILINE,
+            )
+            updated = pat.sub(lambda m: m.group(1) + str(val).strip(), updated, count=1)
+    if updated == entry:
+        return False
+    if shard_text:
+        shards.save_worklog_shard(project, item, updated)
+        return True
+    path = project.path(os.path.join(project.docs, "project", "worklog.md"))
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except (IOError, OSError):
+        return False
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text.replace(entry, updated, 1))
+    return True
+
+
+def draft_entry(rt, project, item, title, tier, effort, status, commits, run, waived, today, notes=None):
     """The worklog entry for <item>: what git and the ledger know, filled; what only the
-    agent knows, marked TODO(finish) so it cannot pass as written."""
+    agent knows, filled from <notes> when provided or marked TODO(finish) otherwise."""
+    notes = notes or {}
+    single_shot = _has_notes(notes)
     files = changed_files(rt, project, commits)
     shas = [sha for sha, _, _ in commits]
     if waived:
@@ -184,7 +311,45 @@ def draft_entry(rt, project, item, title, tier, effort, status, commits, run, wa
     else:
         verify_lines = "- **Not run** — no verify run on record (Tier 3)"
     todo = "%s: " % TODO
-    return "\n".join([
+    why_val = (notes.get("why") or "").strip()
+    why_line = why_val if why_val else (todo + "the reasoning, and any approach you rejected.")
+    not_done_line = (notes.get("not_done") or "").strip() or (
+        "nothing deferred" if single_shot and why_val else (
+            todo + "deferred or stubbed work with follow-up IDs, or \"nothing deferred\"."
+        )
+    )
+    discovered_line = (notes.get("discovered") or "").strip() or (
+        "nothing" if single_shot and why_val else (
+            todo + "bugs found, stale docs, refuted assumptions, or \"nothing\"."
+        )
+    )
+    decisions_line = (notes.get("decisions") or "").strip() or (
+        "none" if single_shot and why_val else (
+            todo + "durable decisions and their ADR, or \"none\"."
+        )
+    )
+    assumptions_line = (notes.get("assumptions") or "").strip() or (
+        "none" if single_shot and why_val else (
+            todo + "the assumptions this relied on, or \"none\"."
+        )
+    )
+    if plan:
+        plan_line = "[%s](plans/%s)" % (plan[0], plan[0])
+    elif (notes.get("plan") or "").strip():
+        plan_line = notes["plan"].strip()
+    elif single_shot and why_val and tier != "1":
+        plan_line = why_val
+    else:
+        plan_line = todo + "the approach and the alternatives rejected (Tier 2: the plan lives here)."
+    if reviews:
+        reviews_line = "\n".join("- [%s](reviews/%s)" % (r, r) for r in reviews)
+    elif (notes.get("reviews") or "").strip():
+        reviews_line = notes["reviews"].strip()
+    elif single_shot and why_val and tier != "1":
+        reviews_line = "self-reviewed"
+    else:
+        reviews_line = todo + "each role engaged and its verdict."
+    text_block = "\n".join([
         "## %s — %s" % (item, title), "",
         "**Date:** %s **Tier:** %s **Effort:** %s" % (today, tier or "?", effort),
         "**Status:** %s" % status,
@@ -192,30 +357,26 @@ def draft_entry(rt, project, item, title, tier, effort, status, commits, run, wa
         "### What changed", "", subjects, "",
         "Files: " + (", ".join("`%s`" % f for f in files[:12]) +
                      (" (+%d more)" % (len(files) - 12) if len(files) > 12 else "") or "none"), "",
-        "### Why", "", todo + "the reasoning, and any approach you rejected.", "",
+        "### Why", "", why_line, "",
         "### Verified", "", verify_lines, "",
-        "### Not done", "", todo + "deferred or stubbed work with follow-up IDs, or "
-        "\"nothing deferred\".", "",
-        "### Discovered", "", todo + "bugs found, stale docs, refuted assumptions, or "
-        "\"nothing\".", "",
-        "### Decisions", "", todo + "durable decisions and their ADR, or \"none\".", "",
-        "### Assumptions used", "", todo + "the assumptions this relied on, or \"none\".", "",
-        "### Plan", "", ("[%s](plans/%s)" % (plan[0], plan[0]) if plan else
-                         todo + "the approach and the alternatives rejected (Tier 2: the "
-                         "plan lives here)."), "",
-        "### Reviews", "", ("\n".join("- [%s](reviews/%s)" % (r, r) for r in reviews) if reviews
-                            else todo + "each role engaged and its verdict."), "",
-    ]), True
+        "### Not done", "", not_done_line, "",
+        "### Discovered", "", discovered_line, "",
+        "### Decisions", "", decisions_line, "",
+        "### Assumptions used", "", assumptions_line, "",
+        "### Plan", "", plan_line, "",
+        "### Reviews", "", reviews_line, "",
+    ])
+    return text_block, (TODO in text_block)
 
 
-def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=None):
-    """Close <item>: check what its tier owes, draft what is missing, then set Done (Tier 1:
-    Parked for the human approval). Returns (lines, exit code): 0 finished, 1 something is
-    owed first (each line says what and how), 2 the item cannot be found."""
+def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=None, notes=None):
+    """Close <item>: check what its tier owes, draft what is missing, then set Done (Tier 1,
+    or Tier 2 under Strict tier rules: Parked for human approval). Returns (lines, exit code):
+    0 finished, 1 something is owed first, 2 the item cannot be found."""
     today = today or datetime.date.today().isoformat()
-    _, lines = backlog_lines(project)
+    backlog_text = project.records("backlog.md")
     found = {}
-    for row_id, status, cells in rt.backlog_rows("\n".join(lines or []), project.prefix,
+    for row_id, status, cells in rt.backlog_rows(backlog_text, project.prefix,
                                                  getattr(project, "legacy_prefixes", None)):
         found.setdefault(row_id, (status, cells))
     if item not in found:
@@ -227,9 +388,9 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     if column == "Dropped":
         return ["%s is Dropped; nothing to finish" % item], 1
     already = column in ("Done", "Parked")
-    owed = rt.required_steps(tier, rt.tier_rules(project), True, True)
-    effort, state = rt.choice(rt.labelled(project.charter, "Default effort mode") or "", rt.EFFORT)
-    effort = effort if state == "decided" else "Normal"
+    t_rules = rt.tier_rules(project)
+    owed = rt.required_steps(tier, t_rules, True, True)
+    effort = resolve_effort(rt, project, item, cells)
     commits = rt.item_commits(project, item)
     out, owing = ["%s · Tier %s · %s" % (item, tier or "?", status)], []
 
@@ -315,9 +476,18 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     elif reviews:
         out.append("review   %s" % ", ".join(r["file"] for r in reviews))
 
-    final = "Parked" if tier == "1" else "Done"
+    for name, n in ([] if already else rt.open_escalations(project, item)):
+        owe("review   finding %s in %s/project/reviews/%s is escalated and has no decision: "
+            "a person decides it and writes their name in its Responses row"
+            % (n, project.docs, name))
+
+    needs_human_gate = (tier == "1") or (tier == "2" and str(t_rules).lower() == "strict")
+    final = "Parked" if needs_human_gate else "Done"
     entry = worklog_entry(project, item)
-    logged = bool(entry) or item in rt.ids_in(project.worklog_texts(), project.prefix, set([item]))
+    if entry and TODO in entry and _has_notes(notes) and not dry_run:
+        if _replace_worklog_todos(project, item, notes):
+            entry = worklog_entry(project, item)
+    logged = bool(entry)
     if entry and TODO in entry:
         owe("log      the worklog entry still has %s parts: write them, then run "
                      "finish again" % TODO)
@@ -328,16 +498,15 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     elif owed["Log"]:
         block, needs_agent = draft_entry(rt, project, item, title, tier, effort,
                                          status if already else final, commits, run, waived,
-                                         today)
+                                         today, notes=notes)
         if not dry_run:
-            insert_worklog(project, block)
+            insert_worklog(project, block, item=item)
         if needs_agent:
             owe("log      %s a worklog entry from git and the ledger: replace each "
                          "%s line (Why, Not done, Discovered...), then run finish again"
                          % ("would draft" if dry_run else "drafted", TODO))
         else:
-            out.append("log      %s the compact worklog line" % ("would write" if dry_run
-                                                                  else "wrote"))
+            out.append("log      %s worklog entry" % ("would write" if dry_run else "wrote"))
     else:
         out.append("log      not owed (Tier 3: the commit is the record)")
 
@@ -345,20 +514,47 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
         return out + ["", "not finished: %d thing(s) owed (OWED above)" % len(owing)], 1
     if already:
         return out + ["status   already %s" % status], 0
-    if tier == "1":
+    if needs_human_gate:
         approvers = plain(rt.labelled(project.charter, "Approvers") or "") or "the owner"
-        extra = [approvers, "merge approval (Tier 1)", today]
+        extra = [approvers, "merge approval (Tier %s)" % tier, today]
     else:
         extra = [today]
     if not dry_run:
-        move_row(project, item, final, extra)
+        if shards.is_sharded(project, for_write=True):
+            sh = shards.load_item(project, item) or shards.merged_items(project).get(item) or {
+                "id": item,
+                "title": title,
+                "tier": tier or "2",
+                "owner": plain(cells[3]) if len(cells) > 3 else "software-engineer",
+                "depends": cells[4] if len(cells) > 4 else "",
+                "created": today,
+            }
+            sh["status"] = final
+            sh["updated"] = today
+            if needs_human_gate:
+                sh["waiting_on"] = extra[0]
+                sh["park_reason"] = extra[1]
+            else:
+                sh["completed"] = today
+                sh["waiting_on"] = ""
+                sh["park_reason"] = ""
+            shards.save_item(project, sh, today=today)
+        else:
+            move_row(project, item, final, extra)
+        unlocked = release_item_test_locks(
+            rt, project, item, commits,
+            verify_ok=(run[0] == "pass"),
+            bite_ok=bite_state(rt, project, item, commits),
+        )
+        if unlocked:
+            out.append("locks    unlocked reproducing test(s): %s" % ", ".join(unlocked))
         try:
             rt.runtime_module("claims").release(project, item)
         except Exception:
             pass
     out.append("status   %s %s%s" % ("would set" if dry_run else "set", final,
                                      " (waiting on %s for the merge approval)" % extra[0]
-                                     if tier == "1" else ""))
+                                     if needs_human_gate else ""))
     return out, 0
 
 
@@ -373,7 +569,7 @@ def session_path(project, payload):
     sid = re.sub(r"[^A-Za-z0-9_-]", "", str(payload.get("session_id") or ""))[:80] or "default"
     folder = project.path(os.path.join(".ai-sdlc", "session"))
     if not os.path.isdir(folder):
-        os.makedirs(folder)
+        os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, ".gitignore"), "w", encoding="utf-8") as handle:
             handle.write("*\n")
     return os.path.join(folder, sid + ".json")
@@ -453,8 +649,7 @@ def rotate_worklog(rt, project, apply=False, today=None):
               % ("moved" if apply else "would move", moved, "y" if moved == 1 else "ies",
                  len(lines) - cut, rel, target, len(starts) - moved)]
     if apply:
-        if not os.path.isdir(project.path(folder)):
-            os.makedirs(project.path(folder))
+        os.makedirs(project.path(folder), exist_ok=True)
         with open(project.path(target), "w", encoding="utf-8") as handle:
             handle.write("# Worklog archive — moved from worklog.md on %s\n\nNewest first, "
                          "like the worklog.\n\n%s\n" % (today.isoformat(),
@@ -528,3 +723,7 @@ def link_evidence(rt, project, apply=False):
     return ["%s %d row(s) from %d run(s) not in the ledger: %s"
             % ("added" if apply else "would add", len(rows), len(runs), ", ".join(runs[:5]) +
                (" ..." if len(runs) > 5 else ""))]
+
+
+def migrate_shards(rt, project, apply=False):
+    return shards.migrate_shards(rt, project, apply=apply)

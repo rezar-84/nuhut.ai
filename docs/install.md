@@ -438,3 +438,10 @@ This only works if you keep project-specific rules where they belong: in `AGENTS
 installed `AGENTS.md` carries the kit version it came from, in an HTML comment near the
 top. The manifest records the version of the managed process, role, and skill files;
 `VERSION` here is the current one.
+
+Installing from a branch that is ahead of the last release (for example `kit-v5` before it
+merges) still stamps `VERSION` into the manifest and `AGENTS.md`, so a later `--upgrade`
+compares versions correctly. The installer's banner says so, for example
+`v4.0.0 + 30 unreleased commits (next release: 5.0.0)`. The version changes when the branch
+merges to `main` and the release workflow tags it; bumping `VERSION` by hand would stop
+that workflow from tagging the release.

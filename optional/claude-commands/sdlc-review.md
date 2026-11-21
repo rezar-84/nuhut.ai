@@ -13,7 +13,11 @@ branch.)
 1. **Establish what you are reviewing.** Read the actual diff and the surrounding code.
    Run the thing if it runs. State the commit range or files you examined.
 
-2. **Conformance pass first** (Tier 1 and 2, ship review). Ask whether the diff does what
+2. **Paraphrase first** (design review). Before any role, write two to five sentences of
+   your own on what the plan proposes and how the existing system works according to it.
+   A part you cannot paraphrase is a finding (`02-role-reviews.md`, "Paraphrase first").
+
+   **Conformance pass first** (Tier 1 and 2, ship review). Ask whether the diff does what
    the plan and the acceptance criteria said, and nothing else. For Tier 1, run
    `python3 .ai-sdlc/bin/sdlc.py plan-check <ID>` and quote its output, then decide for
    each gap whether it is a plan that should have been updated or an unreviewed change.
@@ -48,6 +52,12 @@ branch.)
 
 7. **Record** to `{{DOCS_DIR}}/project/reviews/{{PREFIX}}-###-<design|ship>.md` using
    `{{DOCS_DIR}}/templates/role-review.md` for Tier 1; summarise in the response for Tier 2.
+
+8. **Answer each finding** once the review is written, as the author: Fix, Contest,
+   Escalate or Decline, in the review file's **Responses** table (`02-role-reviews.md`,
+   "Answering findings"). A Contest cites a `file:line` or a recorded decision the reviewer
+   could read. Put Escalate findings first in your reply: they need the person's knowledge,
+   not only their approval.
 
 **A finding seen before.** If this review raises a finding an earlier review or
 postmortem already raised, the correction becomes one line under "Known agent mistakes" in

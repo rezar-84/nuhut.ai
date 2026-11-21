@@ -1,0 +1,145 @@
+---
+description: Check this project's SDLC documents for gaps, staleness, and drift
+argument-hint: "[optional: charter | roles | staleness | traceability | profile]"
+---
+
+Audit the installed kit in this repository and report what is wrong with it. Scoped to:
+
+$ARGUMENTS
+
+(If no argument is given, run every section below.)
+
+This command **reports**; it does not fix. Findings become backlog items, and the ones
+that need a human decision — an unticked role, a missing approver — stay with the human.
+
+## 0. Run the mechanical checks first
+
+```sh
+python3 .ai-sdlc/bin/sdlc.py doctor
+```
+
+It decides from the files what does not need judgment: sections 1, 2, 4 (dates), 5, 6
+and 7 below, and in section 3 the blank rows, the modes and the roles with no reason.
+**Report its findings as they are; do not redo those checks by reading the files
+yourself.** A script that reads every row is more reliable than a model that skims them.
+For mechanical setup drift (`profile.json` out of sync with the charter, a missing
+`AGENTS.md` pointer file, an interrupted `bite` run, or stale test locks), recommend
+`python3 .ai-sdlc/bin/sdlc.py fix <sync-profile|wire-pointer|restore-bite|unlock-tests|all>`
+(or `sdlc.py config` to set charter constraints or check commands).
+Your part is what it cannot decide:
+- the severity of each finding;
+- in section 3, deployment platforms against `handbook/platforms/`, blank Model & data
+  or Budgets cells, and whether the artifacts that ticked roles own exist;
+- in section 4, whether a `status: stale` document has a backlog item;
+- section 8;
+- what to do first.
+
+If the script is missing (installed before the runtime existed) or `python3` is not
+available, do every section by hand, as written. The sections below are the
+specification either way.
+
+## 1. Substitution
+
+```sh
+grep -rn '[{][{]' handbook AGENTS.md .claude 2>/dev/null
+```
+
+(The character class is deliberate — a literal double brace in this file would itself be
+substituted at install time.)
+
+Any hit is a broken install: an unsubstituted work-item prefix leaves a literal path in
+the docs an agent follows. Report every occurrence with its file.
+
+## 2. Is anything pointing at the contract?
+
+Nothing in this kit runs unless an agent is told to read `AGENTS.md`, and every tool
+looks in a different file. Check that at least one of these names it:
+
+```sh
+grep -ln 'AGENTS.md' CLAUDE.md GEMINI.md AGENT.md CONVENTIONS.md \
+  .github/copilot-instructions.md .cursor/rules/*.mdc .cursorrules \
+  .windsurfrules .clinerules .roo/rules/agents.md 2>/dev/null
+```
+
+No output is a **finding of the highest severity in this report**: the documents are
+installed, the process is not running, and nothing about the repository looks wrong. The
+fix is one line — `Read and follow \`AGENTS.md\` in this directory.` — in whichever file
+the tool in use actually loads. `.ai-sdlc/profile.json` → `harnesses` records what the
+installer wired; a file listed there that no longer mentions `AGENTS.md` was edited since.
+
+Codex, Jules, Zed, Factory, opencode and Antigravity read `AGENTS.md` directly and need no pointer.
+
+## 3. Charter completeness
+
+Read `handbook/project/charter.md`. A blank cell is **Unknown**, not "not applicable"
+(`handbook/process/06-evidence-and-claims.md`), and an agent that guesses a check
+command because the charter was blank produces confidently false "verified" claims.
+Report, in this order of severity:
+
+- Blank rows in **Commands** — each one is a stage that cannot be run or reported.
+  Distinguish blank (nobody filled it in) from the word "absent" (deliberate).
+- Blank **approvers**, **default branch**, or **staleness window**.
+- **Deployment platforms** that disagree with `handbook/platforms/`: a platform named
+  in the charter with a kit checklist that is not installed, or an installed checklist
+  for a platform the charter no longer names. Either way, report it; do not delete a
+  checklist or edit the row yourself.
+- Blank cells in **Model & data** or **Budgets** where the corresponding role is ticked.
+- Invalid **Default effort mode** / **Acquisition profile** values. A row still listing
+  every option is *undecided*, not invalid: the documented default (Normal / Standard)
+  applies, and you report it as a question, not an error. A legacy
+  `Operating mode: Beast mode` row is ambiguous and must be migrated explicitly; do not
+  guess whether it meant completeness or permissive acquisition.
+- **Unticked roles with an empty reason column.** A blank reason means nobody decided;
+  it does not mean the role does not apply. List each one as a question for a human.
+- Ticked roles whose owned artifacts do not exist (see `handbook/README.md` → the
+  "Create when" column, which is the only statement of which artifacts this project is
+  supposed to have).
+
+## 4. Staleness
+
+For every file in `handbook/project/`, read the frontmatter `last-reviewed` and
+compare against today and the charter's staleness window. Report anything older, anything
+with a missing or malformed date, and anything marked `status: stale` that has no backlog
+item to fix it. ADRs are exempt: they are dated records and are superseded, not refreshed.
+
+## 5. Traceability
+
+Per `handbook/process/07-traceability.md`:
+
+- Backlog rows in a done state with no worklog entry carrying that ID.
+- Worklog entries whose ID is not in the backlog.
+- Items marked `Parked` with no stated blocker or owner.
+- Branches or recent commits referencing an ID that exists in neither.
+- Backlog rows past the charter's staleness window: an `In progress` or `In review`
+  row that nothing has named since the window passed (backlog or worklog line, or a
+  commit subject, in git history) is a zombie claim, usually a session that died; a
+  `Ready`, `Blocked` or `Parked` row older than the window needs a decision. The
+  script reports each with the decision it needs. Your part: say which to finish,
+  park, defer or drop, and never silently delete a row (`Dropped` keeps it).
+
+## 6. Worklog size
+
+Report the line count of `handbook/project/worklog.md`. Past the rotation threshold in
+`07-traceability.md`, recommend rotating the closed entries into
+`handbook/project/worklog-archive/`. An unbounded worklog quietly becomes the largest
+file every future agent reads.
+
+## 7. Profile drift
+
+If `.ai-sdlc/profile.json` exists, compare its `commands`, `roles`, `docs_dir`,
+`effort_mode`, and `acquisition_profile`
+against the charter. **The charter is the source of truth**; report any difference as
+drift to be corrected in the profile, never the other way round. Report a `kit_version`
+older than `.ai-sdlc/manifest.json` as an incomplete upgrade.
+
+## 8. Point at the viewer
+
+When you report back, tell the human they can see the same records joined up with
+`python3 .ai-sdlc/bin/sdlc.py view` (add `--serve` to keep it live, or `--export-html
+<path>` for one static file to share). Do not run a server on their behalf.
+
+## Output
+
+One table: area · finding · severity per `handbook/process/04-quality-gates.md` ·
+who can fix it. Then the two or three things worth doing first. If a section is clean,
+say so explicitly — "no findings" is a result, and silence is not.

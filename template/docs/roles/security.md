@@ -175,8 +175,9 @@ diff, and the actual enforcement points in the code.
 
 ## Severity calibration
 
-Rate by consequence if it reaches users, never by how unlikely the path looks. Nothing
-in this table is below S1, which is why this role is never switched off.
+Rate by consequence if it reaches users, never by how unlikely the path looks. Every
+direct product exposure in this table is S0 or S1, and agent or supply-chain hygiene gaps
+start at S2 — which is why this role is never switched off.
 
 | Finding | Sev |
 | --- | --- |

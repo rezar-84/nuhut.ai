@@ -15,7 +15,7 @@
         el("p", { cls: "view-subtitle", text: "Adjust effort level, second-reviewer requirements, and Token-Saving Mode, inspect what is installed, and fix broken kit setup." })
       ]),
       el("div", { style: "display: flex; gap: 6px; align-items: center;" }, [
-        LIVE && M.action_token ? el("button", {
+        LIVE && M.live_actions ? el("button", {
           cls: "cmd-btn run-btn",
           text: "▶ Run Doctor Audit",
           on: { click: function () {
@@ -275,19 +275,21 @@
         if (suggested) {
           btns.push(el("button", {
             cls: "cmd-btn primary",
-            text: "Use `" + suggested + "`",
+            text: "Copy `" + suggested + "` cmd",
             on: { click: function () {
-              var ch = {}; ch[st] = suggested;
-              kitApi("/api/config", { checks: ch }, "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=\"" + suggested + "\"", "Set checks." + st);
+              var cmd = "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=\"" + suggested + "\"";
+              copyText(cmd);
+              showToast("CLI Command Copied", "Shell check stages must be configured from your terminal:", cmd);
             } }
           }));
         }
         btns.push(el("button", {
           cls: "cmd-btn",
-          text: "Mark `absent`",
+          text: "Copy `absent` cmd",
           on: { click: function () {
-            var ch = {}; ch[st] = "absent";
-            kitApi("/api/config", { checks: ch }, "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=absent", "Marked checks." + st + " absent");
+            var cmd = "python3 .ai-sdlc/bin/sdlc.py config --set-check " + st + "=absent";
+            copyText(cmd);
+            showToast("CLI Command Copied", "Run in terminal to mark checks." + st + " absent:", cmd);
           } }
         }));
         blankBox.appendChild(el("div", { style: "display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 12px;" }, [

@@ -1,0 +1,9 @@
+# Commands that need a named human's approval: one shell glob per line,
+# matched against the whole command. Mirror AGENTS.md section 9 and the
+# charter's Environments table. A matching command is denied unless the
+# session was started with AI_SDLC_APPROVAL=<ticket or ID>.
+#
+# e.g.  *deploy*prod*
+#       *terraform apply*
+#       *kubectl*--context*prod*
+#       *db:migrate*production*

@@ -16,8 +16,8 @@ happens — not a report after.
 
 ## Before
 
-1. **Go/no-go.** Every stage in the charter's Commands table run and reported as Verified /
-   Not run / Absent (`sdlc-evidence-check`). A failing or skipped gate is a no-go unless a
+1. **Go/no-go.** Every stage in the charter's Commands table run and reported using the
+   evidence vocabulary (`Verified` / `Measured` / `Not run` / `Absent` / `Unknown`; see `sdlc-evidence-check`). A failing or skipped gate is a no-go unless a
    named approver accepted it in writing — record who, and why.
 2. **Scope.** The exact commit range going out and the work item IDs in it. Anything in the
    range that nobody reviewed is a stop.

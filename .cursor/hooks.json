@@ -1,0 +1,19 @@
+{
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "sh \"$CURSOR_PROJECT_DIR\"/.claude/hooks/adapter.sh cursor work-item-id.sh",
+        "timeout": 15
+      },
+      {
+        "command": "sh \"$CURSOR_PROJECT_DIR\"/.claude/hooks/adapter.sh cursor secret-guard.sh",
+        "timeout": 15
+      },
+      {
+        "command": "sh \"$CURSOR_PROJECT_DIR\"/.claude/hooks/adapter.sh cursor approval-gate.sh",
+        "timeout": 15
+      }
+    ]
+  },
+  "version": 1
+}

@@ -31,6 +31,39 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parent
 VERSION = (SRC / "VERSION").read_text(encoding="utf-8").strip()
+
+
+def display_version(root=SRC):
+    """VERSION, plus how far a git checkout is past it. Installing from a branch ahead of
+    the last release still stamps VERSION into the manifest (upgrades compare it), but the
+    banner says the code is unreleased and which version it becomes when merged."""
+    try:
+        version = (root / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return VERSION
+    tool = root / "tools" / "semver.py"
+    if not (root / ".git").exists() or not tool.is_file():
+        return version
+    try:
+        shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=str(root),
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, timeout=5)
+        if shallow.stdout.decode("utf-8", "replace").strip() == "true":
+            # The cut-off hides the commit that last changed VERSION, so a count would be wrong.
+            return "%s (shallow clone: unreleased commits unknown)" % version
+    except (OSError, subprocess.SubprocessError):
+        return version
+    try:
+        proc = subprocess.run([sys.executable, str(tool), "next", "--json", "--root", str(root)],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, timeout=10)
+        info = json.loads(proc.stdout.decode("utf-8", "replace")) if proc.returncode == 0 else {}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return version
+    if not info.get("commits") or info.get("level") in (None, "none"):
+        return version
+    return "%s + %d unreleased commit%s (next release: %s)" % (
+        version, info["commits"], "" if info["commits"] == 1 else "s", info["next"])
 MANIFEST_REL = Path(".ai-sdlc") / "manifest.json"
 PROFILE_REL = Path(".ai-sdlc") / "profile.json"
 # Retired in 4.0: the static status page. `sdlc.py view --export-html` replaces it.
@@ -40,7 +73,7 @@ RETIRED_STATE = "dashboard-state.js"
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
-                 "finish.py", "slop.py", "sync.py")
+                 "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -766,6 +799,8 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      Edited kit files, section 9 of AGENTS.md, the charter, backlog,
                      worklog and the evidence ledger are kept. Shows the plan and
                      asks first; -y skips the question, --dry-run only shows the plan.
+  --self-host        allow installing or upgrading into the kit repository itself when
+                     --docs-dir is not 'docs' (e.g. --docs-dir handbook for dogfooding).
 """
 
 
@@ -775,6 +810,7 @@ class Options(object):
         self.prefix = ""
         self.docs_dir = "docs"
         self.docs_dir_given = False
+        self.self_host = False
         self.upgrade = False
         self.assume_yes = False
         self.want_skills = True
@@ -929,6 +965,8 @@ def parse_args(argv):
             o.upgrade = True
         elif arg == "--uninstall":
             o.uninstall = True
+        elif arg == "--self-host":
+            o.self_host = True
         elif arg in ("-y", "--yes", "--non-interactive"):
             o.assume_yes = True
         elif arg == "--no-skills":
@@ -1973,7 +2011,7 @@ class Wizard(object):
 
     @staticmethod
     def term_cols():
-        return shutil.get_terminal_size((80, 24)).columns
+        return Term._size()[0]
 
     def show_files(self):
         new, kept = preview_files(self)
@@ -2833,6 +2871,15 @@ def resolve_target(path, options, term):
             return None
     p = p.resolve()
     if p == SRC:
+        if options.self_host:
+            existing_manifest = load_manifest(p) or {}
+            eff_docs = options.docs_dir if options.docs_dir_given else (
+                existing_manifest.get("docs_dir") or options.docs_dir
+            )
+            if eff_docs and eff_docs != "docs":
+                return p
+            term.err("error: --self-host requires --docs-dir other than 'docs' (e.g. --docs-dir handbook)")
+            return None
         term.err(t("err.is_kit", path=str(SRC)))
         term.err(t("err.give_project"))
         return None
@@ -3458,7 +3505,7 @@ class Installer(object):
     def run(self):
         w = self.w
         print("")
-        print("Installing Nuhut kit v%s into %s" % (VERSION, self.target))
+        print("Installing Nuhut kit v%s into %s" % (display_version(), self.target))
         print("")
         candidates = [self.target / "AGENTS.md", self.target / "CLAUDE.md",
                       self.target / MANIFEST_REL]
@@ -4693,7 +4740,7 @@ def upgrade(target, o):
               % (len(changed), len(obsolete)))
         return 0
 
-    print("Upgrading Nuhut kit in %s to v%s" % (target, VERSION))
+    print("Upgrading Nuhut kit in %s to v%s" % (target, display_version()))
     print("  refreshes the kit's own files: %s/process, roles, templates, platforms, the"
           % docs)
     print("  /sdlc-* commands and the skills already installed. Your charter, backlog,")
@@ -5278,7 +5325,7 @@ def main(argv):
 
     if w.interactive:
         print("")
-        print("%s%s%s" % (TERM.B, t("intro.title", version=VERSION), TERM.R))
+        print("%s%s%s" % (TERM.B, t("intro.title", version=display_version()), TERM.R))
         TERM.dim(t("intro.what"))
         TERM.say("")
         if TERM.rich:

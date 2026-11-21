@@ -1,0 +1,92 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/work-item-id.sh",
+            "if": "Bash(git commit*)",
+            "statusMessage": "Checking the commit carries a work item ID",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/protected-paths.sh",
+            "statusMessage": "Checking the path is not single-writer",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write|Edit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/test-lock.sh",
+            "statusMessage": "Checking the path is not a locked reproducing test",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write|Edit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/secret-guard.sh",
+            "if": "Bash(git commit*)",
+            "statusMessage": "Checking the commit adds no credential",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/doc-leak-guard.sh",
+            "statusMessage": "Checking the write holds no credential",
+            "type": "command"
+          }
+        ],
+        "matcher": "Write|Edit|MultiEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/approval-gate.sh",
+            "statusMessage": "Checking the command needs no human approval",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|Write|Edit"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.ai-sdlc/bin/sdlc.py guard start",
+            "statusMessage": "Noting where this session starts",
+            "timeout": 30,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.ai-sdlc/bin/sdlc.py guard stop",
+            "statusMessage": "Checking for committed work left unfinished",
+            "timeout": 30,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

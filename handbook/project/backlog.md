@@ -1,0 +1,95 @@
+---
+status: active
+owner: product-manager
+last-reviewed: 2026-11-13
+---
+
+# Backlog — nuhut.ai
+
+> **This table stays terse. One line per item.** Narrative — what happened, what was
+> verified, what was discovered — goes in `worklog.md`, found via the ID.
+>
+> Column rules, the eight status values, and why the separation matters:
+> `../process/07-traceability.md`.
+>
+> **How the sections and the eight statuses line up.** An item's row moves between
+> sections as its status changes; the `Status` cell is always the precise value.
+>
+> | Section | Statuses it holds | Columns |
+> | --- | --- | --- |
+> | Now | `In progress`, `In review` | the six-column spec |
+> | Next | `Ready` | the six-column spec |
+> | Blocked | `Blocked` | six-column spec **+ Who can unblock, Since** |
+> | Parked | `Parked` | six-column spec **+ Waiting on whom, For what decision, Since** |
+> | Later | `Deferred` | six-column spec **+ Becomes relevant when** |
+> | Done | `Done` | six-column spec **+ Completed** |
+> | Dropped | `Dropped` | six-column spec **+ Why dropped, When** |
+>
+> Every section carries the six mandated columns, in order, and adds its own to the
+> right. A row never loses a cell by moving — that is how the Owner role and Tier of a
+> finished item survive to be looked up later.
+
+## Now
+
+Actively in progress. Keep this short enough to be real — if everything is here, nothing
+is prioritised.
+
+| ID | Task | Tier | Owner role | Depends on | Status |
+| --- | --- | --- | --- | --- | --- |
+
+## Next
+
+Agreed, not started. Ordered by priority.
+
+| ID | Task | Tier | Owner role | Depends on | Status |
+| --- | --- | --- | --- | --- | --- |
+
+## Blocked
+
+Cannot proceed. The blocker must be a real, identified thing with an owner — not "needs
+more thought".
+
+| ID | Task | Tier | Owner role | Depends on | Status | Who can unblock | Since |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
+## Parked — awaiting a human
+
+Built and verified as far as an agent can take it; stopped at an approval or a waiver
+only a named human can give. This is a finished state for the agent, not an excuse to
+proceed. See "Waiting on a human" in `../process/00-operating-model.md`.
+
+| ID | Task | Tier | Owner role | Depends on | Status | Waiting on whom | For what decision | Since |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| NUHT-007 | Fresh-context review as a recorded independence level | 1 | architect |  | Parked | rezar-84 | plan and ADR approval: changes a Tier 1 governance gate | 2026-11-21 |
+
+## Later
+
+Valid, not now. Include the condition that would make it now.
+
+| ID | Task | Tier | Owner role | Depends on | Status | Becomes relevant when |
+| --- | --- | --- | --- | --- | --- | --- |
+| NUHT-008 | Plugin bootstrap for Claude Code / Codex that runs install.py | 2 | devops-sre |  | Deferred | NUHT-005 and v5.0.0 are released |
+| NUHT-009 | sdlc-drift: compare living specs and ADRs with code | 2 | architect |  | Deferred | the Specs row is on in a real project and drift is reported |
+
+## Done
+
+Newest first. Move to `worklog-archive/` once this section gets long — the worklog is the
+permanent record, and the entry is found by ID.
+
+| ID | Task | Tier | Owner role | Depends on | Status | Completed |
+| --- | --- | --- | --- | --- | --- | --- |
+| NUHT-010 | Guided installer draws 40 columns on Python 3.8-3.10 when the terminal reports size 0 (touch: install_ui.py, tests/smoke.py, CHANGELOG.md) | 2 | qa |  | Done | 2026-11-21 |
+| NUHT-006 | plan-check --pre: refuse plans that name missing files before the build (touch: optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, tests/smoke.py, docs/cli.md, README.md, CHANGELOG.md) | 2 | architect |  | Done | 2026-11-21 |
+| NUHT-005 | Review triage: paraphrase step and Contest/Escalate/Fix/Decline responses, escalations in Needs you (touch: template/docs/process/02-role-reviews.md, template/docs/templates/role-review.md, handbook/process/02-role-reviews.md, handbook/templates/role-review.md, optional/runtime/sdlc.py, .ai-sdlc/bin/sdlc.py, .claude/commands/sdlc-review.md, optional/commands/**, tests/smoke.py, CHANGELOG.md, docs/**) | 2 | qa |  | Done | 2026-11-21 |
+| NUHT-004 | Release hygiene: CI Python 3.8 runner, installer names the unreleased version (touch: .github/workflows/ci.yml, install.py, tests/smoke.py, CHANGELOG.md, docs/install.md) | 2 | devops-sre |  | Done | 2026-11-21 |
+| NUHT-003 | M3: Multi-worker headless dispatcher (dispatch.py), self-healing defect policy & effort-modes benchmark suite | 1 | architect | NUHT-002 | Done | 2026-11-21 |
+| NUHT-002 | M2: Sharded zero-conflict store, git-ref leases, Tier 2 parallel scope globs, universal --json & cached doctor | 1 | architect | NUHT-001 | Done | 2026-11-21 |
+| NUHT-001 | M1: Control-plane security hardening, unified Python hook engine, runtime bug fixes & contract reconciliation | 1 | security |  | Done | 2026-11-21 |
+
+## Dropped
+
+**Never delete a row — move it here.** The record that something was considered and
+rejected stops it being proposed, discussed, and rejected again. The ID stays reserved.
+
+| ID | Task | Tier | Owner role | Depends on | Status | Why dropped | When |
+| --- | --- | --- | --- | --- | --- | --- | --- |

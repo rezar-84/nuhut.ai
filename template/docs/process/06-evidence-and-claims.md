@@ -81,7 +81,7 @@ you did not observe. If you did not run the tests, the sentence is "tests not ru
 
 ### Measured — the seventh word has conditions
 
-The other five words describe checks that pass or fail. A great deal of software does
+The other six words describe checks, sources, or gaps rather than distributions. A great deal of software does
 neither: an evaluation suite scores, a benchmark distributes, a pipeline is fresh to
 within some lag. Reporting those as *Verified* is the most comfortable way to fabricate,
 because the number is real and only the claim around it is invented.

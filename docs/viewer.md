@@ -71,8 +71,9 @@ still cannot place sits under Other, with a note saying which statuses those are
 ### Dashboard
 
 - **Needs you:** only what a person has to act on. That means failing doctor findings, a
-  failed verify run, build and security failures from the Project lens, and every blocked or
-  parked item with who it waits on. `j`/`k` walk the list.
+  failed verify run, build and security failures from the Project lens, review findings
+  escalated to a person and not yet decided, and every blocked or parked item with who it
+  waits on. `j`/`k` walk the list.
 - **Health:** shippable or not, the last verify run, Done, in flight, and git traceability.
   Each says what it covers.
 - **Flow:** items per column over committed days.

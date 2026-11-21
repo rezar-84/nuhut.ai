@@ -64,8 +64,11 @@ the running system.
 - [ ] Idempotency and repetition where an action can be retried or double-submitted.
 - [ ] Concurrency where two actors can act on the same thing.
 
-**Manual verification of what automation misses**
-- [ ] Exercise the real journey end to end, in a realistic environment.
+**Interactive and exploratory verification of what unit suites miss**
+- [ ] Exercise the real journey end to end, in a realistic environment (directly or via
+      headless browser / protocol / CLI automation when running unattended; record any
+      step that requires a live display or device not available to the session as
+      `Not run`).
 - [ ] Force every state: empty, loading, slow, partial, error, unauthorised, expired.
 - [ ] Try to break it deliberately — the wrong order, the back button mid-flow, a
       double click, a refresh during submission, a session that expires while a form is
