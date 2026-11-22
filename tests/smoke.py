@@ -5037,8 +5037,8 @@ def test_installer_python_floor_and_finish_errors():
     for n in (1, 2):
         write(d, "src/f%d.txt" % n, str(n))
         subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
-        subprocess.call(git + ["commit", "-qm", "fix(FER-%d): typo" % n], cwd=d,
-                        stdout=subprocess.DEVNULL)
+        subprocess.call(git + ["commit", "-qm", "fix(FER-%d): typo\n\nWork-Item: FER-%d" % (n, n)],
+                        cwd=d, stdout=subprocess.DEVNULL)
     # Drive finish() in-process with the sync and claims helpers replaced by stubs that raise.
     driver = (
         "import sys, types\n"
