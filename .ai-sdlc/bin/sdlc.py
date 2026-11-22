@@ -1861,7 +1861,7 @@ def resolve_owner(project, value):
 
 
 PERSON_WARNING = ("no person identity: set NUHUT_USER=<handle> or map git user.name in "
-                  "project/people.json")
+                  "%s")
 _person_warned = []
 
 
@@ -1883,7 +1883,8 @@ def person_identity(project, read_only=False, warn=True):
         person = resolve_person(registry, raw)
     elif raw and source == "NUHUT_USER":
         person = person_key(raw) or None
-    warning = None if person else PERSON_WARNING
+    warning = None if person else PERSON_WARNING % os.path.join(project.docs, PEOPLE_REL).replace(
+        os.sep, "/")
     quiet = read_only and (os.environ.get("CI") or "").strip().lower() == "true"
     if warning and warn and not quiet and not _person_warned:
         _person_warned.append(True)

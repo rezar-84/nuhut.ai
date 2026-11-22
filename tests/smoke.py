@@ -6669,7 +6669,7 @@ def test_people_registry():
             held = json.load(fh)
     except (IOError, OSError, ValueError):
         pass
-    warning = "no person identity: set NUHUT_USER=<handle> or map git user.name in project/people.json"
+    warning = "no person identity: set NUHUT_USER=<handle> or map git user.name in docs/project/people.json"
     check("an unmapped identity records person null, never a guess",
           code == 0 and "person" in held and held["person"] is None, json.dumps(held) + out + err)
     check("the missing person is warned about exactly once", err.count(warning) == 1, err)

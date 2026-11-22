@@ -142,6 +142,13 @@ def setup_gaps(project, me, open_tier1):
         gaps.append({"check": "identity",
                      "text": "no identity: neither NUHUT_USER nor git user.name is set",
                      "fix": "git config user.name \"<your name>\", or export NUHUT_USER=<handle>"})
+    elif not me["people"] and me["source"] == "git user.name":
+        # The rule claim applies (sdlc.person_identity): git user.name names a person
+        # only through people.json, so with no one listed every claim records none.
+        gaps.append({"check": "identity",
+                     "text": "%s (git user.name) names no one: %s lists no people, so your "
+                             "claims record no person" % (me["name"], rel),
+                     "fix": "add yourself to %s, or export NUHUT_USER=<handle>" % rel})
     elif me["people"] and not me["handle"]:
         gaps.append({"check": "identity",
                      "text": "%s (%s) is not in %s" % (me["name"], me["source"], rel),
@@ -194,6 +201,11 @@ def report(rt, project):
     finish_mod = rt.runtime_module("finish")
     shards_mod = rt.runtime_module("shards")
     branch = project.git("rev-parse", "--abbrev-ref", "HEAD").strip()
+    unborn = False
+    if not branch:
+        # No commits yet: rev-parse fails, but HEAD already names a branch.
+        branch = project.git("symbolic-ref", "--quiet", "--short", "HEAD").strip()
+        unborn = bool(branch)
     me = whoami(project)
     names = set(me["names"])
     agent = rt.identity(None, None)[0]
@@ -247,6 +259,10 @@ def report(rt, project):
     open_tier1 = sum(1 for it in backlog.values()
                      if it.get("tier") == "1" and it["column"] not in ("Done", "Dropped"))
     setup = setup_gaps(project, me, open_tier1)
+    if unborn:
+        setup.insert(0, {"check": "commits",
+                         "text": "no commits yet on %s, so claim cannot make a worktree" % branch,
+                         "fix": "commit the kit first: git add -A && git commit"})
 
     findings = rt.apply_baseline(project, rt.doctor(project))
     counts = {"fail": 0, "warn": 0, "info": 0}
