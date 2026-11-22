@@ -21,9 +21,11 @@ the request given with this skill: the text after its name, or the request in th
    python3 .ai-sdlc/bin/sdlc.py finish <ID>
    ```
 
-   It reads the item's tier and checks only what that tier owes. It needs a
-   `sdlc.py verify --item <ID>` run on the item's commits (not at Tier 3), a ship review
-   at Tier 1, and an independent review where the charter's policy asks for one. It runs
+   It reads the item's tier and checks only what that tier owes. It needs a full
+   `sdlc.py verify --item <ID>` run (no `--stage`) on the item's newest code commit (not
+   at Tier 3), a ship review at Tier 1, and an independent review where the charter's
+   policy asks for one. A commit is the item's only when it carries a `Work-Item: <ID>`
+   trailer (`sdlc.py trailers <ID>`). It runs
    `plan-check` when there is a plan. Then it drafts the worklog entry from git and the
    evidence ledger and sets the backlog row to Done. At Tier 1 it sets **Parked** for
    the human merge approval instead; it never approves on anyone's behalf.
@@ -31,16 +33,18 @@ the request given with this skill: the text after its name, or the request in th
 3. **Each `OWED` line says what is missing and the command that supplies it.** Do that,
    then run `finish` again. Do not edit records to make a line go away.
 
-4. **When the checks genuinely cannot run here** (no database, no device), a named
-   person may waive them, never at Tier 1:
+4. **When the checks genuinely cannot run here** (no database, no device), a person in
+   the charter's **Approvers** row (read from the default branch) may waive them, never
+   at Tier 1. The approver runs it; with no terminal attached, `finish` refuses unless
+   `NUHUT_USER` (else `git config user.name`) is that approver:
 
    ```sh
    python3 .ai-sdlc/bin/sdlc.py finish <ID> --waive verify --by <name> --reason "..."
    ```
 
    The waiver is recorded as *Not run* with the name and reason. It never counts as
-   Verified, and `sdlc.py metrics` counts waivers. Do not waive on your own initiative:
-   ask the person, and give their words as the reason.
+   Verified, and `sdlc.py metrics` counts waivers. Do not waive on your own initiative,
+   and never set `NUHUT_USER` to someone else: ask the approver to run it.
 
 5. **Fill the drafted entry.** For Tier 1 and 2, `finish` writes every section it can
    from git and the ledger and marks the rest `TODO(finish)`: Why, Not done,

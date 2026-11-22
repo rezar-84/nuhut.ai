@@ -1106,7 +1106,7 @@ def check_bite_leftover(project, out):
                 "`sdlc.py bite --restore`")
 
 
-DOCTOR_CACHE_VERSION = 2
+DOCTOR_CACHE_VERSION = 3
 
 
 def _doctor_input_digest(project, today):
@@ -1119,7 +1119,7 @@ def _doctor_input_digest(project, today):
     h.update(json.dumps(project.profile or {}, sort_keys=True).encode("utf-8") + b"\0")
     h.update(json.dumps(project.manifest or {}, sort_keys=True).encode("utf-8") + b"\0")
 
-    head_refs = project.git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/nuhut")
+    head_refs = project.git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes", "refs/nuhut")
     head_sha = project.git("rev-parse", "HEAD").strip()
     h.update(("HEAD:%s\n%s\0" % (head_sha, head_refs)).encode("utf-8"))
 
@@ -1214,6 +1214,7 @@ def doctor(project, today=None, use_cache=True):
         check_identity(project, out)
         check_responses(project, out)
         check_verified_claims(project, out)
+        check_attribution(project, out)
         check_placeholders(project, out)
         check_pointer(project, out)
         check_harness_parity(project, out)
@@ -1361,7 +1362,9 @@ def print_findings(items, show_accepted=False):
             print("%-4s  %-12s  %-*s  fix (%s): %s" % ("", "", width, "", item.get("who") or "agent",
                                                       item["fix"]))
     fails = sum(1 for item in items if item["level"] == "fail")
-    print("\n%d finding(s): %d fail, %d warn" % (len(items), fails, len(items) - fails))
+    infos = sum(1 for item in items if item["level"] == "info")
+    print("\n%d finding(s): %d fail, %d warn%s" % (len(items), fails, len(items) - fails - infos,
+                                                  ", %d info" % infos if infos else ""))
 
 
 # ---------------------------------------------------------------- verify
@@ -1398,7 +1401,7 @@ def verify(project, selected, timeout, parallel=False, item=None):
                          % (stage, recorded.get(stage, ""), want))
     folder = evidence_dir(project)
     head = project.git("rev-parse", "HEAD").strip()
-    dirty = bool(project.git("status", "--porcelain").strip())
+    dirty = tree_dirty(project)
 
     def run_stage(stage, command):
         log = os.path.join(folder, stage + ".log")
@@ -1470,7 +1473,8 @@ def verify(project, selected, timeout, parallel=False, item=None):
         "time": summary["generated"], "commit": head, "dirty": dirty, "stage": e["stage"],
         "command": e["command"], "exit_code": e.get("exit_code"), "result": e["result"],
         "output_sha256": e.get("log_sha256", ""), "run": os.path.basename(folder),
-        **({"item": item} if item else {})}
+        **({"item": item} if item else {}),
+        **({"selected": sorted(selected)} if selected else {})}
         for e in results if "exit_code" in e])
     text = summary_markdown(summary, os.path.relpath(folder, project.root))
     with open(os.path.join(folder, "summary.md"), "w", encoding="utf-8") as handle:
@@ -1499,15 +1503,24 @@ TRAILER = re.compile(r"^([A-Z][A-Za-z-]+):[ \t]*(.+?)[ \t]*$")
 
 
 def trailers(message):
-    """{key: value} from the trailer block, the last paragraph of a commit message."""
+    """{key: value} from the trailer block: the last paragraph of a commit message, plus
+    the paragraphs just before it that hold nothing but trailer lines (a harness often
+    appends `Co-Authored-By:` as a paragraph of its own after `Work-Item:`)."""
     paragraphs = [p for p in re.split(r"\n\s*\n", message.strip()) if p.strip()]
     found = {}
     if len(paragraphs) < 2:
         return found
-    for line in paragraphs[-1].splitlines():
-        m = TRAILER.match(line.strip())
-        if m:
-            found[m.group(1)] = m.group(2)
+    blocks = [paragraphs[-1]]
+    for para in reversed(paragraphs[1:-1]):
+        lines = [line for line in para.splitlines() if line.strip()]
+        if not lines or not all(TRAILER.match(line.strip()) for line in lines):
+            break
+        blocks.insert(0, para)
+    for block in blocks:
+        for line in block.splitlines():
+            m = TRAILER.match(line.strip())
+            if m:
+                found[m.group(1)] = m.group(2)
     return found
 
 
@@ -1573,31 +1586,192 @@ def commit_index(project, known=None):
         return cache["commit_index"]
     if known is None:
         known = getattr(project, "legacy_prefixes", None)
+    # Only the Work-Item trailer attributes a commit. A message that merely mentions an
+    # ID ("follows up ACME-12") is not that item's work. `known` stays for callers.
     index = {}
     for sha, parent, body, tags in _parsed_commits(project):
-        found = set(ids_in(body, project.prefix, known)) if project.prefix or known else set()
         if tags.get("Work-Item"):
-            found.add(tags["Work-Item"])
-        for item in found:
-            index.setdefault(item, []).append((sha, parent, tags))
+            index.setdefault(tags["Work-Item"], []).append((sha, parent, tags))
     if cache is not None:
         cache["commit_index"] = index
     return index
 
 
 def item_commits(project, item):
-    """[(sha, parent, trailers)] for commits naming <item> in a Work-Item trailer or in
-    the message, newest first."""
+    """[(sha, parent, trailers)] for commits whose Work-Item trailer names <item>, newest
+    first. A mention in the subject or body does not attribute a commit."""
     cache = getattr(project, "_build_cache", None)
     if cache is not None:
         return list(commit_index(project).get(item, ()))
-    found = []
-    pattern = re.compile(r"(?<![A-Za-z0-9])%s(?![0-9])" % re.escape(item))
-    for sha, parent, body, tags in _parsed_commits(project):
-        if tags.get("Work-Item") == item or pattern.search(body) or \
-                item in id_ranges(body, project.prefix):
-            found.append((sha, parent, tags))
+    return [(sha, parent, tags) for sha, parent, body, tags in _parsed_commits(project)
+            if tags.get("Work-Item") == item]
+
+
+def mentioned_only(project):
+    """Item IDs that commit messages mention but no Work-Item trailer names: work that
+    lost its commit attribution when matching became trailer-only (6.0)."""
+    if not project.prefix:
+        return []
+    named, mentioned = set(), set()
+    for _, _, body, tags in _parsed_commits(project):
+        if tags.get("Work-Item"):
+            named.add(tags["Work-Item"])
+        else:
+            mentioned.update(ids_in(body, project.prefix))
+    return sorted(mentioned - named, key=id_sort_key)
+
+
+def records_path(project, path):
+    """True for a path under <docs>/project/ (ledger, worklog, backlog, reviews) other
+    than the charter, which holds the check commands."""
+    records = project.docs.rstrip("/") + "/project/"
+    return path.startswith(records) and path != project.charter_path.replace(os.sep, "/")
+
+
+def tree_dirty(project):
+    """True when the working tree has uncommitted changes the checks could see.
+    Uncommitted records (ledger, worklog, backlog) and the kit's generated state
+    (evidence, cache) do not count; the charter does, because it holds the commands."""
+    counted = (".ai-sdlc/bin/", ".ai-sdlc/profile.json", ".ai-sdlc/manifest.json")
+    for line in project.git("status", "--porcelain", "--untracked-files=all").splitlines():
+        path = line[3:].split(" -> ")[-1].strip('"')
+        if not path or records_path(project, path) or \
+                (path.startswith(".ai-sdlc/") and not path.startswith(counted)):
+            continue
+        return True
+    return False
+
+
+def commit_paths(project, sha):
+    """Paths a commit changes, against its first parent (a merge counts what it brought
+    in to the branch it landed on)."""
+    out = project.git("diff-tree", "--no-commit-id", "--name-only", "-r", "-m",
+                      "--first-parent", "--root", sha)
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def newest_code_commit(project, item, commits=None):
+    """(sha, parent) of the item's newest commit that changes a path outside
+    <docs>/project/** -- the commit a verify run must cover. Records-only commits
+    (ledger, worklog, status) are skipped; when every commit is records-only, the newest
+    commit is used. (None, None) when the item has no commits."""
+    commits = item_commits(project, item) if commits is None else commits
+    if not commits:
+        return None, None
+    for sha, parent, _ in commits:
+        if any(not records_path(project, path) for path in commit_paths(project, sha)):
+            return sha, parent
+    return commits[0][0], commits[0][1]
+
+
+def is_ancestor(project, older, newer):
+    """True when <older> is <newer> or one of its ancestors. Fails closed."""
+    if not older or not newer:
+        return False
+    if older == newer:
+        return True
+    if str(older).startswith("-") or str(newer).startswith("-"):
+        return False
+    try:
+        proc = subprocess.run(("git", "merge-base", "--is-ancestor", older, newer),
+                              cwd=project.root, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)
+    except OSError:
+        return False
+    return proc.returncode == 0
+
+
+# ---------------------------------------------------------------- trusted records
+
+def trusted_ref(project):
+    """The ref security-bearing records are read from: origin/<default> when it exists,
+    else <default>, else None. The default branch comes from the charter (or profile),
+    then from origin/HEAD."""
+    branch = default_branch(project)
+    if not branch:
+        head = project.git("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").strip()
+        branch = head[len("refs/remotes/origin/"):] if head.startswith("refs/remotes/origin/") else ""
+    if not branch or branch.startswith("-"):
+        return None
+    for ref in ("refs/remotes/origin/" + branch, "refs/heads/" + branch):
+        if project.git("rev-parse", "--verify", "--quiet", ref + "^{commit}").strip():
+            return ref
+    return None
+
+
+def trusted_text(project, rel):
+    """(text, source) for a security-bearing record (the charter's Approvers row,
+    people.json, ...), read as it stands on the default branch so a branch that edits it
+    has no effect until it merges. source names the ref. Falls back to the working tree,
+    with source "working-tree", only when there is no git, no default-branch ref, or the
+    file does not exist on that ref yet. ADR 0003 decision 8."""
+    rel = rel.replace(os.sep, "/")
+    ref = trusted_ref(project)
+    if ref and project.git("ls-tree", "--name-only", ref, "--", rel).strip():
+        source = ref[len("refs/remotes/"):] if ref.startswith("refs/remotes/") else \
+            ref[len("refs/heads/"):]
+        return project.git("show", "%s:%s" % (ref, rel)), source
+    return read(project.path(rel)), "working-tree"
+
+
+def person_key(name):
+    """A name as compared: no `@`, backticks or surrounding space, lowercase."""
+    return re.sub(r"[`@]", "", str(name or "")).strip().lower()
+
+
+def people(project):
+    """{handle: set of lowercase names it answers to} from <docs>/project/people.json
+    (NUHT-023), read from the default branch. {} when there is no registry. Accepts
+    {"people": [...]}, a list of {"handle", "name", "aliases", "git_names", "emails"},
+    or {handle: {...}}."""
+    text, _ = trusted_text(project, os.path.join(project.docs, "project", "people.json"))
+    try:
+        data = json.loads(text) if (text or "").strip() else None
+    except ValueError:
+        return {}
+    if isinstance(data, dict) and isinstance(data.get("people"), list):
+        data = data["people"]
+    if isinstance(data, dict):
+        data = [dict(v, handle=k) if isinstance(v, dict) else {"handle": k}
+                for k, v in data.items()]
+    found = {}
+    for entry in data if isinstance(data, list) else []:
+        if not isinstance(entry, dict) or not str(entry.get("handle") or "").strip():
+            continue
+        handle = person_key(entry["handle"])
+        names = set([handle])
+        for key in ("name", "git_name", "email", "github"):
+            if entry.get(key):
+                names.add(person_key(entry[key]))
+        for key in ("aliases", "git_names", "emails", "names"):
+            if isinstance(entry.get(key), list):
+                names.update(person_key(v) for v in entry[key] if v)
+        found[handle] = names
     return found
+
+
+def resolve_person(registry, name):
+    """The people.json handle <name> answers to; without a registry, the name itself (as
+    compared). None when a registry exists and does not know the name."""
+    key = person_key(name)
+    if not registry:
+        return key or None
+    for handle, names in registry.items():
+        if key in names:
+            return handle
+    return None
+
+
+def approver_names(project):
+    """(names as written, source) from the charter's Approvers row on the default
+    branch. A placeholder cell gives []."""
+    text, source = trusted_text(project, project.charter_path)
+    cell = labelled(text or "", "Approvers") or ""
+    if unfilled(cell):
+        return [], source
+    cell = UNFILLED.sub("", cell)
+    names = [re.sub(r"[`@*]", "", n).strip() for n in re.split(r",|;|\band\b", cell)]
+    return [n for n in names if n], source
 
 
 def item_author(project, item):
@@ -1665,14 +1839,26 @@ def evidence_matches(project, item, rows=None, commits=None):
     commits = item_commits(project, item) if commits is None else commits
     heads = set(sha for sha, _, _ in commits)
     parents = set(parent for _, parent, _ in commits if parent)
-    # A run tagged with the item (verify --item), a clean run on one of the item's
-    # commits, or a run on the parent of one with the change still uncommitted. A dirty
-    # run on the item's own commit verified whatever came next, not the item. A waiver
-    # (finish --waive) is a recorded Not run, never evidence.
+    ancestry = {}
+
+    def descends(commit):
+        # The answer depends on the commit graph only, never on HEAD or the clock, so
+        # doctor and the viewer agree whenever they run. Freshness is finish's job.
+        if commit not in ancestry:
+            ancestry[commit] = any(is_ancestor(project, sha, commit) for sha in heads)
+        return ancestry[commit]
+
+    # A clean run on one of the item's commits, a run on the parent of one with the change
+    # still uncommitted, or a clean run tagged with the item (verify --item) that has one
+    # of the item's commits in its history. A dirty run on the item's own commit verified
+    # whatever came next, not the item. A waiver (finish --waive) is a recorded Not run,
+    # never evidence.
     return [row for row in rows if not row.get("waived_by") and (
-        (row.get("item") == item and str(row.get("result", "")).startswith("Verified"))
-        or (row.get("commit") in heads and not row.get("dirty"))
-        or (row.get("dirty") and row.get("commit") in parents))]
+        (row.get("commit") in heads and not row.get("dirty"))
+        or (row.get("dirty") and row.get("commit") in parents)
+        or (row.get("item") == item and not row.get("dirty")
+            and str(row.get("result", "")).startswith("Verified")
+            and descends(row.get("commit"))))]
 
 
 # ---------------------------------------------------------------- review
@@ -1689,7 +1875,8 @@ def item_diff(project, item, base=None):
         return None, "base %r is not a valid git ref" % base
     commits = item_commits(project, item)
     if not commits and not base:
-        return None, "no commit names %s; pass --base to review the working tree" % item
+        return None, ("no commit carries a `Work-Item: %s` trailer; pass --base to review "
+                      "the working tree" % item)
     if base:
         return project.git("diff", base), None
     oldest, newest = commits[-1], commits[0]
@@ -2091,6 +2278,33 @@ def check_verified_claims(project, out):
                     "this item's commits. Only verify makes a result Verified")
 
 
+def check_attribution(project, out):
+    """Since 6.0 only a Work-Item trailer attributes a commit. Items that commit messages
+    mention but no trailer names lost their commits; approver names that people.json
+    does not know cannot waive."""
+    lost = [item for item in mentioned_only(project)
+            if item in set(row_id for row_id, _, _ in backlog_rows(
+                project.records("backlog.md"), project.prefix,
+                getattr(project, "legacy_prefixes", None)))]
+    if lost:
+        out.add("info", "attribution", "git log",
+                "%d item%s lost commit attribution (no Work-Item trailer); see `sdlc.py "
+                "trailers`: %s" % (len(lost), "" if len(lost) == 1 else "s",
+                                   ", ".join(lost[:8]) + (" ..." if len(lost) > 8 else "")),
+                fix="Commit further work on these items with a `Work-Item: <ID>` trailer "
+                    "(`%s trailers <ID>`); old commits stay unattributed" % SDLC, who="agent")
+    registry = people(project)
+    if registry:
+        names, source = approver_names(project)
+        for name in names:
+            if resolve_person(registry, name) is None:
+                out.add("warn", "approvers", "%s Approvers" % project.charter_path,
+                        "%r is not a handle in people.json (read from %s), so it cannot "
+                        "waive verify" % (name, source),
+                        fix="Use the person's people.json handle in the Approvers row, or "
+                            "add them to people.json", who="owner")
+
+
 def budgets(project):
     """{tier: {"tokens": n, "minutes": n}} from the charter's Agent budget per tier row."""
     cell = UNFILLED.sub("", labelled(project.charter, "Agent budget per tier") or "")
@@ -2360,7 +2574,7 @@ def bite(project, command, base=None, timeout=1800, item=None):
               "with_change": with_change, "without_change": without_change,
               "bites": with_change == 0 and without_change not in (0, None),
               "git_head": project.git("rev-parse", "HEAD").strip(),
-              "dirty": bool(project.git("status", "--porcelain").strip()),
+              "dirty": tree_dirty(project),
               "generated": datetime.datetime.now(datetime.timezone.utc).strftime(
                   "%Y-%m-%dT%H:%M:%SZ")}
     folder = evidence_dir(project, "-bite")
@@ -4530,7 +4744,7 @@ def main(argv):
         if not since and opts.id:
             found = item_commits(project, opts.id)
             if not found:
-                sys.stderr.write("log: no commit names %s\n" % opts.id)
+                sys.stderr.write("log: no commit carries a `Work-Item: %s` trailer\n" % opts.id)
                 return 2
             since = found[-1][1].split(" ")[0]
             if not since:

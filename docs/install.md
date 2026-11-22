@@ -396,6 +396,24 @@ charter row, the upgrade inserts it blank, in its own table, and lists it. An ex
 is never changed. Skills the project did not choose are not added by an upgrade — `ls
 optional/skills` shows what a newer version ships.
 
+### Upgrading to 6.0
+
+Three rules get stricter. Each one can stop `finish` on an existing project:
+
+- **Commits are attributed by trailer only.** A commit belongs to an item only when it
+  carries a `Work-Item: <ID>` trailer. A mention in the subject or body no longer counts,
+  so items committed without trailers lose their commits, and `doctor` lists them as an
+  info finding. Fix: commit further work with the trailer (`sdlc.py trailers <ID>` prints
+  it); old commits stay unattributed.
+- **Only an approver can waive verify.** `finish --waive verify --by <name>` must name
+  someone in the charter's **Approvers** row as it stands on the default branch. Fix: put
+  the people who may waive in that row and merge it.
+- **A placeholder Approvers row refuses every waiver.** Fix: fill the row. The upgrade
+  prints a notice when it is still blank.
+
+`finish` also needs a full verify run (no `--stage`) on the item's newest code commit.
+Fix: run `sdlc.py verify --item <ID>` again after the last code change.
+
 ### Repairing an install
 
 ```sh
