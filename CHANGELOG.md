@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **`sdlc.py` routes subcommands through a `COMMANDS` table** (NUHT-021). The long `if opts.command == ...` chain in `main()` is now one handler function per command, and `register_command()` adds an extension command or a noun-verb group (`deploy record|list`). It refuses a name a core command already uses. Every existing subcommand and flag behaves as before.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.
