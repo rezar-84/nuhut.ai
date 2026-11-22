@@ -5584,6 +5584,9 @@ def _cmd_trailers(project, opts, parser):
         print(json.dumps(dict(tags), indent=2))
     else:
         print("\n".join("%s: %s" % pair for pair in tags))
+    if agent != "unknown" and model == "unknown":
+        sys.stderr.write("trailers: %s was detected but not its model, and ci-check rejects "
+                         "`Model: unknown`: pass --model <model id> or set AI_SDLC_MODEL\n" % agent)
     return 0
 
 

@@ -2570,8 +2570,11 @@ def test_scaffolding():
 
     d = tempfile.mkdtemp(prefix="sdlc-scaffold-empty-")
     code, out = run([d, "APP", "-y", "--scaffold-ci", "github"])
-    check("CI scaffolding refuses an unknown command set",
-          code == 1 and "no quality commands" in out and files(d) == 0)
+    wf = read(d, ".github/workflows/quality.yml") if os.path.isfile(
+        os.path.join(d, ".github", "workflows", "quality.yml")) else ""
+    check("CI scaffolding with no commands still writes doctor and ci-check, with a TODO",
+          code == 0 and "doctor --strict" in wf and "ci-check" in wf and "TODO" in wf
+          and "config --set-check" in wf, out[-400:] + wf[-400:])
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -4991,6 +4994,9 @@ def test_ci_check():
     code, out = sdlc("trailers", "CIC-1")
     check("trailers with no agent detected prints Agent: human and no Model",
           code == 0 and "Agent: human" in out and "Model:" not in out and "unknown" not in out, out)
+    code, out = sdlc("trailers", "CIC-1", env={"CLAUDECODE": "1"})
+    check("trailers with an agent but no model says ci-check will reject it and how to fix it",
+          "Model: unknown" in out and "--model" in out and "ci-check" in out, out)
 
     # A clean range: verified on the newest code commit, ledger committed.
     branch("clean")

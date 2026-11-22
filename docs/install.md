@@ -245,7 +245,8 @@ Two explicit flags turn detection into project-owned starting files:
 `--scaffold-tests` creates `docs/project/test-plan.md` and
 `.ai-sdlc/testing-profile.json`, both marked as detected and requiring confirmation.
 `--scaffold-ci` creates `.github/workflows/quality.yml` or `.gitlab-ci.yml` from the
-project's detected/confirmed commands. It refuses an empty command set. Scaffolding never
+project's detected/confirmed commands. With none, it still writes the `doctor --strict`
+and `ci-check` steps and a TODO naming `sdlc.py config --set-check`. Scaffolding never
 overwrites an existing file, never installs a dependency, and leaves runtime and service
 version confirmation to the project charter. The GitLab job is manual-only until a
 human confirms the commands and makes it automatic.

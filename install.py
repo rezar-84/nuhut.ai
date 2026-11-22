@@ -123,7 +123,7 @@ EN = {
     "h.scaffold_tests": "Creates docs/project/test-plan.md and .ai-sdlc/testing-profile.json, both marked as detected and needing confirmation. Never installs a dependency.",
     "l.scaffold_tests": "Starter test plan",
     "q.scaffold_ci": "Write a starter CI workflow?",
-    "h.scaffold_ci": "Built from the check commands above. Jobs are manual-only until you confirm the commands and enable push or pull-request triggers. Refused if there are no commands.",
+    "h.scaffold_ci": "Built from the check commands above. Jobs are manual-only until you confirm the commands and enable push or pull-request triggers. With no commands, only the record checks are written, with a TODO.",
     "l.scaffold_ci": "Starter CI",
     "review.command": "Same install choices without questions (charter answers stay in the charter):",
     "sec.dest": "Destination",
@@ -3526,9 +3526,6 @@ class Installer(object):
                                self.target / ".github" / "pull_request_template.md"))
         elif self.o.scaffold_ci == "gitlab":
             candidates.append(self.target / ".gitlab-ci.yml")
-        if self.o.scaffold_ci and not [key for key in self.selected_commands()
-                                       if key not in ("run",)]:
-            raise RuntimeError("cannot scaffold CI: no quality commands were detected or confirmed")
         for candidate in candidates:
             ensure_inside(self.target, candidate)
         if not self.o.dry_run:
@@ -4286,6 +4283,13 @@ class Installer(object):
             if charter_rel in self.fresh:
                 self.edit(charter_rel, lambda value: tick_artifact(value, "eval-plan"))
 
+    # With no detected or confirmed check commands, the record checks still bind.
+    NO_CHECKS_TODO = (
+        "      # TODO: no check commands were detected. Add a step per charter command",
+        "      # (`python3 .ai-sdlc/bin/sdlc.py config --set-check unit=\"<command>\"`), e.g.",
+        "      #   - name: Unit",
+        "      #     run: \"npm test\"")
+
     def ci_text(self, provider):
         commands = self.selected_commands()
         ordered = [(key, commands[key]) for _, _, key in CMD_FIELDS
@@ -4319,6 +4323,8 @@ class Installer(object):
             for key, command in ordered:
                 lines.extend(("      - name: %s" % key.replace("_", " ").title(),
                               "        run: %s" % json.dumps(command)))
+            if not ordered:
+                lines.extend(self.NO_CHECKS_TODO)
             lines.extend(("",
                           "# Runs on every pull request. Confirm the commands above, and the runtime and",
                           "# service versions, against the charter: a wrong command fails every PR or",
@@ -4332,6 +4338,8 @@ class Installer(object):
                  "    - python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
         for _, command in ordered:
             lines.append("    - %s" % json.dumps(command))
+        if not ordered:
+            lines.extend(self.NO_CHECKS_TODO)
         lines.extend(("", "# Manual-only by default. Confirm commands, runtime, and service versions",
                       "# from the charter before making this job automatic or required.", ""))
         return "\n".join(lines)
