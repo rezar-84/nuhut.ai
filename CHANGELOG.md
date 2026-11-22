@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **The test-lock and protected-path guards now see shell writes.** `approval-gate` (and `test-lock` or `protected-paths` when given a shell payload) tokenises the command and denies it only when a write target matches a locked or protected glob: a redirect, `tee`, `sed -i`, `perl -i`, the destination of `cp`/`mv`/`install`, `truncate`, `dd of=`, `git checkout`/`git restore` paths, or a literal `open(..., 'w')` in `python -c`. Targets are resolved against the root and case-folded on macOS. Reading a locked file is allowed again (`cat .ai-sdlc/protected.txt 2>&1` was denied before). A command that cannot be parsed, or that runs `eval`, `sh -c`, `bash -c` or `python -c` and names a guarded path, is denied. With `--git-hooks`, `pre-commit` now refuses a commit that changes a path locked or protected at `HEAD` unless `AI_SDLC_APPROVAL` is set, which catches what the parser misses (`f=tests/a; : > $f`). Agent edits and shell writes to the trust anchors `.ai-sdlc/extensions/**`, `.ai-sdlc/local/extensions/**`, `.ai-sdlc/manifest.json` and `<docs>/project/people.json` are denied. `05-change-control.md` says the hooks are best-effort and that `AI_SDLC_APPROVAL` is a local guardrail, not a verified approval.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.
