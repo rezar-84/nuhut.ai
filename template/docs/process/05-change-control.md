@@ -162,7 +162,8 @@ charter's **Agent budget per tier**.
 
 When no agent is detected, the script prints `Agent: human` and no `Model` line: a
 person committing by hand writes exactly that, and needs no Model. Where it prints
-`Model: unknown`, replace it with what you know. Never guess a model. `unknown` is an
+`Model: unknown` (it then warns on stderr), pass `--model <id>` or set `AI_SDLC_MODEL`
+with what you know. Never guess a model. `unknown` is an
 honest value locally, and the doctor treats an unknown author as unjudgeable, not as
 independent, but `sdlc.py ci-check` fails a pull request whose commits say `unknown`:
 set `AI_SDLC_AGENT` (and `AI_SDLC_MODEL`), or use `Agent: human`.
@@ -319,8 +320,10 @@ The test comes first, and the fixer does not get to rewrite it.
 The hooks are best-effort. The shell check reads each command for its write targets (a
 redirect, `tee`, `sed -i`, `cp`/`mv`, `git checkout --` and the like) and cannot see
 through a variable or a script; with `--git-hooks`, `pre-commit` refuses a commit that
-changes a path locked or protected at `HEAD`, so a lock is released by committing the
-line's removal first. `AI_SDLC_APPROVAL` is a local guardrail, not a verified approval:
+changes a path locked at `HEAD`, so a lock is released by committing the line's removal
+first. It refuses a path protected at `HEAD` only when the commit comes from an agent's
+session (its tool's environment variables are set): a person regenerating a lockfile is
+that path's owner. `AI_SDLC_APPROVAL` is a local guardrail, not a verified approval:
 any process, an agent included, can set it, so it records intent and proves nothing.
 
 A test that existed before the fix and that the fixer could not change is the evidence

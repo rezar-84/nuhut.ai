@@ -429,6 +429,14 @@ GATES_LIST = ".ai-sdlc/gates.txt"
 
 SHELL_PUNCT = "();<>|&\n"
 INLINE_SHELLS = ("sh", "bash", "zsh", "dash", "ksh")
+# Interpreters and the flags that make them run code given on the command line. With
+# no script operand they read their program from stdin, which counts as inline too.
+INLINE_INTERPRETERS = {
+    "node": ("-e", "--eval", "-p", "--print"), "nodejs": ("-e", "--eval", "-p", "--print"),
+    "bun": ("-e", "--eval", "-p", "--print"), "deno": ("eval",),
+    "ruby": ("-e",), "perl": ("-e", "-E"), "php": ("-r",), "lua": ("-e",),
+    "tclsh": (), "osascript": ("-e",),
+}
 COMMAND_PREFIXES = ("sudo", "doas", "env", "command", "builtin", "nohup", "time", "nice", "exec")
 PY_OPEN_WRITE_RE = re.compile(
     r"open\(\s*[rbuf]*(['\"])(.+?)\1\s*,\s*(?:mode\s*=\s*)?[rbuf]*(['\"])([^'\"]*)\3"
@@ -457,22 +465,42 @@ def _glob_hit(rel, patterns):
     return None
 
 
+# The files each tool's hooks are wired from (the built-in harness records' hooks.settings).
+HOOK_SETTINGS = (".claude/settings.json", ".gemini/settings.json", ".cursor/hooks.json")
+
+
+def _kit_checkout(root):
+    """True in the kit's own repository, where .ai-sdlc/bin is copied from the tracked
+    optional/runtime sources rather than installed."""
+    return os.path.isfile(os.path.join(root or "", "optional", "runtime", "hooks.py")) and \
+        os.path.isfile(os.path.join(root or "", "install.py"))
+
+
 def _trust_anchors(root):
-    """Paths that decide what the kit trusts. Only a human changes them."""
+    """Paths that decide what the kit trusts or enforces. Only a human changes them: the
+    extensions and their pins, the guard code and its wiring, the profile, people.json
+    and the evidence ledger (`sdlc.py verify` and `finish` write it, not an edit)."""
     _, docs_dir = _profile_info(root)
-    return (
+    anchors = (
         ".ai-sdlc/extensions", ".ai-sdlc/extensions/*",
         ".ai-sdlc/local/extensions", ".ai-sdlc/local/extensions/*",
-        ".ai-sdlc/manifest.json",
+        ".ai-sdlc/manifest.json", ".ai-sdlc/profile.json",
+        ".ai-sdlc/git-hooks", ".ai-sdlc/git-hooks/*",
         docs_dir + "/project/people.json",
-    )
+        docs_dir + "/project/evidence-ledger.jsonl",
+        docs_dir + "/project/ledger", docs_dir + "/project/ledger/*",
+    ) + HOOK_SETTINGS
+    if not _kit_checkout(root):
+        anchors += (".ai-sdlc/bin", ".ai-sdlc/bin/*")
+    return anchors
 
 
 def _trust_anchor_denial(rel, root):
     if _glob_hit(rel, _trust_anchors(root)):
         return (
-            "%s is a trust anchor (extensions, the kit manifest, people.json): only a human "
-            "changes it; propose the change instead of making it." % rel
+            "%s is a trust anchor (extensions, the kit's code, manifest and profile, hook "
+            "wiring, people.json, the evidence ledger): only a human changes it; propose the "
+            "change instead of making it." % rel
         )
     return None
 
@@ -593,8 +621,15 @@ def _command_targets(words, base):
         return [], True, base
     if name in INLINE_SHELLS:
         inline = any(a.startswith("-") and not a.startswith("--") and "c" in a[1:] for a in args)
-        return [], inline, base
+        # No script operand (or `-s`): the shell reads its commands from stdin, a pipe or a
+        # here-document the parser does not follow.
+        ops = _operands(args, ("-o", "+o", "-O", "+O"))
+        return [], inline or not ops or ops[0] == "-" or "-s" in args, base
     if re.match(r"^(?:python[0-9.]*|pypy[0-9.]*)$", name):
+        if "-c" not in args:
+            ops = _operands(args, ("-W", "-X", "-Q"))
+            # `python3 -` or a bare `python3` reads its program from stdin (a heredoc).
+            return [], "-m" not in args and (not ops or ops[0] == "-"), base
         if "-c" in args:
             idx = args.index("-c")
             code = args[idx + 1] if idx + 1 < len(args) else ""
@@ -606,6 +641,44 @@ def _command_targets(words, base):
         return [], False, base
     if name == "tee":
         return _operands(args), False, base
+    if name in INLINE_INTERPRETERS:
+        flags = INLINE_INTERPRETERS[name]
+        ops = _operands(args, ("-r", "--require", "-I", "-M", "-m", "-d", "-c", "-x"))
+        bundled = name in ("perl", "ruby") and any(
+            a.startswith("-") and not a.startswith("--") and re.search(r"[eE]", a[1:]) for a in args)
+        inline = bundled or any(a in flags or a.split("=", 1)[0] in flags for a in args) \
+            or not ops or ops[0] == "-" or (name == "deno" and ops[:1] == ["eval"])
+        targets = []
+        if name == "perl" and any(a.startswith("-") and not a.startswith("--") and "i" in a[1:]
+                                  for a in args):
+            targets = _operands(args, ("-e", "-E", "-I", "-M"))
+        return targets, inline, base
+    if name in ("awk", "gawk", "mawk", "nawk"):
+        return [], True, base   # the program is code: `print > "file"` writes
+    if name == "rsync":
+        ops = _operands(args, ("-e", "--rsh", "--exclude", "--include", "--filter", "-f",
+                               "--exclude-from", "--include-from", "--files-from"))
+        if len(ops) < 2:
+            return [], False, base
+        dest = ops[-1]
+        return [dest] + [os.path.join(dest, os.path.basename(o.rstrip("/"))) for o in ops[:-1]], \
+            False, base
+    if name in ("tar", "gtar", "bsdtar", "unzip"):
+        dest = None
+        for i, a in enumerate(args):
+            if a in ("-C", "--directory", "-d") and i + 1 < len(args) and \
+                    (a != "-d" or name == "unzip"):
+                dest = args[i + 1]
+            elif a.startswith("--directory="):
+                dest = a.split("=", 1)[1]
+        if dest is None:
+            return [], False, base
+        return [dest, os.path.join(dest, "-")], False, base
+    if name == "patch":
+        ops = _operands(args, ("-p", "-o", "-i", "-d", "-D", "-B", "-F", "-V", "-z", "-r",
+                               "--output", "--input", "--directory"))
+        out_file = [args[i + 1] for i, a in enumerate(args[:-1]) if a in ("-o", "--output")]
+        return ops[:1] + out_file, not ops, base
     if name in ("sed", "gsed", "perl"):
         flags = [a for a in args if a.startswith("-") and not a.startswith("--")]
         inplace = any("i" in a[1:] for a in flags) or any(a.startswith("--in-place") for a in args)
@@ -656,6 +729,8 @@ def _command_targets(words, base):
             i += 1
         sub = args[i] if i < len(args) else ""
         rest = args[i + 1:]
+        if sub in ("apply", "am"):
+            return [], True, base   # the patch decides what it writes
         if sub in ("checkout", "restore", "rm", "mv"):
             ops = _operands(rest, ("-s", "--source", "-b", "-B"))
             return [os.path.join(git_base, o) for o in ops], False, base
@@ -684,6 +759,8 @@ def shell_write_targets(cmd, cwd, root):
     if inline:
         for word in CANDIDATE_RE.findall(_flatten_cmd(cmd)):
             candidates.append(_normalise_target(word, cwd, root))
+            if word[:2] in ("a/", "b/"):   # a diff's `--- a/path` and `+++ b/path`
+                candidates.append(_normalise_target(word[2:], cwd, root))
     return [t for t in targets if t], inline, [c for c in candidates if c]
 
 
@@ -707,7 +784,8 @@ def _shell_denial(cmd, cwd, root, checks):
             for cand in candidates:
                 if _glob_hit(cand, patterns):
                     return (
-                        "this command runs inline code (eval, sh -c, bash -c or python -c) that "
+                        "this command runs inline code (eval, sh -c, an interpreter's -e, a "
+                        "script on stdin or a heredoc, awk, a patch) that "
                         "names the guarded path %s, so the hook cannot see what it writes: run "
                         "the steps directly instead." % cand
                     )
@@ -824,8 +902,9 @@ def _check_builtin_shell_guards(cmd, cwd=None, root=None):
          "AI_SDLC_APPROVAL (only appending a new lock with `echo '<glob>' >> .ai-sdlc/test-lock.txt` "
          "is permitted; verified `sdlc.py finish <ID>` releases completed locks automatically) (%s)."),
         (_trust_anchors(root),
-         "%s is a trust anchor (extensions, the kit manifest, people.json): only a human changes "
-         "it; propose the change instead of modifying it from the shell."),
+         "%s is a trust anchor (extensions, the kit's code, manifest and profile, hook wiring, "
+         "people.json, the evidence ledger): only a human changes it; propose the change "
+         "instead of modifying it from the shell."),
     ]
     return _shell_denial(cmd, cwd, root, checks)
 
@@ -1130,9 +1209,23 @@ def run_agent_hook(harness, rule):
     return 0
 
 
+# Variables an agent tool sets in the shells it runs (sdlc.py AGENT_SESSION_ENVS, plus
+# AI_SDLC_AGENT). A git hook inherits them from the agent's `git commit`.
+AGENT_SESSION_ENVS = ("CLAUDECODE", "CLAUDE_PROJECT_DIR", "GEMINI_CLI", "GEMINI_PROJECT_DIR",
+                      "CURSOR_PROJECT_DIR", "CODEX_SANDBOX", "ANTIGRAVITY_AGENT",
+                      "NUHUT_DISPATCH_WORKER", "AI_SDLC_AGENT")
+
+
+def _agent_session():
+    return any(os.environ.get(k) for k in AGENT_SESSION_ENVS)
+
+
 def _guarded_paths_in_commit(wt):
     """The authoritative backstop for the shell guards: staged paths that match a glob in
-    .ai-sdlc/test-lock.txt or .ai-sdlc/protected.txt as committed at HEAD.
+    the test-lock list (every committer) or, in an agent's session, the protected-paths
+    list, as committed at HEAD. The protected list is about who writes a path: in 5.x it
+    bound only agent edits, and a person regenerating a lockfile is its owner, so a
+    person's commit is not held to it.
 
     Reading the lists from HEAD means a lock added in this commit does not block its own
     reproducing test, and a lock removed in this commit still holds: an unlock is recorded
@@ -1141,7 +1234,7 @@ def _guarded_paths_in_commit(wt):
     if rc != 0:
         return []
     lists = []
-    for list_rel in (TEST_LOCK_LIST, PROTECTED_LIST):
+    for list_rel in (TEST_LOCK_LIST, PROTECTED_LIST) if _agent_session() else (TEST_LOCK_LIST,):
         rc, text = _git_output(wt, ["show", "HEAD:" + list_rel])
         if rc == 0:
             patterns = _active_patterns("", text)

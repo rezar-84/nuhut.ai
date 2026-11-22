@@ -1018,6 +1018,24 @@ def test_shell_write_guards():
         "echo '[]' > docs/project/people.json",
         ": > .ai-sdlc/test-lock.txt",
         "sed -i '1d' .ai-sdlc/protected.txt",
+        # Interpreters that run inline code, and stdin scripts (NUHT-016 ship review).
+        "node -e \"require('fs').writeFileSync('.ai-sdlc/protected.txt','')\"",
+        "perl -e 'open F,\">.ai-sdlc/gates.txt\"'",
+        "ruby -e 'File.write(\".ai-sdlc/gates.txt\",\"\")'",
+        "php -r \"file_put_contents('tests/locked_test.py','');\"",
+        "python3 - <<'EOF'\nopen('.ai-sdlc/manifest.json','w').write('{}')\nEOF",
+        "cat <<'EOF' | sh\necho > tests/locked_test.py\nEOF",
+        "awk 'BEGIN{print \"\" > \"tests/locked_test.py\"}'",
+        "rsync /tmp/x tests/locked_test.py",
+        "tar -xf /tmp/x.tar -C .ai-sdlc/extensions",
+        "unzip -o /tmp/x.zip -d .ai-sdlc/local/extensions",
+        "git apply <<'EOF'\n--- a/.ai-sdlc/manifest.json\n+++ b/.ai-sdlc/manifest.json\nEOF",
+        "patch .ai-sdlc/manifest.json /tmp/p.diff",
+        # Trust anchors beyond the extension files.
+        "echo x > .ai-sdlc/bin/hooks.py",
+        "echo '{}' > .ai-sdlc/profile.json",
+        "echo '{}' > .claude/settings.json",
+        "echo '{}' >> docs/project/evidence-ledger.jsonl",
     )
     for cmd in denied:
         out = shell(cmd)
@@ -1049,7 +1067,14 @@ def test_shell_write_guards():
                       ("Write", ".ai-sdlc/local/extensions/x"),
                       ("Write", ".ai-sdlc/extensions/lint/extension.json"),
                       ("Edit", ".ai-sdlc/manifest.json"),
-                      ("Write", "docs/project/people.json")):
+                      ("Write", "docs/project/people.json"),
+                      ("Edit", ".ai-sdlc/bin/hooks.py"),
+                      ("Edit", ".ai-sdlc/bin/registry.py"),
+                      ("Write", ".ai-sdlc/profile.json"),
+                      ("Edit", ".ai-sdlc/git-hooks/pre-commit"),
+                      ("Edit", ".claude/settings.json"),
+                      ("Edit", "docs/project/evidence-ledger.jsonl"),
+                      ("Write", "docs/project/ledger/x.jsonl")):
         out = fire("protected-paths.sh", {"tool_name": tool, "tool_input": {"file_path": rel}})
         check("agent %s to the trust anchor %s is denied" % (tool, rel),
               '"permissionDecision":"deny"' in out, out)
@@ -1080,8 +1105,14 @@ def test_shell_write_guards():
     check("AI_SDLC_APPROVAL lets the commit through", code == 0, out)
     write(d, "gen/out.json", '{"a": 1}\n')
     subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
-    code, out = commit("SWG-3 protected")
-    check("the pre-commit backstop refuses a protected path", code != 0 and "gen/out.json" in out, out)
+    code, out = commit("SWG-3 protected", CLAUDECODE="1")
+    check("the pre-commit backstop refuses an agent's commit to a protected path",
+          code != 0 and "gen/out.json" in out, out)
+    for k in AGENT_ENV_VARS:
+        base_env.pop(k, None)
+    code, out = commit("SWG-3 protected by a person")
+    check("a person's commit to a protected path passes, as in 5.x (protected.txt guards agents)",
+          code == 0, out)
     subprocess.call(git + ["reset", "-q", "--hard", "HEAD"], cwd=d)
     write(d, "tests/new_repro.py", "def test_y():\n    assert 0\n")
     with open(os.path.join(d, ".ai-sdlc", "test-lock.txt"), "a") as fh:
