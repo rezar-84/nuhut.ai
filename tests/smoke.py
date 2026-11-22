@@ -3541,7 +3541,7 @@ def test_status():
     check("no custom merge driver declared: nothing reported", "merge-driver" not in setup)
     write(repo, "src/login.py", "def login():\n    return True\n")
     subprocess.call(["git", "add", "-A"], cwd=repo)
-    subprocess.call(git + ["commit", "-qm", "feat(STX-1): login form"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "feat(STX-1): login form\n\nWork-Item: STX-1"], cwd=repo)
     code, out = sdlc("status", "--json")
     st = json.loads(out) if code == 0 else {}
     mine = dict((i.get("id"), i) for i in st.get("items", []))

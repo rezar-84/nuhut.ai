@@ -176,7 +176,7 @@ def next_step(rt, project, item, tier, column, claims_mod, finish_mod):
         return "unknown", lines[0] if lines else "%s is not in the backlog" % item
     if any(ln.startswith("build ") for ln in lines) and code == 1 and \
             not any(ln.startswith("OWED ") for ln in lines):
-        return "build", "no commit names %s yet: build it, commit with the ID" % item
+        return "build", "no commit carries a Work-Item: %s trailer yet: build it, commit with the trailer" % item
     owed = [ln[5:].strip() for ln in lines if ln.startswith("OWED ")]
     if owed:
         steps = [o.split(None, 1) for o in owed]
