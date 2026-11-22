@@ -6679,6 +6679,247 @@ def test_unclaim_alias():
     code, out, err = sdlc("--help")
     check("the main help names unclaim and deploy", "unclaim <ID>" in out and "deploy record" in out, out[-600:])
     shutil.rmtree(d, ignore_errors=True)
+def test_command_table():
+    print("sdlc.py routes subcommands through a COMMANDS table that extensions can extend")
+    import argparse
+    import contextlib
+    import importlib.util
+    import inspect
+    import io
+    src = os.path.join(ROOT, "optional", "runtime", "sdlc.py")
+    spec = importlib.util.spec_from_file_location("sdlc_command_table", src)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["sdlc_command_table"] = mod
+    spec.loader.exec_module(mod)
+    has_api = all(hasattr(mod, n) for n in ("COMMANDS", "register_command", "build_parser"))
+    check("sdlc.py exposes COMMANDS, register_command and build_parser", has_api)
+    if not has_api:
+        return
+    parser = mod.build_parser()
+    sub = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)][0]
+    parsed = set(sub.choices)
+    core = set(n for n, c in mod.COMMANDS.items() if c.core)
+    check("every parsed subcommand has a core handler in COMMANDS and nothing else is core",
+          parsed == core, "parser-only=%s table-only=%s" % (sorted(parsed - core), sorted(core - parsed)))
+    for name in ("doctor", "verify", "finish", "guard", "item", "claim", "release", "claims",
+                 "parallel", "lens", "audit", "view", "metrics", "fix", "config", "dispatch"):
+        check("core command %s is in the table" % name, name in core)
+    body = inspect.getsource(mod.main)
+    check("main() has no `opts.command ==` routing chain left",
+          "opts.command ==" not in body and "opts.command in" not in body)
+
+    def refused(*args, **kw):
+        try:
+            mod.register_command(*args, **kw)
+        except ValueError:
+            return True
+        return False
+
+    noop = lambda project, opts, parser: 0
+    check("registering a core command name is refused", refused("doctor", noop))
+    check("registering a verb under a core command is refused", refused("item", noop, verb="purge"))
+    check("a malformed command name is refused", refused("Bad Name", noop))
+
+    d = tempfile.mkdtemp(prefix="sdlc-cmdtable-")
+    subprocess.call(["git", "init", "-b", "main", "-q", d])
+    code, out = run([d, "CMT", "-y"])
+    check("command-table test project installs", code == 0, out[-300:])
+    seen = {}
+
+    def hello(project, opts, parser):
+        seen["hello"] = (project.root, opts.name)
+        return 7
+
+    def deploy_record(project, opts, parser):
+        seen["record"] = opts.env
+        return 3
+
+    def deploy_list(project, opts, parser):
+        seen["list"] = True
+        return 4
+
+    try:
+        mod.register_command("hello-ext", hello, help="say hello",
+                             configure=lambda p: p.add_argument("--name", default="world"))
+        check("an extension name already taken is refused", refused("hello-ext", noop))
+        mod.register_command("deploy", deploy_record, verb="record", help="record a deploy",
+                             configure=lambda p: p.add_argument("--env", required=True))
+        mod.register_command("deploy", deploy_list, verb="list", help="list deploys")
+        check("a verb already in a group is refused", refused("deploy", noop, verb="record"))
+        check("a plain command over a verb group is refused", refused("deploy", noop))
+        check("a verb over a plain extension command is refused", refused("hello-ext", noop, verb="x"))
+        rc = mod.main(["--root", d, "hello-ext", "--name", "nuhut"])
+        check("an extension subcommand dispatches with its own flags",
+              rc == 7 and seen.get("hello") == (os.path.realpath(d), "nuhut"), "%r %r" % (rc, seen))
+        rc = mod.main(["--root", d, "deploy", "record", "--env", "prod"])
+        check("a grouped noun-verb command dispatches the verb", rc == 3 and seen.get("record") == "prod",
+              "%r %r" % (rc, seen))
+        rc = mod.main(["--root", d, "deploy", "list"])
+        check("the second verb of the group dispatches", rc == 4 and seen.get("list"), "%r" % rc)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = mod.main(["--root", d, "deploy"])
+        check("a group with no verb exits 2 and names its verbs",
+              rc == 2 and "record" in err.getvalue() and "list" in err.getvalue(), err.getvalue())
+        outbuf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(outbuf):
+                mod.main(["--help"])
+        except SystemExit:
+            pass
+        check("the top-level help lists extension commands",
+              "hello-ext" in outbuf.getvalue() and "deploy" in outbuf.getvalue(), outbuf.getvalue()[-400:])
+    finally:
+        for name in ("hello-ext", "deploy"):
+            mod.COMMANDS.pop(name, None)
+
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    rc, out = sdlc()
+    check("no subcommand still prints the help and exits 2", rc == 2 and "Records and checks" in out, out[-200:])
+    rc, out = sdlc("trailers", "CMT-001", "--agent", "a", "--model", "m")
+    check("trailers still routes", rc == 0 and "Work-Item: CMT-001\nAgent: a\nModel: m" in out, out)
+    rc, out = sdlc("item", "add", "--title", "Routing", "--json")
+    check("item add still routes", rc == 0 and '"id": "CMT-' in out, out[-300:])
+    rc, out = sdlc("item", "list")
+    check("item list still routes", rc == 0 and "Routing" in out, out[-300:])
+    rc, out = sdlc("next-id", "--json")
+    check("next-id still routes", rc == 0 and '"id"' in out, out[-300:])
+    rc, out = sdlc("claims")
+    check("claims still routes", rc == 0 and "no active claims" in out, out[-300:])
+    rc, out = sdlc("doctor", "--json")
+    check("doctor still routes", rc == 0 and out.lstrip().startswith("["), out[-300:])
+    rc, out = sdlc("config", "--json")
+    check("config still routes", rc == 0 and '"constraints"' in out, out[-300:])
+    rc, out = sdlc("verify", "--stage", "bogus")
+    check("verify still rejects an unknown stage", rc == 2 and "unknown stage: bogus" in out, out[-300:])
+    rc, out = sdlc("bite")
+    check("bite with no command is still a usage error", rc == 2 and "bite needs a test command" in out, out[-300:])
+    rc, out = sdlc("render", "--check")
+    check("render --check still routes", rc in (0, 1) and "render:" in out, out[-300:])
+    rc, out = sdlc("fix", "rotate-worklog")
+    check("fix rotate-worklog still routes to the finish module", rc == 0 and out.strip(), out[-300:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_dora_metrics():
+    import datetime as _dt
+    print("DORA delivery metrics from the deploy ledger, commit dates and hotfix items")
+    d = tempfile.mkdtemp(prefix="sdlc-dora-")
+    subprocess.call(["git", "init", "-q", "-b", "main", d])
+    for key, value in (("user.name", "t"), ("user.email", "t@example.invalid"), ("commit.gpgsign", "false")):
+        subprocess.call(["git", "config", key, value], cwd=d)
+    code, out = run([d, "DOR", "-y"])
+    check("installs", code == 0, out[-300:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, universal_newlines=True)
+        return p.returncode, p.stdout, p.stderr
+
+    def dora():
+        rc, out, err = sdlc("metrics", "--json")
+        try:
+            return dict((m["name"], m) for m in json.loads(out) if m.get("group") == "dora"), out + err
+        except ValueError:
+            return {}, out + err
+
+    names = ("Deploy frequency", "Lead time for changes", "Change failure rate", "Time to restore")
+    found, raw = dora()
+    check("metrics carries the four DORA measures", sorted(found) == sorted(names), raw[:400])
+    check("an empty ledger says not enough data for every DORA measure",
+          all("not enough data" in found.get(n, {}).get("value", "") for n in names), raw[:600])
+    rc, out, err = sdlc("metrics")
+    check("the text report shows the DORA measures", rc == 0 and "Deploy frequency" in out
+          and "not enough data" in out, out + err)
+
+    now = _dt.datetime.utcnow().replace(microsecond=0)
+
+    def ts(days):
+        return (now - _dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def commit(name, days):
+        write(d, "src/%s.txt" % name, name)
+        subprocess.call(["git", "add", "-A"], cwd=d)
+        env = dict(os.environ, GIT_AUTHOR_DATE=ts(days), GIT_COMMITTER_DATE=ts(days))
+        subprocess.call(["git", "commit", "-qm", "feat: %s" % name], cwd=d, env=env)
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, stdout=subprocess.PIPE,
+                              universal_newlines=True).stdout.strip()
+
+    a = commit("a", 20)
+    commit("b", 10)
+    c = commit("c", 8)
+    e = commit("e", 5)
+
+    def line(version, env, frm, to, days):
+        return json.dumps({"schema": 1, "version": version, "env": env, "from": frm, "to": to,
+                           "date": ts(days), "by": "t", "agent": "t"})
+
+    lines = [
+        line("1.0.0", "production", None, a, 19),       # first deploy: no range, no lead time
+        line("1.0.0", "staging", None, a, 19.5),         # not production: ignored
+        line("1.1.0", "production", a, c, 7),            # b: 3 days, c: 1 day
+        "not json",
+        json.dumps({"schema": 1, "version": "1.1.1", "env": "production", "from": "--output=x",
+                    "to": "--all", "date": ts(6.5)}),  # hostile refs: a deploy, never passed to git
+        line("1.2.0", "production", c, e, 4),            # e: 1 day
+        line("9.9.9", "production", e, e, -3),           # dated in the future: ignored
+    ]
+    write(d, "docs/project/deploys.jsonl", "\n".join(lines) + "\n")
+
+    sdlc("item", "add", "--id", "DOR-001", "--title", "Checkout returns 500", "--type", "fix", "--tier", "2")
+    sdlc("item", "add", "--id", "DOR-002", "--title", "Ordinary feature", "--tier", "2")
+    sdlc("item", "add", "--id", "DOR-003", "--title", "Old incident", "--type", "defect", "--tier", "2")
+    shard_path = "docs/project/items/DOR-001.json"
+    shard = json.loads(read(d, shard_path) or "{}")
+    shard.update({"hotfix": True, "hotfix_at": ts(6), "status": "Done",
+                  "completed": (now - _dt.timedelta(days=4)).strftime("%Y-%m-%d")})
+    write(d, shard_path, json.dumps(shard, indent=2))
+    shard = json.loads(read(d, "docs/project/items/DOR-002.json") or "{}")
+    shard.update({"created": (now - _dt.timedelta(days=3)).strftime("%Y-%m-%d")})
+    write(d, "docs/project/items/DOR-002.json", json.dumps(shard, indent=2))
+    shard = json.loads(read(d, "docs/project/items/DOR-003.json") or "{}")
+    shard.update({"created": (now - _dt.timedelta(days=400)).strftime("%Y-%m-%d"), "status": "Done",
+                  "completed": (now - _dt.timedelta(days=380)).strftime("%Y-%m-%d")})
+    write(d, "docs/project/items/DOR-003.json", json.dumps(shard, indent=2))
+
+    found, raw = dora()
+    freq = found.get("Deploy frequency", {})
+    check("deploy frequency counts production deploys in the window, skipping staging, bad and future lines",
+          freq.get("data", {}).get("deploys") == 4 and freq.get("data", {}).get("env") == "production"
+          and "4 deploys" in freq.get("value", ""), str(freq))
+    lead = found.get("Lead time for changes", {})
+    check("lead time is the median commit-to-deploy time over shipped commits",
+          lead.get("data", {}).get("commits") == 3 and lead.get("data", {}).get("median_days") == 1.0, str(lead))
+    cfr = found.get("Change failure rate", {})
+    check("change failure rate counts a deploy followed by a hotfix within the window",
+          cfr.get("data", {}).get("failed") == 1 and cfr.get("data", {}).get("deploys") == 4
+          and cfr.get("data", {}).get("items") == ["DOR-001"] and "25%" in cfr.get("value", ""), str(cfr))
+    ttr = found.get("Time to restore", {})
+    check("time to restore is open to done over hotfix and defect items in the window",
+          ttr.get("data", {}).get("items") == ["DOR-001"] and ttr.get("data", {}).get("median_days") == 2.0,
+          str(ttr))
+    check("no DORA measure says not enough data once the ledger and items have it",
+          not any("not enough data" in found.get(n, {}).get("value", "") for n in names), str(found)[:600])
+    check("a hostile ref in the ledger never reaches git", not os.path.exists(os.path.join(d, "x")))
+
+    rc, out, err = sdlc("view", "--json")
+    try:
+        model = json.loads(out)
+    except ValueError:
+        model = {}
+    check("the viewer model carries the DORA block",
+          (model.get("dora") or {}).get("env") == "production"
+          and [m.get("name") for m in (model.get("dora") or {}).get("measures", [])] == list(names),
+          out[:300] + err)
+    page = read(ROOT, "optional/runtime/view.html") or ""
+    check("the viewer page has a delivery (DORA) card", 'ckCard("dora"' in page and "not enough data" in page)
 
 
 def main():
@@ -6706,7 +6947,8 @@ def main():
                  test_hotfix_fast_path,
                  test_people_registry,
                  test_shard_merge_driver,
-                 test_release_records, test_unclaim_alias):
+                 test_release_records, test_unclaim_alias,
+                 test_dora_metrics):
         test()
     print("")
     if failures:

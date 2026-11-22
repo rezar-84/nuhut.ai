@@ -90,6 +90,9 @@ still cannot place sits under Other, with a note saying which statuses those are
   deployed it and how many work items it carries. A row opens the release record: its
   commit range, the tool that recorded it, and the items from its `Work-Item` trailers.
   With nothing recorded, the card names the command to run.
+- **Delivery (DORA):** deploy frequency, lead time for changes, change failure rate and
+  time to restore over the last 90 days, the same numbers `sdlc.py metrics` prints. A
+  measure the ledger and items cannot support says `not enough data` and why.
 
 ### Project
 

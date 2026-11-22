@@ -225,6 +225,20 @@
     if (dep.skipped) depRows.appendChild(el("p", { cls: "muted", style: "font-size: 12px; margin: 6px 0 0;", text: plural(dep.skipped, "malformed ledger line") + " skipped in deploys.jsonl." }));
     grid.appendChild(ckCard("deploys", "Environments", depNames.length ? plural(depNames.length, "environment") + " on record." : null, [depRows]));
 
+    // Delivery (DORA): the four measures from the deploy ledger, commit dates and hotfix
+    // or defect items. A measure without the records says "not enough data", never a guess.
+    var dora = M.dora || {}, doraMs = dora.measures || [];
+    var doraRows = el("div", { role: "list" });
+    doraMs.forEach(function (m) {
+      var empty = /^not enough data/.test(String(m.value || ""));
+      doraRows.appendChild(el("div", { cls: "sum-row", role: "listitem", title: String(m.basis || "") }, [
+        el("strong", { text: String(m.name || "") }),
+        el("span", { cls: empty ? "muted sum-txt" : "sum-txt", text: String(m.value || "") })]));
+    });
+    if (!doraMs.length) doraRows.appendChild(el("p", { cls: "muted", text: "not enough data: the delivery measures could not be read" + (dora.error ? " (" + dora.error + ")" : "") + "." }));
+    var doraNote = dora.env ? "Deploys to " + dora.env + ", last " + (dora.window_days || 90) + " days." : null;
+    grid.appendChild(ckCard("dora", "Delivery (DORA)", doraNote, [doraRows]));
+
     // Project stats
     var colRows = ["Now", "Next", "Blocked", "Parked", "Later", "Done"].map(function (c) { return [c, f.counts[c] || 0, "var(--c-" + c + ")"]; });
     if (f.counts.Other) colRows.push(["Other", f.counts.Other, "var(--c-Other)"]);

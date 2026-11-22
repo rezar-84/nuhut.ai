@@ -1030,6 +1030,183 @@ def read_log(rt, project, kind, run_id, stage):
     return text
 
 
+# ---------------------------------------------------------------- DORA
+
+DORA_WINDOW_DAYS = 90       # every DORA measure looks back this far
+DORA_FAILURE_DAYS = 7       # a hotfix or defect opened this soon after a deploy marks it failed
+DORA_MAX_COMMITS = 2000     # commits read per deploy range, so one huge range cannot stall a page
+PRODUCTION_ENVS = ("production", "prod", "prd", "live")
+DORA_SHA = re.compile(r"^[0-9a-f]{40,64}$")
+
+
+def _when(value):
+    """A UTC datetime from an ISO date or timestamp, or None. A bare date is midnight."""
+    m = re.match(r"^\s*(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?", str(value or ""))
+    if not m:
+        return None
+    try:
+        return datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                                 int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0))
+    except ValueError:
+        return None
+
+
+def _days(value):
+    text = "%.1f days" % value
+    return "%.1f hours" % (value * 24) if value < 1 else text
+
+
+def _n(count, word):
+    return "%d %s%s" % (count, word, "" if count == 1 else "s")
+
+
+def _failure_item(it):
+    """A hotfix (NUHT-028) or a defect item: the records that say a change went wrong."""
+    try:
+        import shards as shards_mod
+        if shards_mod.is_hotfix(it):
+            return True
+    except Exception:
+        if it.get("hotfix") is True:
+            return True
+    return str(it.get("type") or "").strip().lower() in ("defect", "bug", "incident", "hotfix")
+
+
+def dora(rt, project, now=None, env=None):
+    """The four DORA delivery measures, from the deploy ledger (sdlc.py deploy record),
+    commit dates and hotfix/defect items. Each says "not enough data" rather than guess.
+    Ledger lines are hand-editable, so a commit is passed to git only when it is a full SHA."""
+    now = now or datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
+    since = now - datetime.timedelta(days=DORA_WINDOW_DAYS)
+    out = {"env": None, "envs": [], "window_days": DORA_WINDOW_DAYS,
+           "failure_days": DORA_FAILURE_DAYS, "measures": []}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import releases as releases_mod
+        lines, _ = releases_mod.ledger_lines(project)
+    except Exception:
+        lines = []
+    dated = []
+    for line in lines:
+        at = _when(line.get("date"))
+        if at is not None and at <= now + datetime.timedelta(minutes=5):
+            dated.append((at, line))
+    envs = sorted(set(line["env"] for _, line in dated))
+    out["envs"] = envs
+    if env is None:
+        env = next((e for e in PRODUCTION_ENVS if e in envs), None)
+        if env is None and len(envs) == 1:
+            env = envs[0]
+    out["env"] = env
+    window = "the last %d days" % DORA_WINDOW_DAYS
+
+    def add(name, value, basis, data=None):
+        out["measures"].append({"name": name, "kind": "lagging", "group": "dora", "value": value,
+                                "basis": basis, "data": data or {}})
+
+    if not envs:
+        why = "not enough data: no deploys recorded (sdlc.py deploy record --version <v> --env <env>)"
+    elif env is None:
+        why = ("not enough data: no production environment in the ledger (envs: %s); "
+               "run sdlc.py metrics --env <env>" % ", ".join(envs))
+    else:
+        why = None
+    deploys = sorted([(at, line) for at, line in dated if line["env"] == env], key=lambda p: p[0])
+    recent = [(at, line) for at, line in deploys if at >= since]
+    if why is None and not recent:
+        why = "not enough data: no deploys to %s in %s" % (env, window)
+
+    # Deploy frequency
+    if why:
+        add("Deploy frequency", why, "deploys.jsonl lines for the production environment")
+    else:
+        per_week = round(len(recent) * 7.0 / DORA_WINDOW_DAYS, 2)
+        add("Deploy frequency", "%s to %s in %s (%s per week)" % (
+            _n(len(recent), "deploy"), env, window, per_week),
+            "deploys.jsonl lines for %s; other environments are left out" % env,
+            {"env": env, "deploys": len(recent), "per_week": per_week})
+
+    # Lead time for changes: each commit's date to the first deploy whose range holds it.
+    leads, seen, ranged = [], set(), 0
+    for at, line in recent:
+        frm, to = str(line.get("from") or ""), str(line.get("to") or "")
+        if not (DORA_SHA.match(frm) and DORA_SHA.match(to)):
+            continue
+        ranged += 1
+        log = project.git("log", "--format=%H %ct", "-n", str(DORA_MAX_COMMITS), "%s..%s" % (frm, to))
+        for row in log.splitlines():
+            sha, _, stamp = row.partition(" ")
+            if sha in seen or not stamp.strip().isdigit():
+                continue
+            seen.add(sha)
+            committed = datetime.datetime.fromtimestamp(int(stamp), datetime.timezone.utc).replace(tzinfo=None)
+            if committed <= at:
+                leads.append((at - committed).total_seconds() / 86400.0)
+    lead = _median(leads)
+    basis = ("each commit's date to the %s deploy that shipped it; a deploy with no starting "
+             "commit (the first one) is left out" % (env or "production"))
+    if why:
+        add("Lead time for changes", why, basis)
+    elif lead is None:
+        add("Lead time for changes", "not enough data: no deploy to %s in %s names a commit range"
+            % (env, window), basis)
+    else:
+        add("Lead time for changes", "median %s over %s in %s" % (
+            _days(lead), _n(len(leads), "commit"), _n(ranged, "deploy")), basis,
+            {"env": env, "commits": len(leads), "deploys": ranged, "median_days": round(lead, 2)})
+
+    # Change failure rate: a failure item is laid at the newest deploy before it opened.
+    try:
+        import shards as shards_mod
+        items = shards_mod.merged_items(project)
+    except Exception:
+        items = {}
+    failures = []
+    for iid, it in items.items():
+        if not _failure_item(it) or it.get("status") == "Dropped":
+            continue
+        opened = _when(it.get("hotfix_at")) or _when(it.get("created"))
+        if opened is not None:
+            failures.append((iid, it, opened))
+    failed, culprits = {}, []
+    for iid, _, opened in sorted(failures, key=lambda f: f[2]):
+        before = [p for p in deploys if p[0] <= opened]
+        if not before:
+            continue
+        at, line = before[-1]
+        if at < since or (opened - at).days >= DORA_FAILURE_DAYS:
+            continue
+        failed.setdefault(id(line), []).append(iid)
+        culprits.append(iid)
+    basis = ("deploys to %s followed within %d days by a hotfix or defect item (laid at the "
+             "newest deploy before it opened)" % (env or "production", DORA_FAILURE_DAYS))
+    if why:
+        add("Change failure rate", why, basis)
+    else:
+        rate = 100 * len(failed) // len(recent)
+        add("Change failure rate", "%d of %d deploys (%d%%)%s" % (
+            len(failed), len(recent), rate, (": " + ", ".join(sorted(culprits)[:8])) if culprits else ""),
+            basis, {"env": env, "deploys": len(recent), "failed": len(failed), "rate": rate,
+                    "items": sorted(culprits)})
+
+    # Time to restore: a hotfix or defect item from open to Done.
+    restores, restored = [], []
+    for iid, it, opened in failures:
+        done = _when(it.get("completed"))
+        if it.get("status") != "Done" or done is None or done < since or done.date() < opened.date():
+            continue
+        restores.append(float((done.date() - opened.date()).days))
+        restored.append(iid)
+    ttr = _median(restores)
+    basis = "hotfix and defect items, hotfix time (else created date) to their Completed date"
+    if ttr is None:
+        add("Time to restore", "not enough data: no hotfix or defect item done in %s" % window, basis)
+    else:
+        add("Time to restore", "median %.1f days over %s" % (ttr, _n(len(restores), "item")), basis,
+            {"items": sorted(restored), "median_days": round(ttr, 2)})
+    return out
+
+
 def metrics(rt, project, model, today=None):
     """Process measures computed only from what the records and git already hold. Each is
     labelled leading (moves early) or lagging (confirms later), and says what it is from."""
@@ -1138,6 +1315,11 @@ def metrics(rt, project, model, today=None):
             revised += 1
     add("Plans updated after build started", "lagging", str(revised),
         "plan files changed after the item's first commit: deviations that were recorded")
+    try:
+        model["dora"] = dora(rt, project)
+    except Exception as exc:  # a broken ledger never stops the page or the report
+        model["dora"] = {"env": None, "envs": [], "measures": [], "error": str(exc)}
+    out.extend(model["dora"]["measures"])
     return out
 
 
@@ -1153,6 +1335,13 @@ def render(model, template):
 
 def print_metrics(rt, project, opts):
     model = build(rt, project)
+    env = getattr(opts, "env", None)
+    if env:
+        if not re.match(r"^[a-z0-9][a-z0-9_-]{0,31}$", env):
+            sys.stderr.write("metrics: invalid --env %r: lower-case letters, digits, _ and -\n" % (env,))
+            return 2
+        model["dora"] = dora(rt, project, env=env)
+        model["metrics"] = [m for m in model["metrics"] if m.get("group") != "dora"] + model["dora"]["measures"]
     if getattr(opts, "json", False):
         print(json.dumps(model["metrics"], indent=2))
         return 0

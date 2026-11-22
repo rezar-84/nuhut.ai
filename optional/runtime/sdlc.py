@@ -4665,7 +4665,7 @@ EXAMPLES = {
     "view": ["view                     # write .ai-sdlc/view/index.html and open it",
              "view --serve             # live page on 127.0.0.1",
              "view --serve --github    # also open GitHub issues and PRs", "view --export-html report.html"],
-    "metrics": ["metrics", "metrics --json"],
+    "metrics": ["metrics", "metrics --json", "metrics --env staging   # DORA measures for another environment"],
     "log": ["log --since main", "log --since main --id ACME-12 --write"],
     "trailers": ["trailers ACME-12 --agent claude"],
     "review": ["review ACME-12 --role security --by codex",
@@ -4811,6 +4811,8 @@ def main(argv):
                     help="export the standalone dashboard HTML file (default: dashboard.html)")
     met = sub.add_parser("metrics", help="process measures from the records and git")
     met.add_argument("--json", action="store_true", help="print as JSON")
+    met.add_argument("--env", help="the deploy environment the DORA measures read (default: "
+                     "production, prod, prd or live, else the only one in the ledger)")
     lg = sub.add_parser("log", help="draft worklog lines from commits and verify runs")
     lg.add_argument("--since", help="git ref to start after, e.g. main or HEAD~5 (default with "
                     "--id: just before the item's first commit)")
