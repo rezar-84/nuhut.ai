@@ -3672,6 +3672,9 @@ MAIN_HELP = """usage: python3 .ai-sdlc/bin/sdlc.py <command> [options]     (ever
 
 The mechanical half of the Nuhut process: checks, evidence, the viewer, claims and specs.
 
+Start here
+  status              missing setup, your items' next step, Parked on you, Ready     status --json
+
 Records and checks
   doctor              audit the records: stale rows, unproven Verified claims, gaps   doctor --strict
   verify              run the charter's checks in order and keep the evidence        verify --item ACME-12
@@ -3713,6 +3716,7 @@ Guides: docs/cli.md, docs/viewer.md, docs/multi-agent.md and docs/specs.md in th
 """
 
 EXAMPLES = {
+    "status": ["status                   # what to do next on this branch", "status --json"],
     "doctor": ["doctor", "doctor --strict          # exit 1 on a fail-level finding (CI)", "doctor --json",
                "doctor --baseline        # accept today's findings once; only new ones show",
                "doctor --all             # include the accepted ones"],
@@ -3777,6 +3781,9 @@ def main(argv):
     parser.add_argument("--root", help="project root (default: the project this file is "
                         "installed in)")
     sub = parser.add_subparsers(dest="command", parser_class=argparse.ArgumentParser)
+    stp = sub.add_parser("status", help="one screen of next actions: missing setup, your items "
+                                        "and the step each owes, Parked on you, Ready to take")
+    stp.add_argument("--json", action="store_true", help="print the status as JSON")
     doc = sub.add_parser("doctor", help="mechanical checks of the SDLC records")
     doc.add_argument("--json", action="store_true", help="print findings as JSON")
     doc.add_argument("--strict", action="store_true",
@@ -4051,6 +4058,11 @@ def main(argv):
         parser.print_help()
         return 2
     project = Project(opts.root or default_root())
+    if opts.command == "status":
+        status_mod = runtime_module("status")
+        data = status_mod.report(sys.modules[__name__], project)
+        print(json.dumps(data, indent=2) if opts.json else status_mod.format_report(data))
+        return 0
     if opts.command == "doctor":
         items = doctor(project, use_cache=not getattr(opts, "no_cache", False))
         if opts.baseline:

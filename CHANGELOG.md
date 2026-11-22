@@ -4,6 +4,7 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **`sdlc.py status` says what to do next.** One read-only screen for this branch and person: the setup this clone is missing, with a fix for each (an unconfigured merge driver, an identity `people.json` does not know, `gh` missing or logged out while Tier 1 items are open); your claimed items and the next step each owes, by the rules `finish --dry-run` applies; items Parked on you; Ready items you could take; and the doctor finding count. `--json` prints the same. It is listed first in `sdlc.py --help` under *Start here*. There is no `next` alias, so it cannot be confused with `next-id`. New: `docs/joining.md`, a checklist for joining a project that already has the kit (NUHT-026).
 - **The kit installed in this repository now carries the released version.** The 5.0.0 release left `.ai-sdlc/manifest.json`, `profile.json` and the `AGENTS.md` version line at 4.0.0. `tools/semver.py bump` now restamps them and re-hashes the managed `AGENTS.md` region; `semver.py restamp` repairs them by hand; `validate.py` fails when they disagree with `VERSION` (NUHT-011).
 
 ## 5.0.0 — 2026-11-21

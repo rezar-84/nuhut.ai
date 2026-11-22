@@ -50,6 +50,7 @@ inside it.
 | Tier 1 approval is a status and a name in the charter, not a GitHub review | NUHT-024 |
 | Two people editing the same item shard get a git conflict | NUHT-025 |
 | No one-line "what next" in the CLI | NUHT-026 |
+| No guide for joining a project that already has the kit installed | NUHT-026 ([joining.md](joining.md)) |
 
 ### Release, deploy and operate (Phase 3)
 
@@ -84,7 +85,7 @@ than add something new.
 
 | Phase | Today | Target |
 | --- | --- | --- |
-| Understand | `lens`, the viewer, `doctor --baseline`, getting-started | Adds `status` / `next` and a guide for joining an existing install |
+| Understand | `lens`, the viewer, `doctor --baseline`, getting-started | Adds `status` and a guide for joining an existing install (NUHT-026) |
 | Plan | Intake, tier, plan, `plan-check --pre`, shards, claims | Owners are people; Tier 1 plans are approved in a PR review |
 | Build | Claim or dispatch into a worktree, test first, hooks | Worktree setup scripts; works inside T3 Code or Conductor workspaces |
 | Verify and review | Local `verify`, `review --by`, `finish` | CI re-runs verify and `ci-check`; GitHub approval is recorded as the approval |
