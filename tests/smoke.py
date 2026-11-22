@@ -8457,6 +8457,72 @@ def test_status_review_fixes():
     shutil.rmtree(d + "-UNB-001", ignore_errors=True)
 
 
+def test_defect_awareness():
+    print("defects: bug records severity, status and session start show S0-S2, claim warns (NUHT-040)")
+    d = tempfile.mkdtemp(prefix="sdlc-defects-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", repo])
+    code, out = run([repo, "DFX", "-y"])
+    check("installs", code == 0, out[-300:])
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore: kit"], cwd=repo)
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args, **kw):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, input=kw.get("stdin", b""), timeout=120,
+                           env=dict(os.environ, NUHUT_USER="alice"))
+        return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
+
+    code, out, err = sdlc("bug", "Login returns 500", "--severity", "S7")
+    check("a severity off the ladder is refused", code == 2 and "S0 to S4" in err, out + err)
+    code, out, err = sdlc("bug", "Login returns 500 on a long password", "--severity", "s1",
+                          "--touch", "src/auth/**", "--repro", "1. Sign in with a 300-character password",
+                          "--found-by", "user report")
+    check("bug adds a defect item", code == 0 and "DFX-001" in out and "S1" in out, out + err)
+    item = json.loads(read(repo, "docs/project/items/DFX-001.json"))
+    check("the shard records type, severity, owner and found by",
+          item.get("type") == "defect" and item.get("severity") == "S1" and item.get("owner") == "qa"
+          and item.get("found_by") == "user report" and item.get("touch") == ["src/auth/**"], json.dumps(item))
+    check("with no Discovered defects decision the bug is Parked for triage",
+          item.get("status") == "Parked" and item.get("waiting_on"), json.dumps(item))
+    report = read(repo, "docs/project/defects/DFX-001.md")
+    check("a defect report is written from the template with the header filled",
+          "DFX-001 Login returns 500" in report and "**Severity:** S1" in report
+          and "300-character password" in report and "**Found by:** user report" in report, report[:600])
+    code, out, err = sdlc("bug", "Typo on the pricing page", "--severity", "S4")
+    check("a second bug", code == 0 and "DFX-002" in out, out + err)
+    index = read(repo, "docs/project/defects/README.md")
+    check("the defects index is built from the items",
+          re.search(r"\| DFX-001 \| Login returns 500 on a long password \| S1 \| user report \| Parked \|", index)
+          is not None and "| DFX-002 |" in index, index[-500:])
+    code, out, err = sdlc("render", "--check")
+    check("render --check agrees with the written index", code == 0, out + err)
+    code, out, err = sdlc("status", "--json")
+    st = json.loads(out) if code == 0 else {}
+    ids = [x.get("id") for x in st.get("defects", [])]
+    check("status lists open S0-S2 defects and not S3-S4", ids == ["DFX-001"], out[:400] + err)
+    code, out, err = sdlc("status")
+    check("status text has an Open defects section", "Open defects" in out and "DFX-001" in out, out)
+    code, out, err = sdlc("guard", "start", stdin=b'{"session_id": "s1"}')
+    check("session start prints the open S0-S2 defects on stdout for the agent",
+          code == 0 and "Open defects" in out and "DFX-001" in out and "DFX-002" not in out, out + err)
+    code, out, err = sdlc("item", "add", "--title", "Rework the password form", "--status", "Ready",
+                          "--touch", "src/auth/login.py")
+    check("an item touching the defect's files", code == 0 and "DFX-003" in out, out + err)
+    code, out, err = sdlc("claim", "DFX-003", "--no-worktree", "--agent", "agent-a")
+    check("claim warns that an open defect touches the item's files",
+          code == 0 and "open defect DFX-001" in err and "src/auth/login.py" in err, out + err)
+    code, out, err = sdlc("item", "set", "DFX-001", "--status", "Done")
+    code, out, err = sdlc("guard", "start", stdin=b'{"session_id": "s2"}')
+    check("a Done defect is no longer announced", code == 0 and "DFX-001" not in out, out + err)
+    code, out, err = sdlc("item", "set", "DFX-002", "--severity", "S9")
+    check("item set refuses a bad severity", code == 2, out + err)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -8485,7 +8551,7 @@ def main():
                  test_people_registry,
                  test_shard_merge_driver,
                  test_trusted_records_review, test_install_review_fixes,
-                 test_status_review_fixes,
+                 test_status_review_fixes, test_defect_awareness,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

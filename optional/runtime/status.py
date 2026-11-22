@@ -269,7 +269,10 @@ def report(rt, project):
     for f in findings:
         if not f.get("accepted") and f.get("level") in counts:
             counts[f["level"]] += 1
-    return {"branch": branch,
+    defects = [{"id": it["id"], "title": it.get("title", ""), "severity": it.get("severity", ""),
+                "status": it.get("status", ""), "touch": it.get("touch") or []}
+               for it in shards_mod.open_defects(merged, shards_mod.URGENT_SEVERITIES)]
+    return {"branch": branch, "defects": defects,
             "user": {"name": me["name"], "source": me["source"], "handle": me["handle"]},
             "setup": setup, "items": items, "other_claims": others, "parked": parked,
             "ready": ready, "plan_first": plan_first, "doctor": counts}
@@ -303,6 +306,15 @@ def format_report(data, limit=8):
         for p in data["parked"]:
             out.append("  %-10s %-8s %s%s" % (clean(p["id"]), p["status"], clean(p["title"])[:48],
                                               " (%s)" % clean(p["for"]) if p["for"] else ""))
+    if data.get("defects"):
+        out.append("")
+        out.append("Open defects (S0 to S2)")
+        for dft in data["defects"][:limit]:
+            out.append("  %-10s %-3s %-12s %s%s" % (
+                clean(dft["id"]), dft["severity"], clean(dft["status"]), clean(dft["title"])[:48],
+                " (touches %s)" % clean(", ".join(dft["touch"][:3])) if dft["touch"] else ""))
+        if len(data["defects"]) > limit:
+            out.append("  ... %d more: %s item list" % (len(data["defects"]) - limit, SDLC))
     out.append("")
     out.append("Ready to take")
     if not (data["ready"] or data["plan_first"]):

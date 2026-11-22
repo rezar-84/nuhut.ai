@@ -65,6 +65,10 @@ STATUS_ALIASES = {
 ITEM_TYPES = ("feat", "fix", "defect", "chore", "docs", "refactor", "test")
 EFFORT_MODES = ("", "Lean", "Normal", "Beast")
 APPROVER_FIELDS = ("handle", "login", "source", "commit", "at")
+SEVERITIES = ("S0", "S1", "S2", "S3", "S4")
+# Severities an agent is told about at session start and in status (CARD.md: S0 stop,
+# S1 release blocker, S2 blocker unless waived).
+URGENT_SEVERITIES = ("S0", "S1", "S2")
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*-[0-9]+$")
 INLINE_TOUCH_RE = re.compile(r"(?:^|\b)touch\s*:\s*([^|;\n]+)", re.I)
 INLINE_EFFORT_RE = re.compile(r"(?:^|\beffort\s*:\s*)(Lean|Normal|Beast)\b", re.I)
@@ -274,7 +278,73 @@ def normalize_item(data, today=None):
     issue = issue_number(data.get("issue"))
     if issue:
         out["issue"] = issue
+    # Severity (NUHT-040) is written only once an item has one, so other shards keep their
+    # shape.
+    severity = severity_of(data.get("severity"))
+    if severity:
+        out["severity"] = severity
+    found_by = str(data.get("found_by") or "").strip()
+    if found_by:
+        out["found_by"] = found_by
     return out
+
+
+def severity_of(value):
+    """'S0'..'S4' from 'S2', 's2' or '2'; '' for anything else."""
+    text = str(value or "").strip().upper()
+    if re.match(r"^[0-4]$", text):
+        text = "S" + text
+    return text if text in SEVERITIES else ""
+
+
+OPEN_EXCLUDED = ("done", "dropped")
+
+
+def open_defects(items, severities=None):
+    """The defect items not Done or Dropped, most severe first (no severity last), then by
+    ID. severities limits the list, e.g. URGENT_SEVERITIES."""
+    out = []
+    for item_id, it in (items or {}).items():
+        if it.get("type") != "defect":
+            continue
+        if str(it.get("status") or "").strip().lower() in OPEN_EXCLUDED:
+            continue
+        sev = it.get("severity") or ""
+        if severities is not None and sev not in severities:
+            continue
+        out.append(it)
+    order = dict((s, i) for i, s in enumerate(SEVERITIES))
+    out.sort(key=lambda it: (order.get(it.get("severity") or "", len(SEVERITIES)),
+                             _id_sort_key(it["id"])))
+    return out
+
+
+def defects_touching(items, paths):
+    """Open defects whose touch globs match one of paths (repo-relative, / separated):
+    [(item, [matched paths])]."""
+    import fnmatch
+    hits = []
+    for it in open_defects(items):
+        globs = it.get("touch") or []
+        matched = [p for p in paths for g in globs
+                   if fnmatch.fnmatch(p, g) or fnmatch.fnmatch(g, p) or p == g.rstrip("/") or
+                   (g.endswith("/**") and p.startswith(g[:-3].rstrip("/") + "/"))]
+        if matched:
+            hits.append((it, sorted(set(matched))))
+    return hits
+
+
+def defect_summary_lines(items, severities=URGENT_SEVERITIES, limit=8):
+    """One line per open defect at the given severities, for status and session start."""
+    rows = open_defects(items, severities)
+    lines = []
+    for it in rows[:limit]:
+        touch = it.get("touch") or []
+        lines.append("%s %s · %s%s" % (it["severity"], it["id"], it.get("title", ""),
+                                       (" (touches %s)" % ", ".join(touch[:3])) if touch else ""))
+    if len(rows) > limit:
+        lines.append("… and %d more: sdlc.py item list" % (len(rows) - limit))
+    return lines
 
 
 def issue_number(value):
@@ -904,13 +974,24 @@ def render(project, check_only=False):
 
     want_backlog = render_backlog_markdown(project, raw_backlog=cur_backlog)
     want_worklog = render_worklog_markdown(project, raw_worklog=cur_worklog)
+    defects_path = os.path.join(pdir, "defects", "README.md")
+    try:
+        with open(defects_path, encoding="utf-8") as handle:
+            cur_defects = handle.read()
+    except (IOError, OSError):
+        cur_defects = None
+    want_defects = render_defects_index(project, cur_defects) if cur_defects is not None else None
 
     drift = []
     files = []
     for rel_name, path, cur, want in (
         (os.path.join(project.docs, "project", "backlog.md"), backlog_path, cur_backlog, want_backlog),
         (os.path.join(project.docs, "project", "worklog.md"), worklog_path, cur_worklog, want_worklog),
+        (os.path.join(project.docs, "project", "defects", "README.md"), defects_path, cur_defects,
+         want_defects),
     ):
+        if want is None:
+            continue
         changed = cur != want
         if changed:
             drift.append(rel_name)
@@ -928,6 +1009,42 @@ def render(project, check_only=False):
         "drift": drift,
         "files": files,
     }
+
+
+DEFECT_INDEX_HEAD = "| ID | Defect | Severity | Found by | Status |"
+
+
+def _md_cell(text):
+    return str(text or "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def render_defects_index(project, current):
+    """defects/README.md with its Index table built from the defect items (NUHT-040). Rows
+    for IDs that are not items are kept, so a hand-written row is never lost. Returns the
+    text unchanged when there is no Index table to fill."""
+    lines = current.split("\n")
+    try:
+        head = next(i for i, l in enumerate(lines) if l.strip() == DEFECT_INDEX_HEAD)
+    except StopIteration:
+        return current
+    end = head + 2
+    while end < len(lines) and lines[end].strip().startswith("|"):
+        end += 1
+    items = merged_items(project)
+    defects = sorted((it for it in items.values() if it.get("type") == "defect"),
+                     key=lambda it: _id_sort_key(it["id"]))
+    rows = ["| %s | %s | %s | %s | %s |" % (it["id"], _md_cell(it.get("title")),
+                                             it.get("severity") or "unrated",
+                                             _md_cell(it.get("found_by")) or "—", it["status"])
+            for it in defects]
+    known = set(it["id"] for it in defects)
+    for line in lines[head + 2:end]:
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells and cells[0] and cells[0] not in known:
+            rows.append(line)
+    if not rows:
+        rows = ["| | | | | |"]
+    return "\n".join(lines[:head + 2] + rows + lines[end:])
 
 
 def migrate_shards(rt, project, apply=False):

@@ -4725,6 +4725,7 @@ Viewer and reports
 Work items and agents
   item                manage sharded items: add, set, show, list                      item add --title "Fix auth"
   hotfix <ID>         mark an item a hotfix (same as item set <ID> --hotfix)          hotfix ACME-12
+  bug "<title>"       report a defect with its severity; agents see S0-S2 at start   bug "Login 500s" --severity S1
   next-id             allocate the next work item or ADR ID (--sync-refs for CAS)     next-id --sync-refs
   render              materialize backlog.md and worklog.md from shards (--check)     render --check
   merge-shard         git merge driver for items/*.json (fix merge-driver sets it)    fix merge-driver
@@ -4802,6 +4803,8 @@ EXAMPLES = {
              "item set ACME-12 --status Ready --effort Lean",
              "item set ACME-12 --hotfix  # finish skips the pre-merge review; a retro review is owed",
              "item list --status Ready --json", "item show ACME-12 --json"],
+    "bug": ['bug "Login returns 500 on a long password" --severity S1 --touch "src/auth/**"',
+            'bug "Typo on the pricing page" --severity S4 --found-by "user report"'],
     "hotfix": ["hotfix ACME-12           # the same as item set ACME-12 --hotfix",
                "review ACME-12 --role qa --by codex --stage retro  # the retroactive review"],
     "next-id": ["next-id", "next-id --sync-refs --json", "next-id --kind adr"],
@@ -4908,7 +4911,10 @@ def _cmd_finish(project, opts, parser):
             payload = {}
         code, message = finish_mod.guard(sys.modules[__name__], project, opts.event,
                                          payload if isinstance(payload, dict) else {})
-        if message:
+        if message and opts.event == "start" and code == 0:
+            # SessionStart: stdout is what the agent reads as context.
+            print(message)
+        elif message:
             sys.stderr.write(message + "\n")
         return code
     if opts.waive and not (opts.by and opts.reason):
@@ -5216,7 +5222,12 @@ def _cmd_item(project, opts, parser):
             "later_when": opts.later_when or "",
             "dropped_reason": opts.dropped_reason or "",
             "summary": opts.summary or "",
+            "severity": getattr(opts, "severity", None) or "",
+            "found_by": getattr(opts, "found_by", None) or "",
         }
+        if data["severity"] and not _shards_mod.severity_of(data["severity"]):
+            sys.stderr.write("item add: --severity must be S0 to S4\n")
+            return 2
         try:
             saved = _shards_mod.save_item(project, data, today=today_iso)
         except ValueError as exc:
@@ -5302,6 +5313,13 @@ def _cmd_item(project, opts, parser):
             updated["dropped_reason"] = opts.dropped_reason
         if opts.summary is not None:
             updated["summary"] = opts.summary
+        if getattr(opts, "severity", None) is not None:
+            if opts.severity and not _shards_mod.severity_of(opts.severity):
+                sys.stderr.write("item set: --severity must be S0 to S4\n")
+                return 2
+            updated["severity"] = opts.severity
+        if getattr(opts, "found_by", None) is not None:
+            updated["found_by"] = opts.found_by
         updated["updated"] = today_iso
         try:
             saved = _shards_mod.save_item(project, updated, today=today_iso)
@@ -5319,6 +5337,84 @@ def _cmd_item(project, opts, parser):
         else:
             print("updated %s (%s, Tier %s)" % (saved["id"], saved["status"], saved["tier"]))
         return 0
+
+
+def defect_report_text(project, item, repro="", today=None):
+    """A defect report for item from the project's defect-report template, with the header
+    filled in; a short stand-in when the template is missing."""
+    today = today or datetime.date.today().isoformat()
+    path = os.path.join(project.root, project.docs, "templates", "defect-report.md")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except (IOError, OSError):
+        text = ("# Defect report \u2014 %s %s\n\n**Severity:** %s\n\n## Steps to reproduce\n\n"
+                % (item["id"], item["title"], item.get("severity", "")))
+        return text + (repro or "_(steps)_") + "\n"
+    text = re.sub(r"(?m)^status: \S+", "status: current", text, count=1)
+    text = re.sub(r"(?m)^last-reviewed: \S+", "last-reviewed: " + today, text, count=1)
+    text = re.sub(r"(?m)^# Defect report \u2014 .*$",
+                  lambda m: "# Defect report \u2014 %s %s" % (item["id"], item["title"]), text, count=1)
+    text = re.sub(r"(?m)^\*\*Severity:\*\* S0 \| S1 \| S2 \| S3 \| S4",
+                  "**Severity:** " + item.get("severity", ""), text, count=1)
+    if item.get("found_by"):
+        text = text.replace("**Found by:** _(tester / tool / user)_",
+                            "**Found by:** " + item["found_by"], 1)
+    text = re.sub(r"(?m)^\*\*Environment:\*\* (.*)\*\*Date:\*\* YYYY-MM-DD",
+                  lambda m: "**Environment:** %s**Date:** %s" % (m.group(1), today), text, count=1)
+    if repro:
+        text = re.sub(r"(?s)(## Steps to reproduce\n\n).*?(?=\n\*\*Inputs|\n## )",
+                      lambda m: m.group(1) + repro.strip() + "\n", text, count=1)
+    return text
+
+
+def _cmd_bug(project, opts, parser):
+    """bug: report a defect as a defect item plus a defect report (NUHT-040)."""
+    severity = _shards_mod.severity_of(opts.severity)
+    if not severity:
+        sys.stderr.write("bug: --severity must be S0 to S4 (see the severity ladder in CARD.md)\n")
+        return 2
+    claims_mod = runtime_module("claims")
+    alloc, err_a = claims_mod.next_id(project, kind="item")
+    if err_a:
+        sys.stderr.write("bug: %s\n" % err_a)
+        return 1
+    item_id = alloc["id"]
+    today_iso = datetime.date.today().isoformat()
+    status, note = opts.status, ""
+    wait, reason = "", ""
+    if not status:
+        status, note = resolve_discovered_status(project, item_id, "defect", opts.tier)
+        if status == "Parked":
+            wait, reason = "backlog owner", "Defect triage: accept into Ready, defer, or drop (%s)" % note
+    data = {"id": item_id, "title": opts.title, "type": "defect", "tier": opts.tier,
+            "owner": "qa", "status": status, "touch": opts.touch or "",
+            "created": today_iso, "updated": today_iso, "waiting_on": wait,
+            "park_reason": reason, "severity": severity, "found_by": opts.found_by or ""}
+    try:
+        saved = _shards_mod.save_item(project, data, today=today_iso)
+    except ValueError as exc:
+        sys.stderr.write("bug: %s\n" % exc)
+        return 2
+    rel = os.path.join(project.docs, "project", "defects", item_id + ".md")
+    full = os.path.join(project.root, rel)
+    if not os.path.exists(full):
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as handle:
+            handle.write(defect_report_text(project, saved, opts.repro or "", today_iso))
+    _shards_mod.render(project)
+    notify_if_parked(project, None, saved)
+    if opts.json:
+        print(json.dumps(dict(saved, report=rel, triage_reason=note), indent=2))
+        return 0
+    print("added %s (%s, %s, Tier %s) -> %s" % (item_id, severity, saved["status"], saved["tier"], rel))
+    if severity == "S0":
+        print("S0: stop and start the incident process (CARD.md); a postmortem is owed.")
+    elif severity == "S1":
+        print("S1: a release blocker until it is Done.")
+    if note:
+        print("status: %s (%s)" % (saved["status"], note))
+    return 0
 
 
 def _cmd_hotfix(project, opts, parser):
@@ -5423,6 +5519,12 @@ def _cmd_claims(project, opts, parser):
                 print("setup: `%s` passed (NUHUT_PORT=%s)" % (setup["command"], record.get("port") or ""))
             print("free it when the item is Done, Parked or Deferred: "
                   "python3 .ai-sdlc/bin/sdlc.py unclaim %s" % record["id"])
+        claimed_item = _shards_mod.merged_items(project).get(record["id"]) or {}
+        for dft, hit in _shards_mod.defects_touching(_shards_mod.merged_items(project),
+                                                      claimed_item.get("touch") or []):
+            if dft["id"] != record["id"]:
+                sys.stderr.write("claim: open defect %s (%s) touches %s: %s\n" % (
+                    dft["id"], dft.get("severity") or "unrated", ", ".join(hit), dft.get("title", "")))
         if setup and not setup["ok"]:
             tail = (setup.get("output") or "").strip()
             sys.stderr.write("claim: %s. The claim and its worktree are kept: fix the cause and run "
@@ -5863,7 +5965,7 @@ for _name, _handler in (
         ("finish", _cmd_finish), ("guard", _cmd_finish),
         ("notify", _cmd_notify), ("sync", _cmd_sync), ("slop", _cmd_slop), ("spec", _cmd_spec),
         ("next-id", _cmd_next_id), ("render", _cmd_render), ("item", _cmd_item),
-        ("hotfix", _cmd_hotfix), ("dispatch", _cmd_dispatch), ("deploy", _cmd_deploy),
+        ("hotfix", _cmd_hotfix), ("bug", _cmd_bug), ("dispatch", _cmd_dispatch), ("deploy", _cmd_deploy),
         ("claim", _cmd_claims), ("release", _cmd_claims), ("unclaim", _cmd_claims),
         ("claims", _cmd_claims), ("parallel", _cmd_claims), ("lens", _cmd_lens),
         ("audit", _cmd_lens), ("view", _cmd_view), ("metrics", _cmd_view),
@@ -6264,6 +6366,10 @@ def build_parser():
     it_p.add_argument("--later-when", dest="later_when", help="when a Deferred item becomes relevant")
     it_p.add_argument("--dropped-reason", dest="dropped_reason", help="reason an item was Dropped")
     it_p.add_argument("--summary", help="optional short summary")
+    it_p.add_argument("--severity", help="defect severity S0 to S4 (CARD.md ladder); "
+                      "S0 to S2 are shown at session start and in status")
+    it_p.add_argument("--found-by", dest="found_by", help="who or what found a defect: a "
+                      "person, a tool, a user report (never an email)")
     it_p.add_argument("--hotfix", action="store_true",
                       help="on `set`: mark the item a hotfix (records hotfix:true and the time; the "
                            "tier stays). finish then skips the pre-merge review and records a "
@@ -6271,6 +6377,17 @@ def build_parser():
     it_p.add_argument("--sync-refs", dest="sync_refs", action="store_true",
                       help="when auto-allocating ID on `add`, coordinate via refs/nuhut/seq on origin")
     it_p.add_argument("--json", action="store_true", help="print result as JSON")
+    bug_p = sub.add_parser("bug", help="report a defect: a defect item with its severity, "
+                           "and a defect report under <docs>/project/defects/")
+    bug_p.add_argument("title", help="what is wrong, in one line")
+    bug_p.add_argument("--severity", required=True, help="S0 to S4, by consequence (CARD.md)")
+    bug_p.add_argument("--touch", help="comma-separated files or globs the defect lives in; "
+                       "claim warns an agent whose item touches them")
+    bug_p.add_argument("--repro", help="steps to reproduce, for the report")
+    bug_p.add_argument("--found-by", dest="found_by", help="person, tool or user report (never an email)")
+    bug_p.add_argument("--tier", choices=("1", "2", "3"), default="2", help="risk tier of the fix (default 2)")
+    bug_p.add_argument("--status", help="status; default follows the charter's Discovered defects row")
+    bug_p.add_argument("--json", action="store_true", help="print the item as JSON")
     hf_p = sub.add_parser("hotfix", help="mark a work item a hotfix: the same as `item set <ID> --hotfix`")
     hf_p.add_argument("item", help="work item ID")
     hf_p.add_argument("--json", action="store_true", help="print the item as JSON")

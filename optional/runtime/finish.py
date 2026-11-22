@@ -1088,7 +1088,7 @@ def guard(rt, project, event, payload):
             state = {"head": project.git("rev-parse", "HEAD").strip(), "nudged": []}
             with open(path, "w", encoding="utf-8") as handle:
                 json.dump(state, handle)
-        return 0, ""
+        return 0, open_defects_note(rt, project)
     if payload.get("stop_hook_active") or not state.get("head"):
         return 0, ""
     messages = project.git("log", "--format=%B%x00", "%s..HEAD" % state["head"])
@@ -1117,6 +1117,22 @@ def guard(rt, project, event, payload):
                "entry and sets the status. If work continues, say what is left and stop. "
                "(Reminded once per item; turn off with the charter's Finish guard row.)"
                % ("; ".join(pending), SDLC))
+
+
+def open_defects_note(rt, project):
+    """The session-start note on open S0 to S2 defects (NUHT-040), or "". Printed on stdout,
+    which Claude Code adds to the session's context. Never raises: a start hook must not
+    break a session."""
+    try:
+        shards_mod = rt.runtime_module("shards")
+        lines = shards_mod.defect_summary_lines(shards_mod.merged_items(project))
+    except Exception:  # noqa: BLE001 -- a broken record must not stop the session
+        return ""
+    if not lines:
+        return ""
+    return ("Open defects in this project (S0 stop work, S1 release blocker, S2 blocker unless "
+            "waived). Do not ship over them; if your change touches one, say so:\n  "
+            + "\n  ".join(lines))
 
 
 # ---------------------------------------------------------------- record repairs
