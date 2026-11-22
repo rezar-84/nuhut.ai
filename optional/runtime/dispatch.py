@@ -467,7 +467,20 @@ def run_dispatch(rt, project, opts):
     waves_executed = []
 
     def execute_one(item_id, wave_index):
+        teardowns = []
+        res = _execute_one(item_id, wave_index, teardowns)
+        failed = [t for t in teardowns if t and not t.get("ok")]
+        if failed:
+            res["teardown_error"] = "; ".join(t.get("error") or "teardown failed" for t in failed)
+        return res
+
+    def _execute_one(item_id, wave_index, teardowns):
         started_item = time.time()
+
+        def release_item():
+            rec, _ = claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+            teardowns.append((rec or {}).get("teardown_result"))
+
         worker_agent = "%s-w%d" % (agent_name, wave_index + 1)
         wt_path = os.path.join(wt_base, item_id)
         provisioned_aisdlc = False
@@ -482,7 +495,7 @@ def run_dispatch(rt, project, opts):
                     shutil.rmtree(wt_path, ignore_errors=True)
                 claim_rec, c_err = claims_mod.claim(
                     project, view_mod, item_id, worker_agent, worktree=wt_path,
-                    base=base_sha, mark=False, sync_refs=sync_refs,
+                    base=base_sha, mark=False, sync_refs=sync_refs, run_setup_script=False,
                 )
                 if c_err:
                     return {
@@ -492,6 +505,17 @@ def run_dispatch(rt, project, opts):
 
             branch = claim_rec["branch"]
             provisioned_aisdlc = _provision_worktree_kit(project, wt_path)
+            setup = claims_mod.run_setup(project, claim_rec)
+            if setup is not None and not setup["ok"]:
+                tail = (setup.get("output") or "").strip()
+                _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
+                with coord_lock:
+                    release_item()
+                return {
+                    "item": item_id, "ok": False, "status": "setup_failed", "branch": branch,
+                    "error": (setup["error"] + ("\n" + tail if tail else ""))[:1500],
+                    "seconds": round(time.time() - started_item, 2),
+                }
             wt_project = rt.Project(wt_path)
             merged_map = shards.merged_items(wt_project)
             item_meta = dict(merged_map.get(item_id) or {"id": item_id, "title": item_id, "tier": "2", "type": "feat"})
@@ -542,7 +566,7 @@ def run_dispatch(rt, project, opts):
             if not verified_ok:
                 _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
                 with coord_lock:
-                    claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                    release_item()
                 return {
                     "item": item_id, "ok": False, "status": "verify_failed", "branch": branch,
                     "attempts": attempts_used, "verify_run": verify_run_id,
@@ -594,7 +618,7 @@ def run_dispatch(rt, project, opts):
                 if rev_err:
                     _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
                     with coord_lock:
-                        claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                        release_item()
                     return {
                         "item": item_id, "ok": False, "status": "review_failed", "branch": branch,
                         "attempts": attempts_used, "error": rev_err,
@@ -604,7 +628,7 @@ def run_dispatch(rt, project, opts):
                     _stage_and_commit(wt_path, "docs(%s): record blocking review" % item_id, trailers_text)
                     _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
                     with coord_lock:
-                        claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                        release_item()
                     return {
                         "item": item_id, "ok": False, "status": "review_blocked", "branch": branch,
                         "attempts": attempts_used, "review": rev_rel,
@@ -631,7 +655,7 @@ def run_dispatch(rt, project, opts):
             if fin_code != 0:
                 _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
                 with coord_lock:
-                    claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                    release_item()
                 return {
                     "item": item_id, "ok": False, "status": "finish_blocked", "branch": branch,
                     "attempts": attempts_used, "error": "\n".join(fin_lines),
@@ -646,7 +670,7 @@ def run_dispatch(rt, project, opts):
 
             _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
             with coord_lock:
-                claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                release_item()
 
             return {
                 "item": item_id,
@@ -666,7 +690,7 @@ def run_dispatch(rt, project, opts):
                 _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
             if claim_rec:
                 with coord_lock:
-                    claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                    release_item()
             return {
                 "item": item_id, "ok": False, "status": "exception",
                 "error": str(exc), "seconds": round(time.time() - started_item, 2),
@@ -833,8 +857,10 @@ def format_dispatch_report(report):
             ))
         else:
             lines.append("  FAIL  %-10s %-14s %s" % (
-                r["item"], r.get("status", "failed"), (r.get("error") or "").splitlines()[0][:120]
+                r["item"], r.get("status", "failed"), ((r.get("error") or "").splitlines() or [""])[0][:120]
             ))
+        if r.get("teardown_error"):
+            lines.append("  WARN  %-10s teardown failed: %s" % (r["item"], r["teardown_error"][:120]))
     if report.get("discovered_filed"):
         lines.append("  discovered defects filed (Parked): %s" % ", ".join(report["discovered_filed"]))
     if report.get("telemetry_path"):

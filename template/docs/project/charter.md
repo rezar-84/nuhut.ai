@@ -158,6 +158,7 @@ line and saves a corrupted backlog. Rules: `../process/10-multi-agent.md`.
 | **Claiming a work item** | _(how an agent takes and releases a backlog row — default: set Owner and status `In progress`, committed on its own)_ |
 | **Single-writer files** | _(beyond the charter, migrations, lockfiles, and generated files, which always are)_ |
 | **May merge to the default branch** | _(yes / no — pull requests only)_ |
+| **Worktree scripts** | none _(optional; default none. `setup: <cmd>; teardown: <cmd>`, plus `; port: <base>` if 4100 is taken. Setup runs in each worktree `sdlc.py claim` or `dispatch` creates; teardown runs before `release --remove-worktree` removes it. Both get `NUHUT_ITEM` and `NUHUT_PORT`, one port per worktree, and a failure is reported. Set with `sdlc.py config --worktree-scripts`)_ |
 
 ## Budgets
 

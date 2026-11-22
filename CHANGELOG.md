@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Worktree setup and teardown scripts.** The charter's new optional **Worktree scripts** row (`setup: <cmd>; teardown: <cmd>`, default none, set with `sdlc.py config --worktree-scripts`) runs setup in each worktree `claim` or `dispatch` creates and teardown before `release --remove-worktree` or `dispatch` removes it. Both get `NUHUT_ITEM` and a per-worktree `NUHUT_PORT` allocated from a base (4100, or `port: <base>`). A failing setup makes `claim` exit 1 and ends a dispatched item as `setup_failed`; a failing teardown makes `release` exit 1 and release nothing unless `--force`.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.
