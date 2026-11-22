@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **`sdlc.py lens --area standards` reads the conventions a codebase already follows**: formatter and linter configs (including `pyproject.toml` sections and `package.json` keys), the naming style per language with samples, the test layout, the import style and the commit convention from the last 200 subjects. It is read-only; `--write` drafts `<docs>/project/standards.md` for people to correct and refuses to overwrite an existing page.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.

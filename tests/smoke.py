@@ -3147,6 +3147,78 @@ def test_arrow_keys():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_lens_standards():
+    print("project lens: standards discovery, read-only unless --write, never overwriting")
+    d = tempfile.mkdtemp(prefix="sdlc-std-")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", d])
+    write(d, ".editorconfig", "root = true\n[*]\nindent_style = space\nindent_size = 4\n")
+    write(d, "pyproject.toml", "[project]\nname = \"app\"\n\n[tool.ruff]\nline-length = 100\n\n[tool.black]\nline-length = 100\n")
+    write(d, ".prettierrc", "{\"semi\": false}\n")
+    write(d, "eslint.config.js", "export default [];\n")
+    write(d, "app/order_service.py", "import os\nfrom app import util\n\n\nclass OrderService:\n    pass\n\n\n"
+                                     "def place_order(item_id):\n    return item_id\n\n\ndef cancel_order(order_id):\n    return order_id\n")
+    write(d, "app/util.py", "from .order_service import place_order\n\n\ndef make_total(line_items):\n    return 0\n")
+    write(d, "tests/test_order_service.py", "from app.order_service import place_order\n\n\ndef test_place_order():\n    assert place_order(1) == 1\n")
+    code, out = run([d, "STX", "-y"])
+    check("installs next to an existing app", code == 0, out[-300:])
+    subprocess.call(["git", "add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "feat(api): add orders"], cwd=d)
+    write(d, "app/x.py", "X = 1\n")
+    subprocess.call(["git", "add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "fix: handle empty cart"], cwd=d)
+    write(d, "app/y.py", "Y = 1\n")
+    subprocess.call(["git", "add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "chore(deps): bump"], cwd=d)
+    manifest = json.loads(read(d, ".ai-sdlc/manifest.json") or "{}")
+    docs = manifest.get("docs_dir") or "docs"
+    target = os.path.join(d, docs, "project", "standards.md")
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+    code, out = sdlc("lens", "--area", "standards", "--json")
+    std = {}
+    try:
+        std = json.loads(out) if code == 0 else {}
+    except ValueError:
+        pass
+    check("sdlc.py lens --area standards --json runs", code == 0 and bool(std), out[-400:])
+    if not std:
+        shutil.rmtree(d, ignore_errors=True)
+        return
+    tools = [t["tool"] for t in std.get("tooling", [])]
+    check("formatter and linter configs are found, including pyproject sections",
+          all(t in tools for t in ("EditorConfig", "Prettier", "ESLint", "Ruff", "Black")), str(tools))
+    py = next((n for n in std.get("naming", []) if n["language"] == "Python"), {})
+    check("Python naming style is sampled from the code",
+          py.get("functions") == "snake_case" and py.get("classes") == "PascalCase"
+          and py.get("files") == "snake_case" and "place_order" in py.get("samples", []), str(py))
+    tl = std.get("tests", {})
+    check("the test layout is read", tl.get("layout") == "separate tests/ directory" and "test_*.py" in tl.get("patterns", []), str(tl))
+    imp = next((i for i in std.get("imports", []) if i["language"] == "Python"), {})
+    check("the import style is counted", imp.get("absolute", 0) >= 2 and imp.get("relative", 0) == 1, str(imp))
+    cm = std.get("commits", {})
+    check("the commit convention comes from git log",
+          cm.get("convention") == "Conventional Commits" and cm.get("sampled") == 3 and "feat" in cm.get("types", {}), str(cm))
+    check("the lens is read-only by default", not os.path.exists(target))
+    code, out = sdlc("lens", "--area", "standards")
+    check("the text report names what it found", code == 0 and "Conventional Commits" in out and "Ruff" in out, out[-400:])
+    check("still read-only after the text report", not os.path.exists(target))
+    code, out = sdlc("lens", "--area", "standards", "--write")
+    draft = read(d, os.path.relpath(target, d)) if os.path.exists(target) else ""
+    check("--write drafts the standards page", code == 0 and "Conventional Commits" in draft and "snake_case" in draft
+          and "Draft" in draft, out[-400:])
+    write(d, os.path.relpath(target, d), "# Our standards\nhand-edited\n")
+    code, out = sdlc("lens", "--area", "standards", "--write")
+    check("--write never overwrites an existing page", code != 0 and read(d, os.path.relpath(target, d)) == "# Our standards\nhand-edited\n"
+          and "exists" in out, out[-300:])
+    code, out = sdlc("lens", "--write")
+    check("--write needs --area standards", code != 0, out[-200:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_lens():
     print("project lens: stack, build errors, security, deploy, env, agents")
     d = tempfile.mkdtemp(prefix="sdlc-lens-")
@@ -4598,7 +4670,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
+                 test_epics, test_decision_and_stack, test_semver, test_lens, test_lens_standards, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
                  test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
                  test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes):
         test()
