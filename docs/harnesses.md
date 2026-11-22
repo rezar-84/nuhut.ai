@@ -24,7 +24,7 @@ What each layer of the kit needs from the tool:
 | Loop commands (`sdlc-plan`, `-build`, `-verify`, `-review`, `-finish`, `-log`, `-doctor`) | `/` commands in `.claude/commands/` | skills of the same name in `.agents/skills/`, so they appear in a `/` menu that lists skills (Antigravity, Cursor, Codex, Gemini CLI, Copilot); `CARD.md` names what each runs on any tool |
 | Tool-call hooks (`--hooks`) | yes | Gemini CLI: all six rules; Cursor: the three shell rules; both through `.claude/hooks/adapter.sh`. Other tools: none; the installer prints "guards do not run for this tool" for each one it wires, and the git hooks still check their commits |
 | Git hooks (`--git-hooks`) | yes | yes — git runs them for every agent and every human |
-| CI (`--scaffold-ci`) | yes | yes — the doctor runs strictly before the quality commands |
+| CI (`--scaffold-ci`) | yes | yes — the doctor runs strictly before the quality commands; on GitHub, `ci-check` judges each pull request |
 
 ```sh
 ./install.sh /path/to/project ACME -y --harness claude,cursor,copilot

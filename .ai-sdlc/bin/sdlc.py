@@ -9,6 +9,7 @@ markdown commands that call this.
     python3 .ai-sdlc/bin/sdlc.py doctor [--json] [--strict]
     python3 .ai-sdlc/bin/sdlc.py verify [--stage unit,lint] [--timeout 1800]
     python3 .ai-sdlc/bin/sdlc.py plan-check ACME-12 [--base main] [--json] [--strict]
+    python3 .ai-sdlc/bin/sdlc.py ci-check [--base main] [--head REF|event] [--charter-ref REF] [--json]
     python3 .ai-sdlc/bin/sdlc.py view [--no-open] [--json] [--serve [--port 8765]]
     python3 .ai-sdlc/bin/sdlc.py metrics [--json]
     python3 .ai-sdlc/bin/sdlc.py log --since main [--write]
@@ -1661,13 +1662,20 @@ def trusted_ref(project):
     return None
 
 
-def trusted_text(project, rel):
+def trusted_text(project, rel, ref=None):
     """(text, source) for a security-bearing record (the charter's Approvers row,
     people.json, ...), read as it stands on the default branch so a branch that edits it
     has no effect until it merges. source names the ref. Falls back to the working tree,
     with source "working-tree", only when there is no git, no default-branch ref, or the
-    file does not exist on that ref yet. ADR 0003 decision 8."""
+    file does not exist on that ref yet. ADR 0003 decision 8. <ref> (ci-check's
+    --charter-ref) names the ref to read instead of the default branch."""
     rel = rel.replace(os.sep, "/")
+    if ref is not None:
+        ref = ref if ref and not str(ref).startswith("-") and \
+            project.git("rev-parse", "--verify", "--quiet", ref + "^{commit}").strip() else None
+        if ref and project.git("ls-tree", "--name-only", ref, "--", rel).strip():
+            return project.git("show", "%s:%s" % (ref, rel)), ref
+        return read(project.path(rel)), "working-tree"
     ref = trusted_ref(project)
     if ref and project.git("ls-tree", "--name-only", ref, "--", rel).strip():
         source = ref[len("refs/remotes/"):] if ref.startswith("refs/remotes/") else \
@@ -3151,6 +3159,235 @@ def print_plan_check(result):
               "question. Neither is decided here.")
 
 
+# ---------------------------------------------------------------- ci-check
+
+# Bot authors whose commits carry no trailers. They skip the trailer check only: their
+# paths still meet the tier floor, unattributed, so a bot commit on a Tier 1 path fails.
+CI_BOTS = ("dependabot[bot]", "github-actions[bot]")
+# Used when the charter's Always Tier 1 here row names no backticked glob; any depth.
+CI_DEFAULT_TIER1 = ("**/auth/**", "**/migrations/**", "**/infra/**")
+# The charter rows whose change is itself a Tier 1 change (ADR 0003 decision 8).
+CI_SECURITY_ROWS = ("Approvers", "Always Tier 1 here", "Extensions allowed", "Notify webhook",
+                    "Tier rules", "Independent review required for")
+# Under .ai-sdlc/ but not enforcement surfaces: the test-first locks routine Tier 2 work
+# keeps, and the folders of generated state (each holds a committed .gitignore).
+CI_NOT_TIER1 = (".ai-sdlc/test-lock.txt",) + tuple(
+    ".ai-sdlc/%s/" % name for name in ("backups", "bite", "cache", "dispatch", "evidence",
+                                       "guard", "runs", "session", "view"))
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+_SHA = re.compile(r"^[0-9a-fA-F]{7,64}$")
+
+
+def _printable(text):
+    """Commit text as safe to print in a CI log: no terminal escapes."""
+    return _CONTROL.sub("?", str(text or ""))
+
+
+def ci_tier1_globs(project, charter_ref=None):
+    """(globs, source): the Tier 1 path globs ci-check enforces. The backticked globs in
+    the charter's Always Tier 1 here row, read at <charter_ref> through trusted_text, else
+    auth/, migrations/ and infra/ at any depth; always the kit's own enforcement surfaces."""
+    text, source = trusted_text(project, project.charter_path, charter_ref)
+    cell = UNFILLED.sub("", labelled(text, "Always Tier 1 here") or "")
+    globs = [g.strip() for g in re.findall(r"`([^`\n]+)`", cell)
+             if g.strip() and not re.search(r"\s", g.strip()) and not g.strip().startswith("-")]
+    if not globs:
+        globs = list(CI_DEFAULT_TIER1)
+    always = [".ai-sdlc/**", ".github/workflows/**",
+              project.docs.rstrip("/") + "/project/people.json"]
+    return globs + [g for g in always if g not in globs], source
+
+
+def _ci_tier_at(project, ref, item):
+    """The item's tier on <ref>: its shard file, else its backlog row; '' when unknown."""
+    folder = project.docs.rstrip("/") + "/project/"
+    raw = project.git("show", "%s:%sitems/%s.json" % (ref, folder, item))
+    if raw.strip():
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = {}
+        if isinstance(data, dict) and tier_of(str(data.get("tier", ""))):
+            return tier_of(str(data.get("tier", "")))
+    text = project.git("show", "%s:%sbacklog.md" % (ref, folder))
+    for row_id, _, cells in backlog_rows(text, project.prefix,
+                                         getattr(project, "legacy_prefixes", None)):
+        if row_id == item and len(cells) > 2:
+            return tier_of(cells[2])
+    return ""
+
+
+def _ci_charter_rows(project, ref):
+    text = project.git("show", "%s:%s" % (ref, project.charter_path.replace(os.sep, "/")))
+    return dict((label, labelled(text, label)) for label in CI_SECURITY_ROWS)
+
+
+def _ci_paths(project, sha, parents, merge_base):
+    """Paths a commit changes. A merge is judged on what it changes against its first
+    parent (`git diff --name-only <first-parent> <merge>`), less what one of its other
+    parents or the base branch already had: those paths were judged on the commits that
+    wrote them, so what is left is the content the merge itself added."""
+    if len(parents) > 1:
+        out = project.git("diff", "--name-only", parents[0], sha)
+        keep = None
+        for other in list(parents[1:]) + [merge_base]:
+            changed = set(project.git("diff", "--name-only", other, sha).splitlines())
+            keep = changed if keep is None else keep & changed
+        return [p for p in out.splitlines() if p.strip() and p in keep]
+    return commit_paths(project, sha)
+
+
+def ci_event_head(path):
+    """(sha, error): pull_request.head.sha from the GitHub event file at <path>."""
+    if not path:
+        return None, "--head event needs $GITHUB_EVENT_PATH (set by GitHub Actions)"
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        sha = data["pull_request"]["head"]["sha"]
+    except (IOError, OSError, ValueError, KeyError, TypeError):
+        return None, "no pull_request.head.sha in the event file $GITHUB_EVENT_PATH"
+    if not isinstance(sha, str) or not _SHA.match(sha):
+        return None, "pull_request.head.sha in $GITHUB_EVENT_PATH is not a commit id"
+    return sha, None
+
+
+def ci_check(project, base=None, head=None, charter_ref=None):
+    """Returns (result, error). Judges the commits in merge_base(base, head)..head, merge
+    commits included: trailers, the ledger record behind each item, a review file for
+    each Tier 1 item, the tier floor its changed paths imply, and tier lowering."""
+    base = base or default_branch(project) or "main"
+    head = head or "HEAD"
+    for name, ref in (("base", base), ("head", head), ("charter-ref", charter_ref)):
+        if ref is None:
+            continue
+        if not ref or str(ref).startswith("-") or \
+                not project.git("rev-parse", "--verify", "--quiet", ref + "^{commit}").strip():
+            return None, ("%s %r is not a commit here. Fetch it (actions/checkout with "
+                          "fetch-depth: 0), or pass --%s" % (name, ref, name))
+    head_sha = project.git("rev-parse", "--verify", "--quiet", head + "^{commit}").strip()
+    merge_base = project.git("merge-base", base, head_sha).strip()
+    if not merge_base:
+        return None, ("no merge base between %s and %s: the clone is shallow or the histories "
+                      "are unrelated. Check out with fetch-depth: 0" % (base, head))
+    log = project.git("log", "--format=%H%x01%P%x01%an%x01%B%x00",
+                      "%s..%s" % (merge_base, head_sha))
+    commits = []
+    for record in log.split("\x00"):
+        parts = record.strip("\n").split("\x01")
+        if len(parts) < 4 or not parts[0].strip():
+            continue
+        commits.append({"sha": parts[0].strip(), "parents": parts[1].split(),
+                        "author": parts[2], "subject": (parts[3].strip().splitlines() or [""])[0],
+                        "trailers": trailers(parts[3])})
+    findings = []
+
+    def find(check, item, sha, detail, fix):
+        findings.append({"check": check, "item": item or "", "sha": sha or "",
+                         "detail": _printable(detail), "fix": fix})
+
+    globs, glob_source = ci_tier1_globs(project, charter_ref)
+    regexes = [(g, glob_regex(g)) for g in globs]
+    charter_rel = project.charter_path.replace(os.sep, "/")
+    items, tiers = [], {}
+    for c in commits:
+        tags, short = c["trailers"], c["sha"][:7]
+        label = '%s "%s"' % (short, c["subject"][:60])
+        item = (tags.get("Work-Item") or "").strip()
+        if item and item not in items:
+            items.append(item)
+        if c["author"] not in CI_BOTS:
+            agent = (tags.get("Agent") or "").strip()
+            model = (tags.get("Model") or "").strip()
+            missing = [k for k, v in (("Work-Item", item), ("Agent", agent)) if not v]
+            if agent.lower() != "human" and not model:
+                missing.append("Model")
+            fix = "%s trailers %s" % (SDLC, item or "<ID>")
+            if missing:
+                find("trailers", item, c["sha"], "%s  missing %s" % (label, ", ".join(missing)),
+                     "end the commit message with the lines `%s` prints" % fix)
+            if agent.lower() == "unknown" or model.lower() == "unknown":
+                find("trailers", item, c["sha"], "%s  Agent or Model is `unknown`" % label,
+                     "set AI_SDLC_AGENT or use Agent: human (then no Model line)")
+        if item and item not in tiers:
+            tiers[item] = item_tier(project, item)
+        tier = tiers.get(item, "") if item else ""
+        if tier == "1":
+            continue
+        paths = _ci_paths(project, c["sha"], c["parents"], merge_base)
+        hits = []
+        for path in paths:
+            if path in CI_NOT_TIER1 or path.startswith(CI_NOT_TIER1):
+                continue
+            glob = next((g for g, rx in regexes if rx.match(path)), None)
+            if glob:
+                hits.append((path, "matches `%s`" % glob))
+            elif path == charter_rel and c["parents"]:
+                before = _ci_charter_rows(project, c["parents"][0])
+                after = _ci_charter_rows(project, c["sha"])
+                changed = [k for k in CI_SECURITY_ROWS if before.get(k) != after.get(k)]
+                if changed:
+                    hits.append((path, "changes the security-bearing row(s) " +
+                                 ", ".join(changed)))
+        if hits:
+            shown = "; ".join("%s %s" % pair for pair in hits[:3])
+            if len(hits) > 3:
+                shown += "; and %d more Tier 1 path(s)" % (len(hits) - 3)
+            find("tier", item, c["sha"],
+                 "%s  %s: Tier 1, but %s" % (
+                     label, shown, ("%s is Tier %s" % (item, tier)) if item and tier
+                     else "the commit names no Tier 1 item"),
+                 "raise the item to Tier 1 (plan, review, approvals), or move the change "
+                 "to a Tier 1 item")
+
+    rules = tier_rules(project)
+    for item in items:
+        tier = tiers.get(item) or item_tier(project, item)
+        if not tier:
+            find("item", item, "", "%s is not in the backlog, so its tier cannot be judged"
+                 % item, "add its backlog row, or correct the commit's Work-Item trailer")
+            continue
+        was = _ci_tier_at(project, base, item)
+        if was and int(tier) > int(was):
+            find("tier", item, "", "%s lowered from Tier %s to Tier %s against %s"
+                 % (item, was, tier, base),
+                 "restore Tier %s; lowering a tier needs its own reviewed change on %s"
+                 % (was, base))
+        if required_steps(tier, rules, True, True)["Verify"]:
+            state = runtime_module("finish").verify_state(sys.modules[__name__], project, item,
+                                                          item_commits(project, item))
+            if state[0] != "pass":
+                why = state[3] or ("the latest run (%s) failed" % state[1] if state[0] == "fail"
+                                   else "no run names it")
+                find("ledger", item, "", "no committed verify record for %s on its newest "
+                     "code commit (this checks the record, not the result): %s" % (item, why),
+                     "%s verify --item %s, then commit the ledger" % (SDLC, item))
+        if tier == "1" and not review_records(project, item):
+            find("review", item, "", "%s is Tier 1 and has no review file in %s/project/reviews/"
+                 % (item, project.docs),
+                 "/sdlc-review %s, or %s review %s --role <role> --by <tool>" % (item, SDLC, item))
+    return {"base": base, "head": head_sha, "merge_base": merge_base,
+            "charter_source": glob_source, "tier1_globs": globs,
+            "commits": [c["sha"] for c in commits], "items": items,
+            "findings": findings}, None
+
+
+def print_ci_check(result):
+    print("ci-check: %d commit(s), %d item(s) since %s (%s); Tier 1 paths from %s"
+          % (len(result["commits"]), len(result["items"]), result["merge_base"][:7],
+             result["base"], result["charter_source"]))
+    if not result["commits"]:
+        print("no commits since %s" % result["base"])
+        return
+    for f in result["findings"]:
+        print("fail  %-8s  %s" % (f["check"], f["detail"]))
+        print("      fix: %s" % f["fix"])
+    if result["findings"]:
+        print("%d finding(s)." % len(result["findings"]))
+    else:
+        print("Every commit is attributed, every item has its record, and no path is above "
+              "its item's tier.")
+
 # ---------------------------------------------------------------- kit control & repair
 
 def _word_count(path):
@@ -4141,6 +4378,7 @@ Records and checks
   finish <ID>         close an item: evidence, review, worklog draft, status          finish ACME-12
   bite <test cmd>     do the tests fail without the change and pass with it?          bite npm test
   plan-check <ID>     does the branch's diff match the plan's Files that change?     plan-check ACME-12
+  ci-check            PR range: trailers, ledger record, Tier 1 review, tier floor    ci-check --base main
 
 Viewer and reports
   view                the project as an interactive page; --serve keeps it live      view --serve
@@ -4189,6 +4427,8 @@ EXAMPLES = {
               "guard stop               # Stop hook"],
     "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict",
                    "plan-check ACME-12 --pre"],
+    "ci-check": ["ci-check --base main", "ci-check --base origin/main --head event --charter-ref origin/main",
+                 "ci-check --json"],
     "view": ["view                     # write .ai-sdlc/view/index.html and open it",
              "view --serve             # live page on 127.0.0.1",
              "view --serve --github    # also open GitHub issues and PRs", "view --export-html report.html"],
@@ -4302,6 +4542,16 @@ def main(argv):
     chk.add_argument("--pre", action="store_true",
                      help="before the build: exit 1 if a planned path matches no file and is "
                      "not marked (new), or the plan is too broad (ignores --base and --strict)")
+    cic = sub.add_parser("ci-check", help="judge a pull request's commits: trailers, the "
+                         "ledger record behind each item, Tier 1 reviews and the tier floor")
+    cic.add_argument("--base", help="branch the PR targets (default: the charter's Default "
+                     "branch, else main)")
+    cic.add_argument("--head", help="the PR's last commit (default: HEAD); `event` reads "
+                     "pull_request.head.sha from $GITHUB_EVENT_PATH")
+    cic.add_argument("--charter-ref", dest="charter_ref", help="read the Always Tier 1 here "
+                     "globs from the charter on this ref (CI: the base branch), so the PR "
+                     "cannot weaken them")
+    cic.add_argument("--json", action="store_true", help="print the result as JSON")
     vw = sub.add_parser("view", help="draw the records as an interactive page "
                         "(.ai-sdlc/view/index.html, git-ignored)")
     vw.add_argument("--no-open", action="store_true", help="write the page, do not open it")
@@ -4332,7 +4582,7 @@ def main(argv):
     tr = sub.add_parser("trailers", help="print the commit trailers for a work item")
     tr.add_argument("item", help="work item ID")
     tr.add_argument("--agent", help="the harness making the commit (default: from the "
-                    "environment, else unknown)")
+                    "environment, else human, with no Model line)")
     tr.add_argument("--model", help="the model id (default: from the environment, else "
                     "unknown)")
     tr.add_argument("--json", action="store_true", help="print trailers as JSON")
@@ -5089,10 +5339,14 @@ def main(argv):
         return 0
     if opts.command == "trailers":
         agent, model = identity(opts.agent, opts.model, project)
+        # No agent detected: a person is committing, and a person has no Model trailer
+        # (process/05-change-control.md). `unknown` would fail ci-check.
+        tags = [("Work-Item", opts.item)] + ([("Agent", "human")] if agent == "unknown" else
+                                             [("Agent", agent), ("Model", model)])
         if getattr(opts, "json", False):
-            print(json.dumps({"Work-Item": opts.item, "Agent": agent, "Model": model}, indent=2))
+            print(json.dumps(dict(tags), indent=2))
         else:
-            print("Work-Item: %s\nAgent: %s\nModel: %s" % (opts.item, agent, model))
+            print("\n".join("%s: %s" % pair for pair in tags))
         return 0
     if opts.command == "review":
         path, record, error = review(project, opts.item, opts.role, opts.by, opts.model,
@@ -5149,6 +5403,22 @@ def main(argv):
         return 1 if opts.strict and gaps else 0
     if opts.command == "ext":
         return runtime_module("ext").main(sys.modules[__name__], project, opts)
+    if opts.command == "ci-check":
+        head = opts.head
+        if head == "event":
+            head, error = ci_event_head(os.environ.get("GITHUB_EVENT_PATH", ""))
+            if error:
+                sys.stderr.write("ci-check: %s\n" % error)
+                return 2
+        result, error = ci_check(project, opts.base, head, opts.charter_ref)
+        if error:
+            sys.stderr.write("ci-check: %s\n" % error)
+            return 2
+        if opts.json:
+            print(json.dumps(result, indent=2))
+        else:
+            print_ci_check(result)
+        return 1 if result["findings"] else 0
     if opts.command == "config":
         changes = {}
         if opts.effort:
