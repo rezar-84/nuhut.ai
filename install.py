@@ -634,9 +634,8 @@ How the agent works  (all project defaults, changeable later in the charter)
   --slop-filter <mode>   off | on | strict       -- hold prose to a no-AI-tells standard
 
 Which AI tools read it
-  --harness <list>       claude, cursor, copilot, gemini, windsurf, cline, roo, amp,
-                         aider, or all (default: claude). Codex, Jules, Zed, Factory,
-                         opencode and Antigravity read AGENTS.md and need nothing.
+  --harness <list>       claude, cursor, copilot, gemini, windsurf, cline, roo, amp, aider,
+                         or all (default: claude); --list harnesses names the rest
 
 Enforcement  (off unless asked for)
   --hooks                Claude Code hooks that refuse unsafe commits and edits
