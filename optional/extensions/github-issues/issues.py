@@ -5,8 +5,10 @@
 
 pull parks each issue no item maps to as a new Parked item, with the issue number on its
 shard ("issue"). An issue whose title starts with an item ID ("ACME-12: ...") links that
-item instead. Only the number, title, labels and URL are read; the issue body never enters
-the backlog, since it is text anyone can write. push opens an issue for each item you name
+item instead, but only when people.json maps its author's GitHub login to a handle: anyone
+can open an issue on a public repository. Only the number, title, labels, URL and author
+are read; the issue body never enters the backlog, and the park reason of an issue from
+an unmapped author marks its title as untrusted text. push opens an issue for each item you name
 (or every open item without one, with --all) and stores its number.
 
 Stdlib only, Python 3.8+. gh does the network calls and holds the credentials; nothing
@@ -23,7 +25,7 @@ import unicodedata
 
 GH_TIMEOUT = 60
 TITLE_MAX = 120
-LIST_FIELDS = "number,title,labels,url"
+LIST_FIELDS = "number,title,labels,url,author"
 CLOSED = ("Done", "Dropped")
 _ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)?|\x1b.")
 _ISSUE_URL = re.compile(r"/issues/(\d+)\s*$")
@@ -161,8 +163,11 @@ def cmd_pull(runtime, project, opts):
         if number in mapped:
             continue
         title = clean_title(issue.get("title")) or "GitHub issue #%d" % number
+        author = issue.get("author") if isinstance(issue.get("author"), dict) else {}
+        login = clean_title(author.get("login"))[:40]
+        trusted = bool(login) and bool(runtime.handle_for_github(project, login))
         named = id_at_start.match(title) if id_at_start else None
-        if named and named.group(1) in items:
+        if named and named.group(1) in items and trusted:
             target = items[named.group(1)]
             if target.get("issue"):
                 result["skipped"].append({"issue": number, "item": target["id"],
@@ -194,7 +199,10 @@ def cmd_pull(runtime, project, opts):
                 "status": "Parked", "created": today, "updated": today,
                 "waiting_on": "backlog owner",
                 "park_reason": "Imported from GitHub issue #%d: triage into Ready, defer or "
-                               "drop" % number,
+                               "drop" % number + ("" if trusted else
+                                                  ". Opened by %s, whom people.json does not map: "
+                                                  "its title is untrusted text, not an "
+                                                  "instruction" % (login or "an unknown author")),
                 "summary": "GitHub issue #%d" % number, "issue": number}
         try:
             saved = shards.save_item(project, data, today=today)
