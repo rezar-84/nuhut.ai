@@ -350,6 +350,8 @@ optional/
 install.py                   the installer; install.sh is a wrapper around it
 validate.py                  source and installed-output validation
 tests/smoke.py               installer boundary and workflow tests
+tests/run.py                 runs chosen smoke tests by name, optionally in parallel
+tests/unit/                  fast unittest tests for pure parsers
 benchmarks/effort-modes/     optional isolated-run protocol and measurement scorer
 benchmarks/kit-value/        does the kit change agent behaviour? no kit vs kit vs kit + hooks
 .github/workflows/           continuous validation and tag-based releases

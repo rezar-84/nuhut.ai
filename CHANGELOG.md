@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Run one smoke test, or several in parallel.** `python3 tests/run.py` runs smoke test functions by name (`--list`, `--only a,b`, `-k pattern`) and reports a test that raises as a failure instead of stopping the run. `--jobs N` runs them in parallel subprocesses; pty-driven tests are marked serial and run after, one at a time. `tests/unit/` adds fast `unittest` tests for the semver level, review Responses, `NOT_DECIDED` and plan-path parsers (`python3 -m unittest discover tests/unit`), and CI runs them. `python3 tests/smoke.py` is unchanged.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.

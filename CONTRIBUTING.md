@@ -29,6 +29,14 @@ dependency after installation.
    The smoke suite needs full git history for its upgrade and benchmark tests
    (`git fetch --unshallow --tags`); without it they skip and say so.
 
+   While working, run only what you touched. `python3 -m unittest discover tests/unit`
+   runs the fast parser tests in under a second. `python3 tests/run.py` runs smoke
+   test functions by name: `--list` shows them (pty-driven ones are marked `serial`),
+   `--only test_semver,test_lens` or `-k upgrade` picks some, and `--jobs 4` runs them
+   in parallel subprocesses with the serial ones after, one at a time. A test that
+   raises is reported as a failure and the run continues. `python3 tests/smoke.py`
+   still runs the whole suite in order, and CI runs both.
+
 ## Compatibility
 
 `install.py` uses only the Python standard library and supports Python 3.8 or newer (the versions CI tests).

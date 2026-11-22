@@ -4582,6 +4582,78 @@ def test_benchmarks_harnesses_and_effort_modes():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_test_runner():
+    """tests/run.py picks smoke functions by name, survives a raise, runs in parallel,
+    and tests/unit/ runs under plain unittest discovery."""
+    runner = os.path.join(ROOT, "tests", "run.py")
+    tmp = tempfile.mkdtemp(prefix="sdlc-runner-")
+    write(tmp, "fake_suite.py", (
+        "import os\n"
+        "failures = []\n"
+        "def check(name, ok):\n"
+        "    print(('  ok    ' if ok else '  FAIL  ') + name)\n"
+        "    if not ok:\n"
+        "        failures.append(name)\n"
+        "def test_alpha():\n"
+        "    check('alpha works', True)\n"
+        "def test_boom():\n"
+        "    raise RuntimeError('kaboom')\n"
+        "def test_beta_fails():\n"
+        "    check('beta is wrong', False)\n"
+        "def test_gamma():\n"
+        "    check('gamma works', True)\n"
+        "def test_serial_one():\n"
+        "    check('serial ran pid %d' % os.getpid(), True)\n"
+        "SERIAL = {'test_serial_one'}\n"
+        "def main():\n"
+        "    for test in (test_alpha, test_boom, test_beta_fails, test_gamma, test_serial_one):\n"
+        "        test()\n"))
+    mod = os.path.join(tmp, "fake_suite.py")
+
+    def go(*args):
+        p = subprocess.run([sys.executable, runner, "--module", mod] + list(args), cwd=ROOT,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           universal_newlines=True, timeout=120)
+        return p.returncode, p.stdout
+
+    code, out = go("--list")
+    names = [l.split()[0] for l in out.splitlines() if l.strip()]
+    check("run.py --list prints tests in main() order",
+          code == 0 and names[:5] == ["test_alpha", "test_boom", "test_beta_fails",
+                                       "test_gamma", "test_serial_one"], out)
+    check("run.py --list marks serial tests",
+          re.search(r"^test_serial_one\s+serial", out, re.M) is not None
+          and re.search(r"^test_alpha\s*$", out, re.M) is not None, out)
+    code, out = go("--only", "test_alpha,test_gamma")
+    check("run.py --only runs just the named tests and passes",
+          code == 0 and "alpha works" in out and "gamma works" in out and "beta" not in out, out)
+    code, out = go("--only", "test_nope")
+    check("run.py --only rejects an unknown name", code == 2 and "test_nope" in out, out)
+    code, out = go("-k", "alph")
+    check("run.py -k selects by substring", code == 0 and "alpha works" in out and "gamma" not in out, out)
+    code, out = go()
+    check("run.py reports a raising test as a failure and keeps going",
+          code == 1 and "kaboom" in out and "test_boom" in out and "gamma works" in out
+          and "beta is wrong" in out and "serial ran" in out, out)
+    code, out = go("--jobs", "3")
+    check("run.py --jobs 3 runs every test in subprocesses and reports the same failures",
+          code == 1 and "kaboom" in out and "gamma works" in out and "beta is wrong" in out
+          and "serial ran" in out and "2 failed" in out, out)
+    code, out = go("--jobs", "2", "--only", "test_alpha,test_gamma")
+    check("run.py --jobs passes when the selected tests pass", code == 0 and "all passed" in out, out)
+    p = subprocess.run([sys.executable, runner, "--list"], cwd=ROOT, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, universal_newlines=True)
+    check("run.py --list on smoke.py lists the pty tests as serial",
+          p.returncode == 0 and re.search(r"^test_arrow_keys\s+serial", p.stdout, re.M)
+          and re.search(r"^test_semver\s*$", p.stdout, re.M), p.stdout[-600:])
+    p = subprocess.run([sys.executable, "-m", "unittest", "discover", "tests/unit"],
+                       cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       universal_newlines=True, timeout=120)
+    check("python3 -m unittest discover tests/unit passes with tests found",
+          p.returncode == 0 and re.search(r"Ran ([1-9]\d*) test", p.stdout) is not None, p.stdout[-600:])
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -4600,7 +4672,8 @@ def main():
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
                  test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
                  test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
-                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes):
+                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
+                 test_test_runner):
         test()
     print("")
     if failures:
