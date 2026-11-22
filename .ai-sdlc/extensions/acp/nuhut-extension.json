@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "id": "acp",
+  "version": "1.0.0",
+  "nuhut": "builtin",
+  "description": "Generic Agent Client Protocol (ACP) agents: they read AGENTS.md through their client; no headless argv",
+  "overrides": null,
+  "provides": {
+    "harnesses": [
+      {
+        "id": "acp",
+        "order": 17,
+        "title": "ACP agents",
+        "native": true,
+        "pointer": null,
+        "markers": [],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [],
+          "mcp": []
+        }
+      }
+    ],
+    "agents": [
+      {
+        "id": "acp",
+        "order": 7,
+        "family": "varies",
+        "review": null,
+        "build": null,
+        "model_flag": null,
+        "identity": {
+          "agent": "acp",
+          "env": [],
+          "model_env": []
+        }
+      }
+    ],
+    "checks": [],
+    "presets": []
+  }
+}

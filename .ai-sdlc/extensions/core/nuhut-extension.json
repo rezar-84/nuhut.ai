@@ -248,24 +248,6 @@
         }
       },
       {
-        "id": "opencode",
-        "order": 14,
-        "title": "opencode",
-        "native": true,
-        "pointer": null,
-        "markers": [],
-        "skills_dir": ".agents/skills",
-        "hooks": {
-          "dialect": null,
-          "settings": null,
-          "events": {}
-        },
-        "lens": {
-          "dirs": [],
-          "mcp": []
-        }
-      },
-      {
         "id": "antigravity",
         "order": 15,
         "title": "Google Antigravity",

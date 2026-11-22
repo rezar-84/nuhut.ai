@@ -10,7 +10,7 @@ exists, never overwriting, and never copying the contract itself.
 
 | Tool | Wiring |
 | --- | --- |
-| Codex, Jules, Zed, Factory, opencode, Antigravity | Nothing to do — they read `AGENTS.md`. Name them in `--harness` anyway to get the shared skills below. |
+| Codex, Jules, Zed, Factory, OpenCode, Kiro, ACP agents, Antigravity | Nothing to do — they read `AGENTS.md`. Name them in `--harness` anyway to get the shared skills below. |
 | Claude Code | `CLAUDE.md`, plus slash commands, skills and optional hooks |
 | Gemini CLI · Amp · Copilot · Cursor · Windsurf · Cline · Roo Code · Aider | `--harness gemini,amp,copilot,cursor,windsurf,cline,roo,aider` (or `all`) |
 
@@ -43,6 +43,29 @@ writes and answers in; the formats themselves live in the kit, so an extension c
 cannot add one. `hooks.settings` and `hooks.events` name the settings file and the event names, and
 `lens.dirs` and `lens.mcp` the folders and MCP files `sdlc.py lens` reads. With `dialect: null`,
 guards do not run for this tool.
+
+### OpenCode, Kiro and ACP agents
+
+These three are built-in extensions made of data only (`optional/extensions/opencode/`,
+`kiro/` and `acp/`); supporting them needed no change to the installer or the runtime.
+
+| Tool | `--harness` | Reads | `review --by` / `dispatch` | Hooks |
+| --- | --- | --- | --- | --- |
+| OpenCode | `--harness opencode` | `AGENTS.md`; `.opencode/` is listed by `sdlc.py lens` | `opencode run "<prompt>"` for both review and build | `dialect: null`: OpenCode: guards do not run for this tool |
+| Kiro | `--harness kiro` | `AGENTS.md`; `.kiro/` and `.kiro/settings/mcp.json` are read by `sdlc.py lens` | review: `kiro-cli chat --no-interactive "<prompt>"`; build adds `--trust-all-tools` | `dialect: null`: Kiro: guards do not run for this tool |
+| ACP agents | `--harness acp` | `AGENTS.md`, through the ACP client (Zed and others) | none: the Agent Client Protocol has no single headless command, so use `--by cmd:<command>` with a reviewer that reads the prompt on stdin | `dialect: null`: ACP agents: guards do not run for this tool |
+
+For all three, the installer prints "guards do not run for this tool" when it wires them, and
+the git hooks (`--git-hooks`) still check their commits. Kiro and OpenCode have hook or plugin
+systems of their own, but neither matches one of the kit's three dialects, and an extension
+cannot add a dialect.
+
+The agent argv in these records reaches a subprocess, so it counts as an executable
+contribution; it loads because the extensions ship with the kit as built-ins
+(`"nuhut": "builtin"`). A project extension that changed it would need the charter row
+**Extensions allowed** and `"overrides"`. Both records give `family: "varies"`, because each
+CLI runs whatever model it is configured with. Pass `--model` to `review`, so the review can be
+labelled independent.
 
 **If nothing points at `AGENTS.md`, the kit is installed and inert** — and nothing about
 the repository looks wrong. The installer warns when it wires nothing, and

@@ -126,15 +126,25 @@ def cross_references(errors):
     for rel in sorted(known ^ runtime_pointers):
         errors.append("the harness records and sdlc.py V5_POINTER_FILES (the fallback) disagree "
                       "on %r" % rel)
+    # V5_AGENTS is the fallback for an install with no registry (made before 6.0), so it
+    # covers the v5 tools only. Those records must agree with it; a tool added since 6.0
+    # (OpenCode, Kiro, ACP) lives only in its built-in extension.
     reg_agents = install.REGISTRY.agents()
+    v5_agents = dict((aid, rec) for aid, rec in reg_agents.items()
+                     if aid in runtime_sdlc.V5_AGENTS)
     for kind in ("review", "build"):
-        if install.REGISTRY_MOD.agent_table(install.REGISTRY, kind) != runtime_sdlc.v5_agent_table(kind):
+        if install.REGISTRY_MOD.agent_table_of(v5_agents, kind) != runtime_sdlc.v5_agent_table(kind):
             errors.append("the agents records and sdlc.py V5_AGENTS (the fallback) disagree on "
                           "the %s argv" % kind)
-    if install.REGISTRY_MOD.identity_env(install.REGISTRY) != runtime_sdlc.v5_identity_env():
+    if install.REGISTRY_MOD.identity_env_of(v5_agents) != runtime_sdlc.v5_identity_env():
         errors.append("the agents records and sdlc.py V5_AGENTS disagree on the identity variables")
-    for aid in sorted(set(reg_agents) ^ set(runtime_sdlc.V5_AGENTS)):
-        errors.append("agent %r is in only one of the agents records and sdlc.py V5_AGENTS" % aid)
+    for aid in sorted(set(runtime_sdlc.V5_AGENTS) - set(reg_agents)):
+        errors.append("agent %r is in sdlc.py V5_AGENTS but in no agents record" % aid)
+    for aid in sorted(set(reg_agents) - set(runtime_sdlc.V5_AGENTS)):
+        owner = reg_agents[aid].get("extension")
+        if owner in ("core", "claude", "codex", "gemini", "cursor"):
+            errors.append("agent %r is in built-in extension %s but not in sdlc.py V5_AGENTS"
+                          % (aid, owner))
     for alias, targets in sorted(install.HARNESS_ALIASES.items()):
         for rel in targets:
             if rel not in known:
