@@ -7,10 +7,21 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 import shards
 
 SDLC = "python3 .ai-sdlc/bin/sdlc.py"
+# What the optional git and claim helpers are expected to raise on an odd repository: a
+# missing helper, a filesystem or git failure, an unreadable JSON record. finish only
+# reports their results, so these stay quiet; anything else is a bug and goes to stderr.
+EXPECTED_HELPER_ERRORS = (ImportError, OSError, ValueError)
+
+
+def report_unexpected(what, exc):
+    sys.stderr.write("finish: %s failed unexpectedly (%s: %s); continuing without it. "
+                     "This is a bug in the kit's runtime: please report it.\n"
+                     % (what, type(exc).__name__, exc))
 TODO = "TODO(finish)"
 CANONICAL = {"Now": "In progress", "Next": "Ready", "Blocked": "Blocked", "Parked": "Parked",
              "Later": "Deferred", "Done": "Done", "Dropped": "Dropped"}
@@ -405,8 +416,11 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
         out.append("note     uncommitted changes are not part of what finish records")
     try:
         sync = rt.runtime_module("sync").state(project, rt.default_branch(project))
-    except Exception:
+    except EXPECTED_HELPER_ERRORS:
         sync = None                      # finish never fails on a git oddity it only reports
+    except Exception as exc:             # noqa: BLE001 -- reported, not swallowed
+        report_unexpected("reading the git sync state", exc)
+        sync = None
     if sync and (sync["operation"] or sync["conflicted"]):
         owe("sync     a %s is unfinished%s: resolve it (05-change-control.md, \"Conflicts\") "
             "or `git %s --abort`, then verify again"
@@ -550,8 +564,10 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
             out.append("locks    unlocked reproducing test(s): %s" % ", ".join(unlocked))
         try:
             rt.runtime_module("claims").release(project, item)
-        except Exception:
-            pass
+        except EXPECTED_HELPER_ERRORS:
+            pass                         # no registry or an unreadable claim: nothing to release
+        except Exception as exc:         # noqa: BLE001 -- reported, not swallowed
+            report_unexpected("releasing the claim on %s" % item, exc)
     out.append("status   %s %s%s" % ("would set" if dry_run else "set", final,
                                      " (waiting on %s for the merge approval)" % extra[0]
                                      if needs_human_gate else ""))

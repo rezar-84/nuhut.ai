@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **`install.sh` asks for Python 3.8 or newer**, the version the kit supports, instead of accepting 3.6. Its message no longer says nothing the kit installs needs Python (the `.ai-sdlc/bin` runtime does) and points to the "Manual install" commands in `docs/install.md` instead of the README. `finish` no longer hides every exception from the git sync check and the claim release: missing helpers, filesystem and JSON errors stay quiet as before, and anything else is printed to stderr with its type before `finish` carries on.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.
