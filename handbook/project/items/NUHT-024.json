@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "security",
-  "status": "Deferred",
+  "status": "Ready",
   "depends": [
     "NUHT-023"
   ],

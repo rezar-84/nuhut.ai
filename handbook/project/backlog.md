@@ -44,8 +44,30 @@ Agreed, not started. Ordered by priority.
 | ID | Task | Tier | Owner role | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
 | NUHT-011 | Self-install kit_version drifts from VERSION after a release (touch: validate.py, .github/workflows/version.yml, .ai-sdlc/manifest.json, .ai-sdlc/profile.json, AGENTS.md, tests/smoke.py) | 2 | devops-sre |  | Ready |
+| NUHT-012 | finish accepts stale, stage-only or self-waived verify evidence (touch: optional/runtime/finish.py, optional/runtime/sdlc.py, tests/smoke.py) | 1 | qa |  | Ready |
 | NUHT-013 | Test-lock and protected-path guards miss shell writes (sed -i, redirects, tee, python -c) (touch: optional/runtime/hooks.py, tests/smoke.py, template/docs/process/05-change-control.md) | 2 | security |  | Ready |
+| NUHT-014 | Release pipeline: skip docs-only pushes, serialize runs, rebase before bot push, drop dead release.yml (touch: .github/workflows/version.yml, .github/workflows/release.yml, tools/semver.py) | 1 | devops-sre |  | Ready |
 | NUHT-015 | install.sh version floor and wording; finish swallows exceptions silently (touch: install.sh, optional/runtime/finish.py, tests/smoke.py) | 2 | software-engineer |  | Ready |
+| NUHT-016 | ADR 0003 and registry.py: nuhut-extension.json manifest, loader, version range (touch: optional/runtime/registry.py, install.py, optional/runtime/sdlc.py) | 1 | architect |  | Ready |
+| NUHT-017 | Move claude, codex, gemini, cursor support into built-in extensions (one agent table) (touch: optional/extensions/, install.py, optional/runtime/sdlc.py, optional/runtime/dispatch.py, optional/runtime/hooks.py) | 2 | software-engineer | NUHT-016 | Ready |
+| NUHT-018 | ext CLI: list, add, remove, update, search, validate; overlays; catalog (touch: optional/runtime/registry.py, optional/runtime/sdlc.py, docs/cli.md) | 2 | software-engineer | NUHT-016 | Ready |
+| NUHT-019 | Generate Claude, Gemini, Codex and Kiro plugin wrappers from the extension manifest (touch: .claude-plugin/, install.py) | 2 | devops-sre | NUHT-017, NUHT-008 | Ready |
+| NUHT-020 | New harness extensions: OpenCode, Kiro, ACP agents (no core changes) (touch: optional/extensions/) | 2 | software-engineer | NUHT-017 | Ready |
+| NUHT-021 | Split sdlc.py command routing into a command table (touch: optional/runtime/sdlc.py) | 2 | software-engineer | NUHT-016 | Ready |
+| NUHT-022 | ci-check: enforce trailers, ledger run on HEAD, review file and path-derived tier floor in PR CI (touch: optional/runtime/sdlc.py, install.py) | 1 | devops-sre |  | Ready |
+| NUHT-023 | People registry: owner and claims name humans (touch: optional/runtime/shards.py, optional/runtime/claims.py) | 2 | product-manager |  | Ready |
+| NUHT-024 | Approvals read from GitHub PR reviews instead of charter names (touch: optional/runtime/finish.py) | 1 | security | NUHT-023 | Ready |
+| NUHT-025 | Merge driver for item shards; rendered backlog and worklog gitignored (touch: optional/runtime/shards.py, install.py) | 2 | software-engineer |  | Ready |
+| NUHT-026 | status / next: one-line next actions in the CLI (touch: optional/runtime/sdlc.py) | 3 | software-engineer |  | Ready |
+| NUHT-027 | Release records and deploy ledger (environment, version, items); rename claim release to unclaim (touch: optional/runtime/) | 1 | devops-sre |  | Ready |
+| NUHT-028 | Hotfix fast path with a doctor check for the retroactive review (touch: optional/runtime/sdlc.py, template/docs/process/05-change-control.md) | 2 | devops-sre |  | Ready |
+| NUHT-029 | DORA delivery metrics in metrics and the viewer (touch: optional/runtime/view.py, optional/runtime/view/) | 2 | devops-sre | NUHT-027 | Ready |
+| NUHT-030 | Issue-tracker sync extension: GitHub Issues, then Linear and Jira | 2 | product-manager | NUHT-018 | Ready |
+| NUHT-031 | MCP server extension: backlog, verify, finish, doctor as tools (stdlib JSON-RPC) | 2 | software-engineer | NUHT-018 | Ready |
+| NUHT-032 | Worktree setup/run scripts for claim and dispatch | 2 | devops-sre |  | Ready |
+| NUHT-033 | Standards discovery: extract codebase conventions via lens | 2 | architect |  | Ready |
+| NUHT-034 | Webhook notifications for blocked, approval-needed and review-blocking events | 2 | devops-sre | NUHT-018 | Ready |
+| NUHT-035 | Move smoke tests to unittest with selection, a fast unit tier and a parallel pty tier (touch: tests/) | 2 | qa |  | Ready |
 
 ## Blocked
 
@@ -63,9 +85,6 @@ proceed. See "Waiting on a human" in `../process/00-operating-model.md`.
 
 | ID | Task | Tier | Owner role | Depends on | Status | Waiting on whom | For what decision | Since |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| NUHT-016 | ADR 0003 and registry.py: nuhut-extension.json manifest, loader, version range (touch: optional/runtime/registry.py, install.py, optional/runtime/sdlc.py) | 1 | architect |  | Parked | rezar-84 | Approve ADR 0003 (extension system) and the NUHT-016 plan | 2026-11-22 |
-| NUHT-014 | Release pipeline: skip docs-only pushes, serialize runs, rebase before bot push, drop dead release.yml (touch: .github/workflows/version.yml, .github/workflows/release.yml, tools/semver.py) | 1 | devops-sre |  | Parked | rezar-84 | Edits .github/workflows/release.yml and the release process (AGENTS.md section 9) | 2026-11-22 |
-| NUHT-012 | finish accepts stale, stage-only or self-waived verify evidence (touch: optional/runtime/finish.py, optional/runtime/sdlc.py, tests/smoke.py) | 1 | qa |  | Parked | rezar-84 | Tightens a Tier 1 governance gate (AGENTS.md section 9) | 2026-11-22 |
 | NUHT-007 | Fresh-context review as a recorded independence level | 1 | architect |  | Parked | rezar-84 | plan and ADR approval: changes a Tier 1 governance gate | 2026-11-21 |
 
 ## Later
@@ -76,25 +95,6 @@ Valid, not now. Include the condition that would make it now.
 | --- | --- | --- | --- | --- | --- | --- |
 | NUHT-008 | Plugin bootstrap for Claude Code / Codex that runs install.py | 2 | devops-sre |  | Deferred | NUHT-005 and v5.0.0 are released |
 | NUHT-009 | sdlc-drift: compare living specs and ADRs with code | 2 | architect |  | Deferred | the Specs row is on in a real project and drift is reported |
-| NUHT-017 | Move claude, codex, gemini, cursor support into built-in extensions (one agent table) (touch: optional/extensions/, install.py, optional/runtime/sdlc.py, optional/runtime/dispatch.py, optional/runtime/hooks.py) | 2 | software-engineer | NUHT-016 | Deferred | v6 Phase 1: after ADR 0003 (extension system) is approved |
-| NUHT-018 | ext CLI: list, add, remove, update, search, validate; overlays; catalog (touch: optional/runtime/registry.py, optional/runtime/sdlc.py, docs/cli.md) | 2 | software-engineer | NUHT-016 | Deferred | v6 Phase 1: after ADR 0003 (extension system) is approved |
-| NUHT-019 | Generate Claude, Gemini, Codex and Kiro plugin wrappers from the extension manifest (touch: .claude-plugin/, install.py) | 2 | devops-sre | NUHT-017, NUHT-008 | Deferred | v6 Phase 1: after ADR 0003 (extension system) is approved |
-| NUHT-020 | New harness extensions: OpenCode, Kiro, ACP agents (no core changes) (touch: optional/extensions/) | 2 | software-engineer | NUHT-017 | Deferred | v6 Phase 1: after ADR 0003 (extension system) is approved |
-| NUHT-021 | Split sdlc.py command routing into a command table (touch: optional/runtime/sdlc.py) | 2 | software-engineer | NUHT-016 | Deferred | v6 Phase 1: after ADR 0003 (extension system) is approved |
-| NUHT-022 | ci-check: enforce trailers, ledger run on HEAD, review file and path-derived tier floor in PR CI (touch: optional/runtime/sdlc.py, install.py) | 1 | devops-sre |  | Deferred | v6 Phase 2 (team): after v6.0 ships |
-| NUHT-023 | People registry: owner and claims name humans (touch: optional/runtime/shards.py, optional/runtime/claims.py) | 2 | product-manager |  | Deferred | v6 Phase 2 (team): after v6.0 ships |
-| NUHT-024 | Approvals read from GitHub PR reviews instead of charter names (touch: optional/runtime/finish.py) | 1 | security | NUHT-023 | Deferred | v6 Phase 2 (team): after v6.0 ships |
-| NUHT-025 | Merge driver for item shards; rendered backlog and worklog gitignored (touch: optional/runtime/shards.py, install.py) | 2 | software-engineer |  | Deferred | v6 Phase 2 (team): after v6.0 ships |
-| NUHT-026 | status / next: one-line next actions in the CLI (touch: optional/runtime/sdlc.py) | 3 | software-engineer |  | Deferred | v6 Phase 2 (team): after v6.0 ships |
-| NUHT-027 | Release records and deploy ledger (environment, version, items); rename claim release to unclaim (touch: optional/runtime/) | 1 | devops-sre |  | Deferred | v6 Phase 3 (delivery): after Phase 2 |
-| NUHT-028 | Hotfix fast path with a doctor check for the retroactive review (touch: optional/runtime/sdlc.py, template/docs/process/05-change-control.md) | 2 | devops-sre |  | Deferred | v6 Phase 3 (delivery): after Phase 2 |
-| NUHT-029 | DORA delivery metrics in metrics and the viewer (touch: optional/runtime/view.py, optional/runtime/view/) | 2 | devops-sre | NUHT-027 | Deferred | v6 Phase 3 (delivery): after Phase 2 |
-| NUHT-030 | Issue-tracker sync extension: GitHub Issues, then Linear and Jira | 2 | product-manager | NUHT-018 | Deferred | v7 Phase 4 (integrations as extensions): after the extension system ships |
-| NUHT-031 | MCP server extension: backlog, verify, finish, doctor as tools (stdlib JSON-RPC) | 2 | software-engineer | NUHT-018 | Deferred | v7 Phase 4 (integrations as extensions): after the extension system ships |
-| NUHT-032 | Worktree setup/run scripts for claim and dispatch | 2 | devops-sre |  | Deferred | v7 Phase 4 (integrations as extensions): after the extension system ships |
-| NUHT-033 | Standards discovery: extract codebase conventions via lens | 2 | architect |  | Deferred | v7 Phase 4 (integrations as extensions): after the extension system ships |
-| NUHT-034 | Webhook notifications for blocked, approval-needed and review-blocking events | 2 | devops-sre | NUHT-018 | Deferred | v7 Phase 4 (integrations as extensions): after the extension system ships |
-| NUHT-035 | Move smoke tests to unittest with selection, a fast unit tier and a parallel pty tier (touch: tests/) | 2 | qa |  | Deferred | Before Phase 1 code lands |
 | NUHT-036 | Run the kit-value benchmark against bench-baseline-v0 and publish results (touch: benchmarks/) | 3 | qa |  | Deferred | Before v6 release notes make benefit claims |
 
 ## Done

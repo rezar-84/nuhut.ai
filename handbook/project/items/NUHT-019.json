@@ -5,7 +5,7 @@
   "tier": "2",
   "effort": "",
   "owner": "devops-sre",
-  "status": "Deferred",
+  "status": "Ready",
   "depends": [
     "NUHT-017",
     "NUHT-008"

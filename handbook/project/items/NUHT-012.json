@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "qa",
-  "status": "Parked",
+  "status": "Ready",
   "depends": [],
   "touch": [
     "optional/runtime/finish.py",
@@ -15,7 +15,7 @@
   "created": "2026-11-22",
   "updated": "2026-11-22",
   "completed": "",
-  "summary": "",
+  "summary": "Owner (rezar-84) directed implementation of the v6 roadmap on kit-v6 on 2026-11-22; merge to main stays a human approval",
   "approvers": [],
   "waiting_on": "rezar-84",
   "park_reason": "Tightens a Tier 1 governance gate (AGENTS.md section 9)",

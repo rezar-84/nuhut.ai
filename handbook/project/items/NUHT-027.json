@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "devops-sre",
-  "status": "Deferred",
+  "status": "Ready",
   "depends": [],
   "touch": [
     "optional/runtime/"

@@ -5,7 +5,7 @@
   "tier": "2",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Deferred",
+  "status": "Ready",
   "depends": [
     "NUHT-017"
   ],

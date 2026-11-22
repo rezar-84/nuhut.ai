@@ -5,7 +5,7 @@
   "tier": "3",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Deferred",
+  "status": "Ready",
   "depends": [],
   "touch": [
     "optional/runtime/sdlc.py"
