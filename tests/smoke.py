@@ -6896,6 +6896,134 @@ def test_unclaim_alias():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_command_table():
+    print("sdlc.py routes subcommands through a COMMANDS table that extensions can extend")
+    import argparse
+    import contextlib
+    import importlib.util
+    import inspect
+    import io
+    src = os.path.join(ROOT, "optional", "runtime", "sdlc.py")
+    spec = importlib.util.spec_from_file_location("sdlc_command_table", src)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["sdlc_command_table"] = mod
+    spec.loader.exec_module(mod)
+    has_api = all(hasattr(mod, n) for n in ("COMMANDS", "register_command", "build_parser"))
+    check("sdlc.py exposes COMMANDS, register_command and build_parser", has_api)
+    if not has_api:
+        return
+    parser = mod.build_parser()
+    sub = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)][0]
+    parsed = set(sub.choices)
+    core = set(n for n, c in mod.COMMANDS.items() if c.core)
+    check("every parsed subcommand has a core handler in COMMANDS and nothing else is core",
+          parsed == core, "parser-only=%s table-only=%s" % (sorted(parsed - core), sorted(core - parsed)))
+    for name in ("doctor", "verify", "finish", "guard", "item", "claim", "release", "claims",
+                 "parallel", "lens", "audit", "view", "metrics", "fix", "config", "dispatch"):
+        check("core command %s is in the table" % name, name in core)
+    body = inspect.getsource(mod.main)
+    check("main() has no `opts.command ==` routing chain left",
+          "opts.command ==" not in body and "opts.command in" not in body)
+
+    def refused(*args, **kw):
+        try:
+            mod.register_command(*args, **kw)
+        except ValueError:
+            return True
+        return False
+
+    noop = lambda project, opts, parser: 0
+    check("registering a core command name is refused", refused("doctor", noop))
+    check("registering a verb under a core command is refused", refused("item", noop, verb="purge"))
+    check("a malformed command name is refused", refused("Bad Name", noop))
+
+    d = tempfile.mkdtemp(prefix="sdlc-cmdtable-")
+    subprocess.call(["git", "init", "-b", "main", "-q", d])
+    code, out = run([d, "CMT", "-y"])
+    check("command-table test project installs", code == 0, out[-300:])
+    seen = {}
+
+    def hello(project, opts, parser):
+        seen["hello"] = (project.root, opts.name)
+        return 7
+
+    def deploy_record(project, opts, parser):
+        seen["record"] = opts.env
+        return 3
+
+    def deploy_list(project, opts, parser):
+        seen["list"] = True
+        return 4
+
+    try:
+        mod.register_command("hello-ext", hello, help="say hello",
+                             configure=lambda p: p.add_argument("--name", default="world"))
+        check("an extension name already taken is refused", refused("hello-ext", noop))
+        mod.register_command("deploy", deploy_record, verb="record", help="record a deploy",
+                             configure=lambda p: p.add_argument("--env", required=True))
+        mod.register_command("deploy", deploy_list, verb="list", help="list deploys")
+        check("a verb already in a group is refused", refused("deploy", noop, verb="record"))
+        check("a plain command over a verb group is refused", refused("deploy", noop))
+        check("a verb over a plain extension command is refused", refused("hello-ext", noop, verb="x"))
+        rc = mod.main(["--root", d, "hello-ext", "--name", "nuhut"])
+        check("an extension subcommand dispatches with its own flags",
+              rc == 7 and seen.get("hello") == (os.path.realpath(d), "nuhut"), "%r %r" % (rc, seen))
+        rc = mod.main(["--root", d, "deploy", "record", "--env", "prod"])
+        check("a grouped noun-verb command dispatches the verb", rc == 3 and seen.get("record") == "prod",
+              "%r %r" % (rc, seen))
+        rc = mod.main(["--root", d, "deploy", "list"])
+        check("the second verb of the group dispatches", rc == 4 and seen.get("list"), "%r" % rc)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = mod.main(["--root", d, "deploy"])
+        check("a group with no verb exits 2 and names its verbs",
+              rc == 2 and "record" in err.getvalue() and "list" in err.getvalue(), err.getvalue())
+        outbuf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(outbuf):
+                mod.main(["--help"])
+        except SystemExit:
+            pass
+        check("the top-level help lists extension commands",
+              "hello-ext" in outbuf.getvalue() and "deploy" in outbuf.getvalue(), outbuf.getvalue()[-400:])
+    finally:
+        for name in ("hello-ext", "deploy"):
+            mod.COMMANDS.pop(name, None)
+
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    rc, out = sdlc()
+    check("no subcommand still prints the help and exits 2", rc == 2 and "Records and checks" in out, out[-200:])
+    rc, out = sdlc("trailers", "CMT-001", "--agent", "a", "--model", "m")
+    check("trailers still routes", rc == 0 and "Work-Item: CMT-001\nAgent: a\nModel: m" in out, out)
+    rc, out = sdlc("item", "add", "--title", "Routing", "--json")
+    check("item add still routes", rc == 0 and '"id": "CMT-' in out, out[-300:])
+    rc, out = sdlc("item", "list")
+    check("item list still routes", rc == 0 and "Routing" in out, out[-300:])
+    rc, out = sdlc("next-id", "--json")
+    check("next-id still routes", rc == 0 and '"id"' in out, out[-300:])
+    rc, out = sdlc("claims")
+    check("claims still routes", rc == 0 and "no active claims" in out, out[-300:])
+    rc, out = sdlc("doctor", "--json")
+    check("doctor still routes", rc == 0 and out.lstrip().startswith("["), out[-300:])
+    rc, out = sdlc("config", "--json")
+    check("config still routes", rc == 0 and '"constraints"' in out, out[-300:])
+    rc, out = sdlc("verify", "--stage", "bogus")
+    check("verify still rejects an unknown stage", rc == 2 and "unknown stage: bogus" in out, out[-300:])
+    rc, out = sdlc("bite")
+    check("bite with no command is still a usage error", rc == 2 and "bite needs a test command" in out, out[-300:])
+    rc, out = sdlc("render", "--check")
+    check("render --check still routes", rc in (0, 1) and "render:" in out, out[-300:])
+    rc, out = sdlc("fix", "rotate-worklog")
+    check("fix rotate-worklog still routes to the finish module", rc == 0 and out.strip(), out[-300:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -6923,7 +7051,8 @@ def main():
                  test_hotfix_fast_path,
                  test_people_registry,
                  test_shard_merge_driver,
-                 test_release_records, test_unclaim_alias):
+                 test_release_records, test_unclaim_alias,
+                 test_command_table):
         test()
     print("")
     if failures:

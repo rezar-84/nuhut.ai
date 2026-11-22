@@ -98,6 +98,16 @@ installer reads the same built-ins for its `--harness` tables and presets.
   `claude`, `gemini` and `cursor` in their built-in shapes even when a project extension
   overrides their harness records.
 
+### The command table
+
+Every subcommand is an entry in `sdlc.py`'s `COMMANDS` table, which maps the name to its
+handler. Code that imports `sdlc.py` can add a command with
+`register_command(name, handler, help=..., configure=...)`, or a verb of a noun-verb group
+with `verb=` (`deploy record`, `deploy list`). The handler is called as
+`handler(project, opts, parser)` and returns the exit code; `configure(subparser)` adds its
+flags. A name that a core command already uses, or that another extension took, is refused
+with `ValueError`. Registered commands appear under "Extension commands" in `sdlc.py --help`.
+
 ## Slash commands (Claude Code) and loop skills (other tools)
 
 | Command | Does |

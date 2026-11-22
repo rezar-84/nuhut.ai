@@ -4718,13 +4718,967 @@ class _Main(argparse.ArgumentParser):
     """The top-level help, grouped by what you are doing, with an example per command."""
 
     def format_help(self):
-        return MAIN_HELP
+        extra = ["  %-19s %s" % (c.name, c.help) for c in COMMANDS.values() if not c.core]
+        if not extra:
+            return MAIN_HELP
+        return MAIN_HELP + "\nExtension commands\n" + "\n".join(extra) + "\n"
 
 
-def main(argv):
-    if argv == ["--selftest"]:
-        selftest()
+
+
+def _cmd_merge_shard(project, opts, parser):
+    """merge-shard: the nuhut-shard git merge driver (needs no project)."""
+    code, message = _shards_mod.merge_shard_files(
+        opts.base, opts.ours, opts.theirs, marker_size=max(3, min(opts.marker_size, 64)))
+    sys.stderr.write(message + "\n")
+    return code
+
+
+def _cmd_status(project, opts, parser):
+    """status: one screen of next actions."""
+    status_mod = runtime_module("status")
+    data = status_mod.report(sys.modules[__name__], project)
+    print(json.dumps(data, indent=2) if opts.json else status_mod.format_report(data))
+    return 0
+
+
+def _cmd_doctor(project, opts, parser):
+    """doctor: mechanical checks of the SDLC records."""
+    items = doctor(project, use_cache=not getattr(opts, "no_cache", False))
+    if opts.baseline:
+        kept, dropped, refused = write_baseline(project, items)
+        if not opts.json:
+            print("doctor-baseline.json: %d finding(s) accepted%s%s" % (
+                kept, ", %d fixed one(s) removed" % dropped if dropped else "",
+                ". %d finding(s) are new since the baseline and stay visible" % refused
+                if refused else ""))
+        items = apply_baseline(project, [dict(i, accepted="") for i in items])
+    if opts.json:
+        print(json.dumps(items, indent=2))
+    else:
+        print_findings(items, opts.all)
+    return 1 if opts.strict and any(i["level"] == "fail" and not i.get("accepted")
+                                    for i in items) else 0
+
+
+def _cmd_finish(project, opts, parser):
+    """finish and guard: close a work item, or run the finish guard from a hook."""
+    finish_mod = runtime_module("finish")
+    if opts.command == "guard":
+        try:
+            payload = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            payload = {}
+        code, message = finish_mod.guard(sys.modules[__name__], project, opts.event,
+                                         payload if isinstance(payload, dict) else {})
+        if message:
+            sys.stderr.write(message + "\n")
+        return code
+    if opts.waive and not (opts.by and opts.reason):
+        parser.error("--waive verify needs --by <name> and --reason \"...\"")
+    notes = {}
+    if getattr(opts, "from_json", None):
+        try:
+            raw_j = sys.stdin.read() if opts.from_json == "-" else read(opts.from_json)
+            parsed_j = json.loads(raw_j or "{}")
+            if not isinstance(parsed_j, dict):
+                parser.error("--from-json must contain a JSON object")
+            for nk in ("why", "not_done", "discovered", "decisions", "assumptions", "plan", "reviews"):
+                if parsed_j.get(nk) is not None:
+                    notes[nk] = str(parsed_j[nk])
+        except ValueError as exc:
+            parser.error("invalid --from-json payload: %s" % exc)
+    for nk in ("why", "not_done", "discovered", "decisions", "assumptions", "plan", "reviews"):
+        cli_v = getattr(opts, nk, None)
+        if cli_v is not None:
+            notes[nk] = cli_v
+    lines, code = finish_mod.finish(sys.modules[__name__], project, opts.item,
+                                    opts.by if opts.waive else None, opts.reason,
+                                    opts.dry_run, notes=notes or None)
+    if getattr(opts, "json", False):
+        owed_list = [ln[5:].strip() for ln in lines if ln.startswith("OWED ")]
+        cur_item = _shards_mod.merged_items(project).get(opts.item) or {}
+        print(json.dumps({
+            "item": opts.item,
+            "exit_code": code,
+            "finished": code == 0,
+            "status": cur_item.get("status", ""),
+            "owed": owed_list,
+            "lines": lines,
+        }, indent=2))
+    else:
+        print("\n".join(lines))
+    return code
+
+
+def _cmd_sync(project, opts, parser):
+    """sync: where this checkout stands against its remote."""
+    sync_mod = runtime_module("sync")
+    how = sync_mod.strategy(labelled(project.charter, "Updating a branch"))
+    state = sync_mod.state(project, default_branch(project), opts.fetch)
+    if state is None:
+        sys.stderr.write("sync: not a git repository here\n")
+        return 2
+    found = sync_mod.findings(state, how)
+    code = sync_mod.exit_code(found, opts.strict)
+    if opts.json:
+        print(json.dumps({"state": state, "strategy": how, "exit": code, "findings": [
+            {"level": level, "text": text, "command": command}
+            for level, text, command in found]}, indent=2, sort_keys=True))
+    else:
+        print("\n".join(sync_mod.report(state, found, how)))
+    return code
+
+
+def _cmd_slop(project, opts, parser):
+    """slop: the slop filter."""
+    slop_mod = runtime_module("slop")
+    if opts.guide:
+        print("\n".join(slop_mod.guide()))
         return 0
+    charter_mode = slop_mod.mode(project, labelled)
+    strict = opts.strict or charter_mode == "strict"
+    if opts.paths == ["-"]:
+        found, count = slop_mod.scan_text(sys.stdin.read(), "<stdin>")
+        results, unread = [("<stdin>", found, count)], []
+    else:
+        if opts.paths:
+            cwd_real = os.path.realpath(os.getcwd())
+            base_dir = project.root if opts.root else cwd_real
+            files = slop_mod.collect(opts.paths, base_dir)
+        else:
+            files = slop_mod.changed_prose(project.root)
+            if files is None:
+                sys.stderr.write("slop: not a git repository here; name the files or "
+                                 "directories to scan\n")
+                return 2
+        results, unread = slop_mod.scan_paths(files, project.root)
+    for rel in unread:
+        sys.stderr.write("slop: cannot read %s\n" % rel)
+    failed = sum(1 for _, found, count in results if slop_mod.verdict(found, count)[0])
+    if opts.json:
+        print(json.dumps({"mode": charter_mode, "strict": strict, "files": [
+            {"file": rel, "words": count, "fails": slop_mod.verdict(found, count)[0],
+             "findings": found} for rel, found, count in results]}, indent=2))
+    else:
+        lines = slop_mod.report(results, strict)[0]
+        if not results:
+            lines = ["slop: no prose files to scan" + ("" if opts.paths else
+                     " (nothing changed; name a file or directory)")]
+        print("\n".join(lines))
+        if charter_mode == "off" and not opts.strict:
+            print("The charter's Slop filter row is off, so this run is advisory. "
+                  "Turn it on with: config --slop-filter on|strict")
+    if unread and not results:
+        return 2
+    return 1 if strict and failed else 0
+
+
+def _cmd_spec(project, opts, parser):
+    """spec: living specs."""
+    specs_mod = runtime_module("specs")
+    if opts.action == "apply":
+        if not opts.target:
+            sys.stderr.write("spec apply: give the work item ID\n")
+            return 2
+        steps, error = specs_mod.apply_change(project, opts.target, write=opts.write)
+        if error:
+            sys.stderr.write("spec apply: %s\n" % error)
+            return 1
+        if opts.json:
+            print(json.dumps({"item": opts.target, "applied": bool(opts.write), "steps": steps}, indent=2))
+        else:
+            print(("applied:" if opts.write else "would (dry run; add --write):"))
+            for s in steps:
+                print("  " + s)
+        return 0
+    data = specs_mod.load(project)
+    if opts.action == "validate":
+        problems = specs_mod.validate(project, data)
+        if opts.json:
+            print(json.dumps(problems, indent=2))
+        for p in [] if opts.json else problems:
+            print("%-4s  %s  %s" % (p["level"], p["where"], p["message"]))
+        if not problems and not opts.json:
+            print("specs: no problems in %d capability spec(s) and %d change(s)" % (len(data["capabilities"]), len(data["changes"])))
+        return 1 if (opts.strict and problems) else 0
+    if opts.action == "show":
+        spec = next((c for c in data["capabilities"] + data["imported"] if c["capability"] == opts.target), None)
+        if not spec:
+            sys.stderr.write("spec show: no capability %r\n" % opts.target)
+            return 2
+        if opts.json:
+            print(json.dumps(spec, indent=2))
+            return 0
+        print("%s (%s) — %s" % (spec["capability"], spec["source"], spec["path"]))
+        for r in spec["requirements"]:
+            print("  Requirement: %s  (%d scenario%s)" % (r["name"], len(r["scenarios"]), "" if len(r["scenarios"]) == 1 else "s"))
+        return 0
+    if opts.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    print("specs %s in the charter" % ("on" if specs_mod.enabled(project, labelled) else "off"))
+    for c in data["capabilities"] + data["imported"]:
+        print("  %-28s %-9s %3d requirement(s)  %s" % (c["capability"], c["source"], len(c["requirements"]), c["path"]))
+    for ch in data["changes"]:
+        n = dict((k, len(v)) for k, v in ch["sections"].items() if v)
+        print("  change %-21s %-9s %s" % (ch["item"], ch["source"], ", ".join("%d %s" % (v, k) for k, v in n.items())))
+    return 0
+
+
+def _cmd_next_id(project, opts, parser):
+    """next-id: allocate the next work item or ADR ID."""
+    claims_mod = runtime_module("claims")
+    res, error = claims_mod.next_id(project, kind=opts.kind, sync_refs=opts.sync_refs)
+    if error:
+        sys.stderr.write("next-id: %s\n" % error)
+        return 1
+    if opts.json:
+        print(json.dumps(res, indent=2))
+    else:
+        print(res["id"])
+    return 0
+
+
+def _cmd_render(project, opts, parser):
+    """render: backlog.md and worklog.md from the shards."""
+    res = _shards_mod.render(project, check_only=opts.check)
+    if opts.json:
+        print(json.dumps(res, indent=2))
+    elif opts.check:
+        if res["in_sync"]:
+            print("render: backlog.md and worklog.md match shards")
+        else:
+            print("render: out of sync (%s); run `sdlc.py render`" % ", ".join(res["drift"]))
+    else:
+        changed = [f["path"] for f in res["files"] if f["changed"]]
+        print("render: updated %s" % (", ".join(changed) if changed else "nothing (already in sync)"))
+    return 0 if (not opts.check or res["in_sync"]) else 1
+
+
+def _cmd_item(project, opts, parser):
+    """item: manage sharded work items."""
+    today_iso = datetime.date.today().isoformat()
+    if getattr(opts, "item_id_flag", None) and not opts.target:
+        opts.target = opts.item_id_flag
+    if opts.action == "list":
+        all_items = _shards_mod.merged_items(project)
+        tier_filter = set(s.strip() for s in (opts.tier or "").split(",") if s.strip())
+        status_filter = _shards_mod.normalize_status(opts.status) if opts.status else ""
+        rows_out = []
+        for iid in sorted(all_items.keys(), key=id_sort_key):
+            it = all_items[iid]
+            if status_filter and it["status"] != status_filter:
+                continue
+            if tier_filter and it["tier"] not in tier_filter:
+                continue
+            rows_out.append(it)
+        if opts.json:
+            print(json.dumps(rows_out, indent=2))
+        elif not rows_out:
+            print("no matching items")
+        else:
+            for it in rows_out:
+                t_str = (" touch=" + ",".join(it["touch"])) if it.get("touch") else ""
+                print("%-10s Tier %-2s %-12s %-18s %s%s" % (
+                    it["id"], it["tier"], it["status"], it["owner"], it["title"], t_str
+                ))
+        return 0
+    if opts.action == "show":
+        if not opts.target:
+            sys.stderr.write("item show: give a work item ID\n")
+            return 2
+        it = _shards_mod.merged_items(project).get(opts.target)
+        if not it:
+            sys.stderr.write("item show: %s not found\n" % opts.target)
+            return 2
+        if opts.json:
+            print(json.dumps(it, indent=2))
+        else:
+            print("%s · Tier %s · %s · %s" % (it["id"], it["tier"], it["status"], it["title"]))
+            print("  type: %s · owner: %s · effort: %s" % (
+                it["type"], it["owner"], it.get("effort") or "(charter default)"
+            ))
+            if it.get("depends"):
+                print("  depends: %s" % ", ".join(it["depends"]))
+            if it.get("touch"):
+                print("  touch: %s" % ", ".join(it["touch"]))
+            if _shards_mod.is_hotfix(it):
+                print("  hotfix: since %s · retroactive review: %s" % (
+                    it.get("hotfix_at") or "unknown",
+                    "on file" if retro_reviews(project, it["id"]) else (it.get("retro_review") or "owed once merged")))
+        return 0
+    if opts.action == "add":
+        if not opts.title:
+            sys.stderr.write("item add: --title is required\n")
+            return 2
+        if opts.owner:
+            opts.owner, err_o = resolve_owner(project, opts.owner)
+            if err_o:
+                sys.stderr.write("item add: --owner %s\n" % err_o)
+                return 2
+        item_id = opts.target
+        if not item_id:
+            claims_mod = runtime_module("claims")
+            alloc, err_a = claims_mod.next_id(project, kind="item", sync_refs=opts.sync_refs)
+            if err_a:
+                sys.stderr.write("item add: %s\n" % err_a)
+                return 1
+            item_id = alloc["id"]
+        existing = _shards_mod.merged_items(project)
+        if item_id in existing:
+            sys.stderr.write("item add: %s already exists (use `item set %s`)\n" % (item_id, item_id))
+            return 1
+        itype_val = opts.item_type or ("defect" if getattr(opts, "discovered", False) else "feat")
+        tier_val = opts.tier or "2"
+        status_val = opts.status or "Ready"
+        wait_val = opts.waiting_on or ""
+        reason_val = opts.park_reason or ""
+        triage_note = ""
+        if getattr(opts, "discovered", False):
+            status_val, triage_note = resolve_discovered_status(project, item_id, itype_val, tier_val)
+            if status_val == "Parked":
+                wait_val = wait_val or "backlog owner"
+                reason_val = reason_val or ("Discovered item triage: accept into Ready, defer, or drop (%s)" % triage_note)
+        data = {
+            "id": item_id,
+            "title": opts.title,
+            "type": itype_val,
+            "tier": tier_val,
+            "effort": opts.effort or "",
+            "owner": opts.owner or ("qa" if itype_val == "defect" else "software-engineer"),
+            "status": status_val,
+            "depends": opts.depends or "",
+            "touch": opts.touch or "",
+            "created": today_iso,
+            "updated": today_iso,
+            "waiting_on": wait_val,
+            "park_reason": reason_val,
+            "unblock_by": opts.unblock_by or "",
+            "later_when": opts.later_when or "",
+            "dropped_reason": opts.dropped_reason or "",
+            "summary": opts.summary or "",
+        }
+        try:
+            saved = _shards_mod.save_item(project, data, today=today_iso)
+        except ValueError as exc:
+            sys.stderr.write("item add: %s\n" % exc)
+            return 2
+        if opts.json:
+            out_saved = dict(saved)
+            if triage_note:
+                out_saved["triage_reason"] = triage_note
+            print(json.dumps(out_saved, indent=2))
+        else:
+            print("added %s (%s, Tier %s) -> %s/project/items/%s.json" % (
+                saved["id"], saved["status"], saved["tier"], project.docs, saved["id"]
+            ))
+        return 0
+    if opts.action == "triage":
+        if not opts.target:
+            sys.stderr.write("item triage: give a work item ID\n")
+            return 2
+        cur = _shards_mod.merged_items(project).get(opts.target)
+        if not cur:
+            sys.stderr.write("item triage: %s not found\n" % opts.target)
+            return 2
+        new_status, triage_reason = resolve_discovered_status(
+            project, opts.target, cur.get("type") or "feat", cur.get("tier") or "2"
+        )
+        updated = dict(cur)
+        updated["status"] = new_status
+        updated["updated"] = today_iso
+        if new_status == "Ready":
+            updated["waiting_on"] = ""
+            updated["park_reason"] = ""
+        else:
+            updated["waiting_on"] = updated.get("waiting_on") or "backlog owner"
+            updated["park_reason"] = updated.get("park_reason") or ("Discovered item triage: %s" % triage_reason)
+        saved = _shards_mod.save_item(project, updated, today=today_iso)
+        if opts.json:
+            out_saved = dict(saved, promoted=(saved["status"] == "Ready"), triage_reason=triage_reason)
+            print(json.dumps(out_saved, indent=2))
+        else:
+            print("triaged %s -> %s (%s)" % (saved["id"], saved["status"], triage_reason))
+        return 0
+    if opts.action == "set":
+        if not opts.target:
+            sys.stderr.write("item set: give a work item ID\n")
+            return 2
+        cur = _shards_mod.merged_items(project).get(opts.target)
+        if not cur:
+            sys.stderr.write("item set: %s not found\n" % opts.target)
+            return 2
+        updated = dict(cur)
+        if opts.title is not None:
+            updated["title"] = opts.title
+        if opts.item_type is not None:
+            updated["type"] = opts.item_type
+        if opts.tier is not None:
+            updated["tier"] = opts.tier
+        if opts.effort is not None:
+            updated["effort"] = opts.effort
+        if opts.owner is not None:
+            owner_v, err_o = resolve_owner(project, opts.owner)
+            if err_o:
+                sys.stderr.write("item set: --owner %s\n" % err_o)
+                return 2
+            updated["owner"] = owner_v
+        if opts.status is not None:
+            updated["status"] = opts.status
+        if opts.depends is not None:
+            updated["depends"] = opts.depends
+        if opts.touch is not None:
+            updated["touch"] = opts.touch
+        if opts.waiting_on is not None:
+            updated["waiting_on"] = opts.waiting_on
+        if opts.park_reason is not None:
+            updated["park_reason"] = opts.park_reason
+        if opts.unblock_by is not None:
+            updated["unblock_by"] = opts.unblock_by
+        if opts.later_when is not None:
+            updated["later_when"] = opts.later_when
+        if opts.dropped_reason is not None:
+            updated["dropped_reason"] = opts.dropped_reason
+        if opts.summary is not None:
+            updated["summary"] = opts.summary
+        updated["updated"] = today_iso
+        try:
+            saved = _shards_mod.save_item(project, updated, today=today_iso)
+        except ValueError as exc:
+            sys.stderr.write("item set: %s\n" % exc)
+            return 2
+        if getattr(opts, "hotfix", False):
+            saved, err_h, code_h = mark_hotfix(project, opts.target, today=today_iso)
+            if err_h:
+                sys.stderr.write("item set: %s\n" % err_h)
+                return code_h
+        if opts.json:
+            print(json.dumps(saved, indent=2))
+        else:
+            print("updated %s (%s, Tier %s)" % (saved["id"], saved["status"], saved["tier"]))
+        return 0
+
+
+def _cmd_hotfix(project, opts, parser):
+    """hotfix: mark a work item a hotfix."""
+    saved, err_h, code_h = mark_hotfix(project, opts.item)
+    if err_h:
+        sys.stderr.write("hotfix: %s\n" % err_h)
+        return code_h
+    if opts.json:
+        print(json.dumps(saved, indent=2))
+    else:
+        print("%s marked hotfix at %s (Tier %s stays). finish skips the pre-merge review; a "
+              "retroactive review is owed within %d day(s)" % (
+                  saved["id"], saved["hotfix_at"], saved["tier"],
+                  retro_review_window(project.charter)))
+    return 0
+
+
+def _cmd_dispatch(project, opts, parser):
+    """dispatch: run waves of Ready items in worker worktrees."""
+    dispatch_mod = runtime_module("dispatch")
+    report, rc = dispatch_mod.run_dispatch(sys.modules[__name__], project, opts)
+    if report.get("error"):
+        if opts.json:
+            print(json.dumps(report, indent=2))
+        else:
+            sys.stderr.write("dispatch: %s\n" % report["error"])
+        return rc
+    if opts.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(dispatch_mod.format_dispatch_report(report))
+    return rc
+
+
+def _cmd_deploy(project, opts, parser):
+    """deploy record|list: release records and the deploy ledger."""
+    releases_mod = runtime_module("releases")
+    if opts.deploy_action == "list":
+        state = releases_mod.deployed(project)
+        print(json.dumps(state, indent=2, sort_keys=True) if opts.json
+              else releases_mod.format_list(state))
+        return 0
+    try:
+        result = releases_mod.record(project, sys.modules[__name__], opts.version, opts.env,
+                                     opts.from_ref, opts.to_ref, opts.by, opts.dry_run)
+    except (releases_mod.DeployError, OSError) as exc:
+        sys.stderr.write("deploy record: %s\n" % exc)
+        return 1
+    if opts.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    rec = result["record"]
+    verb = "would record" if result["dry_run"] else "recorded"
+    if result["action"] == "promotion":
+        print("%s %s in %s (promotion of %s; record unchanged except envs)" % (
+            verb, opts.version, opts.env, rec.get("to", "")[:12]))
+    else:
+        print("%s %s in %s: %d commit(s), %d item(s)%s" % (
+            verb, opts.version, opts.env, rec.get("commits", 0), len(rec.get("items") or []),
+            ": " + ", ".join(rec["items"]) if rec.get("items") else ""))
+    print("  %s%s" % (result["path"], "" if result["dry_run"] else
+                      " and one line in %s/project/deploys.jsonl" % project.docs))
+    return 0
+
+
+def _cmd_claims(project, opts, parser):
+    """claim, unclaim, release, claims and parallel: the shared claim store."""
+    claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
+    if opts.command == "claim":
+        agent = opts.agent or identity(None, None, project)[0]
+        # Never a silent stand-in: an unknown agent or person is recorded as such and
+        # said out loud (on stderr, or inside the --json result).
+        notes = []
+        if agent == "unknown":
+            notes.append("no agent identity: pass --agent <name> or set AI_SDLC_AGENT")
+            if not opts.json:
+                sys.stderr.write("warning: %s\n" % notes[-1])
+        who = person_identity(project, warn=not opts.json)
+        if who["warning"]:
+            notes.append(who["warning"])
+        record, error = claims_mod.claim(
+            project, view_mod, opts.item, agent, opts.worktree,
+            opts.no_worktree, opts.mark, opts.base,
+            sync_refs=getattr(opts, "sync_refs", False),
+            person=who["person"],
+        )
+        if error:
+            sys.stderr.write("claim: %s\n" % error)
+            return 1
+        if opts.json:
+            print(json.dumps(dict(record, warnings=notes) if notes else record, indent=2))
+        else:
+            print("claimed %s for %s (%s) on branch %s" % (
+                record["id"], record["agent"], record.get("person") or "unknown person",
+                record["branch"]))
+            if record["worktree"]:
+                print("worktree: %s\n  cd %s" % (record["worktree"], record["worktree"]))
+            print("free it when the item is Done, Parked or Deferred: "
+                  "python3 .ai-sdlc/bin/sdlc.py unclaim %s" % record["id"])
+        return 0
+    if opts.command == "release":
+        # The claim command's old name. Same stdout, JSON and exit codes; one note on
+        # stderr that repeats the caller's own arguments under the new name.
+        rest = list(getattr(opts, "_argv", None) or [])
+        if "release" in rest:
+            rest = rest[rest.index("release") + 1:]
+        sys.stderr.write("release: deprecated, use: sdlc.py unclaim %s\n" % " ".join(rest))
+    if opts.command in ("release", "unclaim"):
+        record, error = claims_mod.release(
+            project, opts.item, opts.remove_worktree,
+            agent=getattr(opts, "agent", None) or identity(None, None, project)[0],
+            force=getattr(opts, "force", False),
+            sync_refs=getattr(opts, "sync_refs", False),
+        )
+        if error:
+            sys.stderr.write("%s: %s\n" % (opts.command, error))
+            return 1
+        if getattr(opts, "json", False):
+            print(json.dumps({"released": record["id"], "record": record}, indent=2))
+        else:
+            print("released %s (was %s)" % (record["id"], record.get("agent", "?")))
+        return 0
+    if opts.command == "claims":
+        held = claims_mod.list_claims(project, sync_refs=getattr(opts, "sync_refs", False))
+        if opts.json:
+            print(json.dumps(held, indent=2))
+        elif not held:
+            print("no active claims")
+        for c in [] if opts.json else held:
+            print("%-10s %-16s %-16s %-36s since %s  last commit %s" % (
+                c["id"], c.get("agent", "?"), c.get("person") or "unknown person", c.get("branch", ""),
+                c.get("since", "")[:10], c.get("last_commit", "")[:10] or "none"))
+        return 0
+    result = claims_mod.parallel(
+        project, sys.modules[__name__], view_mod,
+        sync_refs=getattr(opts, "sync_refs", False),
+    )
+    if opts.json:
+        print(json.dumps(result, indent=2))
+        return 0
+    for n, group in enumerate(result["groups"], 1):
+        print("group %d (can run together): %s" % (n, ", ".join(group)))
+    for c in result["conflicts"]:
+        print("conflict %s × %s: %s" % (c["a"], c["b"], ", ".join(c["files"] + c["single_writer"])))
+    if result["plan_first"]:
+        print("plan first (no Files that change): %s" % ", ".join(x["id"] for x in result["plan_first"]))
+    if not (result["groups"] or result["plan_first"]):
+        print("no unclaimed Ready items with finished dependencies")
+    return 0
+
+
+def _cmd_lens(project, opts, parser):
+    """lens and audit: the project lens and the dependency scanner."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.dont_write_bytecode = True
+    import lens as lens_mod
+    if opts.command == "audit":
+        return run_audit(project, lens_mod, opts)
+    if opts.write and opts.area != "standards":
+        print("lens: --write needs --area standards", file=sys.stderr)
+        return 2
+    if opts.area == "standards":
+        return run_standards(project, lens_mod, opts)
+    import view
+    model = {"kit": kit_status(project), "alerts": doctor(project), "evidence": view.evidence_runs(project)}
+    data = lens_mod.lens(sys.modules[__name__], project, model, include_user=opts.user)
+    if opts.json:
+        key = {"deps": "dependencies", "deploy": "workflows"}.get(opts.area, opts.area)
+        print(json.dumps(data if not opts.area else data.get(key), indent=2))
+        return 0
+    print_lens(data, opts.area)
+    return 0
+
+
+def _cmd_view(project, opts, parser):
+    """view and metrics: the interactive page and the process measures."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.dont_write_bytecode = True  # no __pycache__ next to kit files in a project
+    import view
+    if opts.command == "metrics":
+        return view.print_metrics(sys.modules[__name__], project, opts)
+    return view.run(sys.modules[__name__], project, opts)
+
+
+def _cmd_log(project, opts, parser):
+    """log: draft worklog lines."""
+    since = opts.since
+    if not since and opts.id:
+        found = item_commits(project, opts.id)
+        if not found:
+            sys.stderr.write("log: no commit carries a `Work-Item: %s` trailer\n" % opts.id)
+            return 2
+        since = found[-1][1].split(" ")[0]
+        if not since:
+            sys.stderr.write("log: %s starts at the root commit; pass --since\n" % opts.id)
+            return 2
+    if not since:
+        sys.stderr.write("log: give --since <ref>, or --id <item>\n")
+        return 2
+    if str(since).startswith("-") or not project.git("rev-parse", "--verify", "--quiet", since + "^{commit}").strip():
+        sys.stderr.write("log: %r is not a commit\n" % since)
+        return 2
+    lines, orphans = log_entries(project, since)
+    if opts.id:
+        lines = [line for line in lines if line.split(" · ")[1] == opts.id]
+        orphans = []
+    if opts.write:
+        written = write_log(project, lines)
+        if not getattr(opts, "json", False):
+            dest = ("%s/project/worklog/" % project.docs) if _shards_mod.is_sharded(project, for_write=True) else ("%s/project/worklog.md" % project.docs)
+            print("wrote %d line(s) to %s" % (len(written), dest))
+        lines = written
+    if getattr(opts, "json", False):
+        print(json.dumps({
+            "since": since,
+            "id": opts.id,
+            "wrote": bool(opts.write),
+            "entries": lines,
+            "orphans": orphans,
+        }, indent=2))
+        return 0
+    for line in lines:
+        print(line)
+    for orphan in orphans:
+        print("no work item ID: %s" % orphan, file=sys.stderr)
+    return 0
+
+
+def _cmd_trailers(project, opts, parser):
+    """trailers: print the commit trailers for a work item."""
+    agent, model = identity(opts.agent, opts.model, project)
+    # No agent detected: a person is committing, and a person has no Model trailer
+    # (process/05-change-control.md). `unknown` would fail ci-check.
+    tags = [("Work-Item", opts.item)] + ([("Agent", "human")] if agent == "unknown" else
+                                         [("Agent", agent), ("Model", model)])
+    if getattr(opts, "json", False):
+        print(json.dumps(dict(tags), indent=2))
+    else:
+        print("\n".join("%s: %s" % pair for pair in tags))
+    return 0
+
+
+def _cmd_review(project, opts, parser):
+    """review: one role's review in another agent tool."""
+    path, record, error = review(project, opts.item, opts.role, opts.by, opts.model,
+                                 opts.stage, opts.base, opts.timeout)
+    if error:
+        sys.stderr.write("review: %s\n" % error)
+        return 2
+    if getattr(opts, "json", False):
+        out_rec = dict(record, path=path)
+        print(json.dumps(out_rec, indent=2))
+    else:
+        print("review saved: %s" % path)
+        print("  reviewer  %s / %s" % (record["reviewer_agent"], record["reviewer_model"]))
+        print("  author    %s / %s" % (record["author_agent"], record["author_model"]))
+        print("  %s; verdict: %s" % (record["independence"], record["verdict"]))
+    return 0
+
+
+def _cmd_bite(project, opts, parser):
+    """bite: check that a test fails without the change."""
+    if opts.restore:
+        restored = bite_restore(project)
+        print("restored %d file(s)%s" % (len(restored), (": " + ", ".join(restored))
+                                         if restored else ""))
+        return 0
+    command = " ".join(opts.test_command).strip()
+    if command.startswith("-- "):
+        command = command[3:]
+    if not command:
+        parser.error("bite needs a test command")
+    result, error = bite(project, command, opts.base, opts.timeout, item=opts.item)
+    if error:
+        sys.stderr.write("bite: %s\n" % error)
+        return 2
+    if opts.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print_bite(result)
+    return 0 if result["bites"] else 1
+
+
+def _cmd_plan_check(project, opts, parser):
+    """plan-check: compare a plan's file list with the diff."""
+    if opts.pre:
+        result, error = plan_precheck(project, opts.item)
+    else:
+        result, error = plan_check(project, opts.item, opts.base)
+    if error:
+        sys.stderr.write("plan-check: %s\n" % error)
+        return 2
+    if opts.json:
+        print(json.dumps(result, indent=2))
+    elif opts.pre:
+        print_plan_precheck(result)
+    else:
+        print_plan_check(result)
+    if opts.pre:
+        return 1 if result["missing"] or result["broad"] else 0
+    gaps = result["unplanned"] or result["untouched"] or result["broad"]
+    return 1 if opts.strict and gaps else 0
+
+
+def _cmd_ext(project, opts, parser):
+    """ext: project extensions."""
+    return runtime_module("ext").main(sys.modules[__name__], project, opts)
+
+
+def _cmd_ci_check(project, opts, parser):
+    """ci-check: judge a pull request's commits."""
+    head = opts.head
+    if head == "event":
+        head, error = ci_event_head(os.environ.get("GITHUB_EVENT_PATH", ""))
+        if error:
+            sys.stderr.write("ci-check: %s\n" % error)
+            return 2
+    result, error = ci_check(project, opts.base, head, opts.charter_ref)
+    if error:
+        sys.stderr.write("ci-check: %s\n" % error)
+        return 2
+    if opts.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print_ci_check(result)
+    return 1 if result["findings"] else 0
+
+
+def _cmd_config(project, opts, parser):
+    """config: inspect or update kit constraints."""
+    changes = {}
+    if opts.effort:
+        changes["effort"] = opts.effort
+    if opts.independent_review:
+        changes["independent_review"] = opts.independent_review
+    if opts.tier_rules:
+        changes["tier_rules"] = opts.tier_rules
+    if opts.decision_style:
+        changes["decision_style"] = opts.decision_style
+    if opts.dev_method:
+        changes["dev_method"] = opts.dev_method
+    if getattr(opts, "specs", None):
+        changes["specs"] = opts.specs
+    if getattr(opts, "slop_filter", None):
+        changes["slop_filter"] = opts.slop_filter
+    if getattr(opts, "discovered_defects", None):
+        changes["discovered_defects"] = opts.discovered_defects
+    if opts.reviewer:
+        changes["preferred_reviewer"] = opts.reviewer
+    if opts.token_saving:
+        changes["token_saving"] = opts.token_saving
+    if opts.set_check:
+        chk_map = {}
+        for item_kv in opts.set_check:
+            if "=" not in item_kv:
+                parser.error("--set-check must be STAGE=COMMAND")
+            k, v = item_kv.split("=", 1)
+            chk_map[k.strip()] = v.strip()
+        changes["checks"] = chk_map
+    if opts.allow_extension:
+        changes["allow_extension"] = opts.allow_extension
+    if changes:
+        res, err = configure_kit(project, changes)
+        if err:
+            sys.stderr.write("config: %s\n" % err)
+            return 2
+        if opts.json:
+            print(json.dumps(res, indent=2))
+        else:
+            for line in res["applied"]:
+                print("updated: %s" % line)
+        return 0
+    status = kit_status(project)
+    if opts.json:
+        print(json.dumps(status, indent=2))
+    else:
+        c = status["constraints"]
+        print("kit v%s (%s profile) · token-saving: %s" % (
+            status["kit_version"], status["profile"],
+            "on" if status["token_saving"] else "off"))
+        print("  effort: %s · independent review: %s · reviewer: %s" % (
+            c["effort_mode"], c["independent_review"], c["preferred_reviewer"]))
+        print("  tier rules: %s · decision style: %s · dev method: %s" % (
+            c["tier_rules"], c["decision_style"], c["dev_method"]))
+    return 0
+
+
+def _cmd_verify(project, opts, parser):
+    """verify: run the charter's check commands."""
+    selected = None
+    if opts.stage:
+        selected = set(s.strip().replace("checks.", "") for s in opts.stage.split(","))
+        unknown = sorted(selected - set(STAGES))
+        if unknown:
+            parser.error("unknown stage: %s (stages: %s)" % (", ".join(unknown),
+                                                              ", ".join(STAGES)))
+    if not project.charter:
+        sys.stderr.write("no charter at %s: nothing says which commands to run\n"
+                         % project.charter_path)
+        return 2
+    summary, text = verify(project, selected, opts.timeout, parallel=getattr(opts, "parallel", False),
+                           item=opts.item)
+    if getattr(opts, "json", False):
+        print(json.dumps(summary, indent=2))
+    else:
+        print(text)
+    failed = [e for e in summary["stages"] if e["result"].startswith("Verified: fail")]
+    return 1 if failed else 0
+
+
+def _cmd_fix(project, opts, parser):
+    """fix: safe mechanical repairs."""
+    if opts.action in ("rotate-worklog", "normalise-status",
+                       "link-evidence", "migrate-shards"):
+        finish_mod = runtime_module("finish")
+        report = getattr(finish_mod, opts.action.replace("-", "_"))(
+            sys.modules[__name__], project, opts.apply)
+        if opts.json:
+            print(json.dumps({"action": opts.action, "applied": bool(opts.apply), "report": report}, indent=2))
+        else:
+            print("\n".join(report))
+            if not opts.apply and not report[0].startswith(("worklog.md is", "every")):
+                print("(preview: add --apply to write it)")
+        return 0
+    if opts.action == "merge-driver":
+        return fix_merge_driver(project, opts.json)
+    if (opts.action == "unlock-tests" or opts.unlock_tests) and not os.environ.get("AI_SDLC_APPROVAL"):
+        if any(os.environ.get(k) for k in AGENT_SESSION_ENVS):
+            sys.stderr.write(
+                "fix: unlocking reproducing tests from an agent session requires human approval "
+                "(AI_SDLC_APPROVAL=<ticket>) or verified completion via `sdlc.py finish <ID>`\n"
+            )
+            return 1
+    res = fix_kit(project, opts.action, {"unlock_tests": opts.unlock_tests})
+    if opts.json:
+        print(json.dumps(res, indent=2))
+    else:
+        if res["repaired"]:
+            for line in res["repaired"]:
+                print("fixed: %s" % line)
+        else:
+            print("nothing needed repair")
+    return 0
+
+
+class Command(object):
+    """One entry in COMMANDS. A plain command has a handler; a noun-verb group (deploy
+    record|list) has verbs, a name -> Command map, and no handler of its own. A handler is
+    called as handler(project, opts, parser) and returns the exit code; configure(subparser)
+    adds the command's flags. A command with needs_project False (the merge driver) is
+    called with project None, since git may run it where no project can be read."""
+
+    __slots__ = ("name", "handler", "help", "configure", "verbs", "core", "needs_project")
+
+    def __init__(self, name, handler=None, help="", configure=None, verbs=None, core=False,
+                 needs_project=True):
+        self.name, self.handler, self.help = name, handler, help
+        self.configure, self.verbs, self.core = configure, verbs, core
+        self.needs_project = needs_project
+
+
+COMMANDS = {}
+_VERB_DEST = "_verb"
+_COMMAND_NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+
+
+def register_command(name, handler, help="", configure=None, verb=None, core=False):
+    """Add a subcommand to COMMANDS, or a verb to a noun-verb group when verb is given.
+
+    Refuses (ValueError) a malformed name, any name a core command already uses, a name
+    an extension already took, a verb already in its group, and mixing a plain command with
+    a group of the same name. Core argparse flags stay in build_parser; an extension
+    command's flags come from configure(subparser)."""
+    if not callable(handler):
+        raise ValueError("command %r: handler is not callable" % (name,))
+    for part in (name, verb) if verb is not None else (name,):
+        if not isinstance(part, str) or not _COMMAND_NAME.match(part):
+            raise ValueError("command name %r: use lowercase letters, digits and single "
+                             "hyphens" % (part,))
+    have = COMMANDS.get(name)
+    if have is not None and have.core:
+        raise ValueError("command %r is a core sdlc.py command; pick another name" % name)
+    if core and verb is not None:
+        raise ValueError("core command %r: core commands take no registered verbs" % name)
+    if verb is None:
+        if have is not None:
+            raise ValueError("command %r is already registered" % name)
+        COMMANDS[name] = Command(name, handler, help, configure, core=core)
+        return COMMANDS[name]
+    if have is None:
+        have = COMMANDS[name] = Command(name, verbs={})
+    elif have.verbs is None:
+        raise ValueError("command %r is a plain command, not a verb group" % name)
+    if verb in have.verbs:
+        raise ValueError("command %r %r is already registered" % (name, verb))
+    have.verbs[verb] = Command(verb, handler, help, configure)
+    have.help = "%s %s" % (name, "|".join(have.verbs))
+    return have.verbs[verb]
+
+
+for _name, _handler in (
+        ("status", _cmd_status),
+        ("doctor", _cmd_doctor), ("finish", _cmd_finish), ("guard", _cmd_finish),
+        ("sync", _cmd_sync), ("slop", _cmd_slop), ("spec", _cmd_spec),
+        ("next-id", _cmd_next_id), ("render", _cmd_render), ("item", _cmd_item),
+        ("hotfix", _cmd_hotfix), ("dispatch", _cmd_dispatch), ("deploy", _cmd_deploy),
+        ("claim", _cmd_claims), ("release", _cmd_claims), ("unclaim", _cmd_claims),
+        ("claims", _cmd_claims), ("parallel", _cmd_claims), ("lens", _cmd_lens),
+        ("audit", _cmd_lens), ("view", _cmd_view), ("metrics", _cmd_view),
+        ("log", _cmd_log), ("trailers", _cmd_trailers), ("review", _cmd_review),
+        ("bite", _cmd_bite), ("plan-check", _cmd_plan_check), ("ext", _cmd_ext),
+        ("ci-check", _cmd_ci_check), ("config", _cmd_config), ("verify", _cmd_verify),
+        ("fix", _cmd_fix)):
+    register_command(_name, _handler, core=True)
+del _name, _handler
+register_command("merge-shard", _cmd_merge_shard, core=True).needs_project = False
+
+
+def build_parser():
+    """The argparse tree: every core subcommand, then each registered extension command."""
     parser = _Main(prog="sdlc.py", description=__doc__.split("\n\n")[0])
     parser.add_argument("--root", help="project root (default: the project this file is "
                         "installed in)")
@@ -5069,810 +6023,51 @@ def main(argv):
         if name in EXAMPLES:
             sp_.formatter_class = argparse.RawDescriptionHelpFormatter
             sp_.epilog = "examples:\n" + "\n".join("  python3 .ai-sdlc/bin/sdlc.py " + e for e in EXAMPLES[name])
+    for cmd in COMMANDS.values():
+        if cmd.core:
+            continue
+        ext = sub.add_parser(cmd.name, help=cmd.help)
+        if cmd.verbs is None:
+            if cmd.configure:
+                cmd.configure(ext)
+            continue
+        verbs = ext.add_subparsers(dest=_VERB_DEST, parser_class=argparse.ArgumentParser)
+        for verb, entry in cmd.verbs.items():
+            vp = verbs.add_parser(verb, help=entry.help)
+            if entry.configure:
+                entry.configure(vp)
+    return parser
+
+
+def dispatch_command(project, opts, parser):
+    """Run the handler COMMANDS holds for opts.command (and its verb, for a group)."""
+    cmd = COMMANDS.get(opts.command)
+    if cmd is None:
+        parser.error("unknown command: %s" % opts.command)
+    if cmd.verbs is None:
+        return cmd.handler(project, opts, parser)
+    verb = getattr(opts, _VERB_DEST, None)
+    entry = cmd.verbs.get(verb) if verb else None
+    if entry is None:
+        sys.stderr.write("%s: give one of: %s\n" % (cmd.name, ", ".join(cmd.verbs)))
+        return 2
+    return entry.handler(project, opts, parser)
+
+
+def main(argv):
+    if argv == ["--selftest"]:
+        selftest()
+        return 0
+    parser = build_parser()
     opts = parser.parse_args(argv)
     if not opts.command:
         parser.print_help()
         return 2
-    if opts.command == "merge-shard":
-        code, message = _shards_mod.merge_shard_files(
-            opts.base, opts.ours, opts.theirs, marker_size=max(3, min(opts.marker_size, 64)))
-        sys.stderr.write(message + "\n")
-        return code
-    project = Project(opts.root or default_root())
-    if opts.command == "status":
-        status_mod = runtime_module("status")
-        data = status_mod.report(sys.modules[__name__], project)
-        print(json.dumps(data, indent=2) if opts.json else status_mod.format_report(data))
-        return 0
-    if opts.command == "doctor":
-        items = doctor(project, use_cache=not getattr(opts, "no_cache", False))
-        if opts.baseline:
-            kept, dropped, refused = write_baseline(project, items)
-            if not opts.json:
-                print("doctor-baseline.json: %d finding(s) accepted%s%s" % (
-                    kept, ", %d fixed one(s) removed" % dropped if dropped else "",
-                    ". %d finding(s) are new since the baseline and stay visible" % refused
-                    if refused else ""))
-            items = apply_baseline(project, [dict(i, accepted="") for i in items])
-        if opts.json:
-            print(json.dumps(items, indent=2))
-        else:
-            print_findings(items, opts.all)
-        return 1 if opts.strict and any(i["level"] == "fail" and not i.get("accepted")
-                                        for i in items) else 0
-    if opts.command in ("finish", "guard"):
-        finish_mod = runtime_module("finish")
-        if opts.command == "guard":
-            try:
-                payload = json.loads(sys.stdin.read() or "{}")
-            except ValueError:
-                payload = {}
-            code, message = finish_mod.guard(sys.modules[__name__], project, opts.event,
-                                             payload if isinstance(payload, dict) else {})
-            if message:
-                sys.stderr.write(message + "\n")
-            return code
-        if opts.waive and not (opts.by and opts.reason):
-            parser.error("--waive verify needs --by <name> and --reason \"...\"")
-        notes = {}
-        if getattr(opts, "from_json", None):
-            try:
-                raw_j = sys.stdin.read() if opts.from_json == "-" else read(opts.from_json)
-                parsed_j = json.loads(raw_j or "{}")
-                if not isinstance(parsed_j, dict):
-                    parser.error("--from-json must contain a JSON object")
-                for nk in ("why", "not_done", "discovered", "decisions", "assumptions", "plan", "reviews"):
-                    if parsed_j.get(nk) is not None:
-                        notes[nk] = str(parsed_j[nk])
-            except ValueError as exc:
-                parser.error("invalid --from-json payload: %s" % exc)
-        for nk in ("why", "not_done", "discovered", "decisions", "assumptions", "plan", "reviews"):
-            cli_v = getattr(opts, nk, None)
-            if cli_v is not None:
-                notes[nk] = cli_v
-        lines, code = finish_mod.finish(sys.modules[__name__], project, opts.item,
-                                        opts.by if opts.waive else None, opts.reason,
-                                        opts.dry_run, notes=notes or None)
-        if getattr(opts, "json", False):
-            owed_list = [ln[5:].strip() for ln in lines if ln.startswith("OWED ")]
-            cur_item = _shards_mod.merged_items(project).get(opts.item) or {}
-            print(json.dumps({
-                "item": opts.item,
-                "exit_code": code,
-                "finished": code == 0,
-                "status": cur_item.get("status", ""),
-                "owed": owed_list,
-                "lines": lines,
-            }, indent=2))
-        else:
-            print("\n".join(lines))
-        return code
-    if opts.command == "sync":
-        sync_mod = runtime_module("sync")
-        how = sync_mod.strategy(labelled(project.charter, "Updating a branch"))
-        state = sync_mod.state(project, default_branch(project), opts.fetch)
-        if state is None:
-            sys.stderr.write("sync: not a git repository here\n")
-            return 2
-        found = sync_mod.findings(state, how)
-        code = sync_mod.exit_code(found, opts.strict)
-        if opts.json:
-            print(json.dumps({"state": state, "strategy": how, "exit": code, "findings": [
-                {"level": level, "text": text, "command": command}
-                for level, text, command in found]}, indent=2, sort_keys=True))
-        else:
-            print("\n".join(sync_mod.report(state, found, how)))
-        return code
-    if opts.command == "slop":
-        slop_mod = runtime_module("slop")
-        if opts.guide:
-            print("\n".join(slop_mod.guide()))
-            return 0
-        charter_mode = slop_mod.mode(project, labelled)
-        strict = opts.strict or charter_mode == "strict"
-        if opts.paths == ["-"]:
-            found, count = slop_mod.scan_text(sys.stdin.read(), "<stdin>")
-            results, unread = [("<stdin>", found, count)], []
-        else:
-            if opts.paths:
-                cwd_real = os.path.realpath(os.getcwd())
-                base_dir = project.root if opts.root else cwd_real
-                files = slop_mod.collect(opts.paths, base_dir)
-            else:
-                files = slop_mod.changed_prose(project.root)
-                if files is None:
-                    sys.stderr.write("slop: not a git repository here; name the files or "
-                                     "directories to scan\n")
-                    return 2
-            results, unread = slop_mod.scan_paths(files, project.root)
-        for rel in unread:
-            sys.stderr.write("slop: cannot read %s\n" % rel)
-        failed = sum(1 for _, found, count in results if slop_mod.verdict(found, count)[0])
-        if opts.json:
-            print(json.dumps({"mode": charter_mode, "strict": strict, "files": [
-                {"file": rel, "words": count, "fails": slop_mod.verdict(found, count)[0],
-                 "findings": found} for rel, found, count in results]}, indent=2))
-        else:
-            lines = slop_mod.report(results, strict)[0]
-            if not results:
-                lines = ["slop: no prose files to scan" + ("" if opts.paths else
-                         " (nothing changed; name a file or directory)")]
-            print("\n".join(lines))
-            if charter_mode == "off" and not opts.strict:
-                print("The charter's Slop filter row is off, so this run is advisory. "
-                      "Turn it on with: config --slop-filter on|strict")
-        if unread and not results:
-            return 2
-        return 1 if strict and failed else 0
-    if opts.command == "spec":
-        specs_mod = runtime_module("specs")
-        if opts.action == "apply":
-            if not opts.target:
-                sys.stderr.write("spec apply: give the work item ID\n")
-                return 2
-            steps, error = specs_mod.apply_change(project, opts.target, write=opts.write)
-            if error:
-                sys.stderr.write("spec apply: %s\n" % error)
-                return 1
-            if opts.json:
-                print(json.dumps({"item": opts.target, "applied": bool(opts.write), "steps": steps}, indent=2))
-            else:
-                print(("applied:" if opts.write else "would (dry run; add --write):"))
-                for s in steps:
-                    print("  " + s)
-            return 0
-        data = specs_mod.load(project)
-        if opts.action == "validate":
-            problems = specs_mod.validate(project, data)
-            if opts.json:
-                print(json.dumps(problems, indent=2))
-            for p in [] if opts.json else problems:
-                print("%-4s  %s  %s" % (p["level"], p["where"], p["message"]))
-            if not problems and not opts.json:
-                print("specs: no problems in %d capability spec(s) and %d change(s)" % (len(data["capabilities"]), len(data["changes"])))
-            return 1 if (opts.strict and problems) else 0
-        if opts.action == "show":
-            spec = next((c for c in data["capabilities"] + data["imported"] if c["capability"] == opts.target), None)
-            if not spec:
-                sys.stderr.write("spec show: no capability %r\n" % opts.target)
-                return 2
-            if opts.json:
-                print(json.dumps(spec, indent=2))
-                return 0
-            print("%s (%s) — %s" % (spec["capability"], spec["source"], spec["path"]))
-            for r in spec["requirements"]:
-                print("  Requirement: %s  (%d scenario%s)" % (r["name"], len(r["scenarios"]), "" if len(r["scenarios"]) == 1 else "s"))
-            return 0
-        if opts.json:
-            print(json.dumps(data, indent=2))
-            return 0
-        print("specs %s in the charter" % ("on" if specs_mod.enabled(project, labelled) else "off"))
-        for c in data["capabilities"] + data["imported"]:
-            print("  %-28s %-9s %3d requirement(s)  %s" % (c["capability"], c["source"], len(c["requirements"]), c["path"]))
-        for ch in data["changes"]:
-            n = dict((k, len(v)) for k, v in ch["sections"].items() if v)
-            print("  change %-21s %-9s %s" % (ch["item"], ch["source"], ", ".join("%d %s" % (v, k) for k, v in n.items())))
-        return 0
-    if opts.command == "next-id":
-        claims_mod = runtime_module("claims")
-        res, error = claims_mod.next_id(project, kind=opts.kind, sync_refs=opts.sync_refs)
-        if error:
-            sys.stderr.write("next-id: %s\n" % error)
-            return 1
-        if opts.json:
-            print(json.dumps(res, indent=2))
-        else:
-            print(res["id"])
-        return 0
-    if opts.command == "render":
-        res = _shards_mod.render(project, check_only=opts.check)
-        if opts.json:
-            print(json.dumps(res, indent=2))
-        elif opts.check:
-            if res["in_sync"]:
-                print("render: backlog.md and worklog.md match shards")
-            else:
-                print("render: out of sync (%s); run `sdlc.py render`" % ", ".join(res["drift"]))
-        else:
-            changed = [f["path"] for f in res["files"] if f["changed"]]
-            print("render: updated %s" % (", ".join(changed) if changed else "nothing (already in sync)"))
-        return 0 if (not opts.check or res["in_sync"]) else 1
-    if opts.command == "item":
-        today_iso = datetime.date.today().isoformat()
-        if getattr(opts, "item_id_flag", None) and not opts.target:
-            opts.target = opts.item_id_flag
-        if opts.action == "list":
-            all_items = _shards_mod.merged_items(project)
-            tier_filter = set(s.strip() for s in (opts.tier or "").split(",") if s.strip())
-            status_filter = _shards_mod.normalize_status(opts.status) if opts.status else ""
-            rows_out = []
-            for iid in sorted(all_items.keys(), key=id_sort_key):
-                it = all_items[iid]
-                if status_filter and it["status"] != status_filter:
-                    continue
-                if tier_filter and it["tier"] not in tier_filter:
-                    continue
-                rows_out.append(it)
-            if opts.json:
-                print(json.dumps(rows_out, indent=2))
-            elif not rows_out:
-                print("no matching items")
-            else:
-                for it in rows_out:
-                    t_str = (" touch=" + ",".join(it["touch"])) if it.get("touch") else ""
-                    print("%-10s Tier %-2s %-12s %-18s %s%s" % (
-                        it["id"], it["tier"], it["status"], it["owner"], it["title"], t_str
-                    ))
-            return 0
-        if opts.action == "show":
-            if not opts.target:
-                sys.stderr.write("item show: give a work item ID\n")
-                return 2
-            it = _shards_mod.merged_items(project).get(opts.target)
-            if not it:
-                sys.stderr.write("item show: %s not found\n" % opts.target)
-                return 2
-            if opts.json:
-                print(json.dumps(it, indent=2))
-            else:
-                print("%s · Tier %s · %s · %s" % (it["id"], it["tier"], it["status"], it["title"]))
-                print("  type: %s · owner: %s · effort: %s" % (
-                    it["type"], it["owner"], it.get("effort") or "(charter default)"
-                ))
-                if it.get("depends"):
-                    print("  depends: %s" % ", ".join(it["depends"]))
-                if it.get("touch"):
-                    print("  touch: %s" % ", ".join(it["touch"]))
-                if _shards_mod.is_hotfix(it):
-                    print("  hotfix: since %s · retroactive review: %s" % (
-                        it.get("hotfix_at") or "unknown",
-                        "on file" if retro_reviews(project, it["id"]) else (it.get("retro_review") or "owed once merged")))
-            return 0
-        if opts.action == "add":
-            if not opts.title:
-                sys.stderr.write("item add: --title is required\n")
-                return 2
-            if opts.owner:
-                opts.owner, err_o = resolve_owner(project, opts.owner)
-                if err_o:
-                    sys.stderr.write("item add: --owner %s\n" % err_o)
-                    return 2
-            item_id = opts.target
-            if not item_id:
-                claims_mod = runtime_module("claims")
-                alloc, err_a = claims_mod.next_id(project, kind="item", sync_refs=opts.sync_refs)
-                if err_a:
-                    sys.stderr.write("item add: %s\n" % err_a)
-                    return 1
-                item_id = alloc["id"]
-            existing = _shards_mod.merged_items(project)
-            if item_id in existing:
-                sys.stderr.write("item add: %s already exists (use `item set %s`)\n" % (item_id, item_id))
-                return 1
-            itype_val = opts.item_type or ("defect" if getattr(opts, "discovered", False) else "feat")
-            tier_val = opts.tier or "2"
-            status_val = opts.status or "Ready"
-            wait_val = opts.waiting_on or ""
-            reason_val = opts.park_reason or ""
-            triage_note = ""
-            if getattr(opts, "discovered", False):
-                status_val, triage_note = resolve_discovered_status(project, item_id, itype_val, tier_val)
-                if status_val == "Parked":
-                    wait_val = wait_val or "backlog owner"
-                    reason_val = reason_val or ("Discovered item triage: accept into Ready, defer, or drop (%s)" % triage_note)
-            data = {
-                "id": item_id,
-                "title": opts.title,
-                "type": itype_val,
-                "tier": tier_val,
-                "effort": opts.effort or "",
-                "owner": opts.owner or ("qa" if itype_val == "defect" else "software-engineer"),
-                "status": status_val,
-                "depends": opts.depends or "",
-                "touch": opts.touch or "",
-                "created": today_iso,
-                "updated": today_iso,
-                "waiting_on": wait_val,
-                "park_reason": reason_val,
-                "unblock_by": opts.unblock_by or "",
-                "later_when": opts.later_when or "",
-                "dropped_reason": opts.dropped_reason or "",
-                "summary": opts.summary or "",
-            }
-            try:
-                saved = _shards_mod.save_item(project, data, today=today_iso)
-            except ValueError as exc:
-                sys.stderr.write("item add: %s\n" % exc)
-                return 2
-            if opts.json:
-                out_saved = dict(saved)
-                if triage_note:
-                    out_saved["triage_reason"] = triage_note
-                print(json.dumps(out_saved, indent=2))
-            else:
-                print("added %s (%s, Tier %s) -> %s/project/items/%s.json" % (
-                    saved["id"], saved["status"], saved["tier"], project.docs, saved["id"]
-                ))
-            return 0
-        if opts.action == "triage":
-            if not opts.target:
-                sys.stderr.write("item triage: give a work item ID\n")
-                return 2
-            cur = _shards_mod.merged_items(project).get(opts.target)
-            if not cur:
-                sys.stderr.write("item triage: %s not found\n" % opts.target)
-                return 2
-            new_status, triage_reason = resolve_discovered_status(
-                project, opts.target, cur.get("type") or "feat", cur.get("tier") or "2"
-            )
-            updated = dict(cur)
-            updated["status"] = new_status
-            updated["updated"] = today_iso
-            if new_status == "Ready":
-                updated["waiting_on"] = ""
-                updated["park_reason"] = ""
-            else:
-                updated["waiting_on"] = updated.get("waiting_on") or "backlog owner"
-                updated["park_reason"] = updated.get("park_reason") or ("Discovered item triage: %s" % triage_reason)
-            saved = _shards_mod.save_item(project, updated, today=today_iso)
-            if opts.json:
-                out_saved = dict(saved, promoted=(saved["status"] == "Ready"), triage_reason=triage_reason)
-                print(json.dumps(out_saved, indent=2))
-            else:
-                print("triaged %s -> %s (%s)" % (saved["id"], saved["status"], triage_reason))
-            return 0
-        if opts.action == "set":
-            if not opts.target:
-                sys.stderr.write("item set: give a work item ID\n")
-                return 2
-            cur = _shards_mod.merged_items(project).get(opts.target)
-            if not cur:
-                sys.stderr.write("item set: %s not found\n" % opts.target)
-                return 2
-            updated = dict(cur)
-            if opts.title is not None:
-                updated["title"] = opts.title
-            if opts.item_type is not None:
-                updated["type"] = opts.item_type
-            if opts.tier is not None:
-                updated["tier"] = opts.tier
-            if opts.effort is not None:
-                updated["effort"] = opts.effort
-            if opts.owner is not None:
-                owner_v, err_o = resolve_owner(project, opts.owner)
-                if err_o:
-                    sys.stderr.write("item set: --owner %s\n" % err_o)
-                    return 2
-                updated["owner"] = owner_v
-            if opts.status is not None:
-                updated["status"] = opts.status
-            if opts.depends is not None:
-                updated["depends"] = opts.depends
-            if opts.touch is not None:
-                updated["touch"] = opts.touch
-            if opts.waiting_on is not None:
-                updated["waiting_on"] = opts.waiting_on
-            if opts.park_reason is not None:
-                updated["park_reason"] = opts.park_reason
-            if opts.unblock_by is not None:
-                updated["unblock_by"] = opts.unblock_by
-            if opts.later_when is not None:
-                updated["later_when"] = opts.later_when
-            if opts.dropped_reason is not None:
-                updated["dropped_reason"] = opts.dropped_reason
-            if opts.summary is not None:
-                updated["summary"] = opts.summary
-            updated["updated"] = today_iso
-            try:
-                saved = _shards_mod.save_item(project, updated, today=today_iso)
-            except ValueError as exc:
-                sys.stderr.write("item set: %s\n" % exc)
-                return 2
-            if getattr(opts, "hotfix", False):
-                saved, err_h, code_h = mark_hotfix(project, opts.target, today=today_iso)
-                if err_h:
-                    sys.stderr.write("item set: %s\n" % err_h)
-                    return code_h
-            if opts.json:
-                print(json.dumps(saved, indent=2))
-            else:
-                print("updated %s (%s, Tier %s)" % (saved["id"], saved["status"], saved["tier"]))
-            return 0
-    if opts.command == "hotfix":
-        saved, err_h, code_h = mark_hotfix(project, opts.item)
-        if err_h:
-            sys.stderr.write("hotfix: %s\n" % err_h)
-            return code_h
-        if opts.json:
-            print(json.dumps(saved, indent=2))
-        else:
-            print("%s marked hotfix at %s (Tier %s stays). finish skips the pre-merge review; a "
-                  "retroactive review is owed within %d day(s)" % (
-                      saved["id"], saved["hotfix_at"], saved["tier"],
-                      retro_review_window(project.charter)))
-        return 0
-    if opts.command == "dispatch":
-        dispatch_mod = runtime_module("dispatch")
-        report, rc = dispatch_mod.run_dispatch(sys.modules[__name__], project, opts)
-        if report.get("error"):
-            if opts.json:
-                print(json.dumps(report, indent=2))
-            else:
-                sys.stderr.write("dispatch: %s\n" % report["error"])
-            return rc
-        if opts.json:
-            print(json.dumps(report, indent=2))
-        else:
-            print(dispatch_mod.format_dispatch_report(report))
-        return rc
-    if opts.command == "deploy":
-        releases_mod = runtime_module("releases")
-        if opts.deploy_action == "list":
-            state = releases_mod.deployed(project)
-            print(json.dumps(state, indent=2, sort_keys=True) if opts.json
-                  else releases_mod.format_list(state))
-            return 0
-        try:
-            result = releases_mod.record(project, sys.modules[__name__], opts.version, opts.env,
-                                         opts.from_ref, opts.to_ref, opts.by, opts.dry_run)
-        except (releases_mod.DeployError, OSError) as exc:
-            sys.stderr.write("deploy record: %s\n" % exc)
-            return 1
-        if opts.json:
-            print(json.dumps(result, indent=2, sort_keys=True))
-            return 0
-        rec = result["record"]
-        verb = "would record" if result["dry_run"] else "recorded"
-        if result["action"] == "promotion":
-            print("%s %s in %s (promotion of %s; record unchanged except envs)" % (
-                verb, opts.version, opts.env, rec.get("to", "")[:12]))
-        else:
-            print("%s %s in %s: %d commit(s), %d item(s)%s" % (
-                verb, opts.version, opts.env, rec.get("commits", 0), len(rec.get("items") or []),
-                ": " + ", ".join(rec["items"]) if rec.get("items") else ""))
-        print("  %s%s" % (result["path"], "" if result["dry_run"] else
-                          " and one line in %s/project/deploys.jsonl" % project.docs))
-        return 0
-    if opts.command in ("claim", "release", "unclaim", "claims", "parallel"):
-        claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
-        if opts.command == "claim":
-            agent = opts.agent or identity(None, None, project)[0]
-            # Never a silent stand-in: an unknown agent or person is recorded as such and
-            # said out loud (on stderr, or inside the --json result).
-            notes = []
-            if agent == "unknown":
-                notes.append("no agent identity: pass --agent <name> or set AI_SDLC_AGENT")
-                if not opts.json:
-                    sys.stderr.write("warning: %s\n" % notes[-1])
-            who = person_identity(project, warn=not opts.json)
-            if who["warning"]:
-                notes.append(who["warning"])
-            record, error = claims_mod.claim(
-                project, view_mod, opts.item, agent, opts.worktree,
-                opts.no_worktree, opts.mark, opts.base,
-                sync_refs=getattr(opts, "sync_refs", False),
-                person=who["person"],
-            )
-            if error:
-                sys.stderr.write("claim: %s\n" % error)
-                return 1
-            if opts.json:
-                print(json.dumps(dict(record, warnings=notes) if notes else record, indent=2))
-            else:
-                print("claimed %s for %s (%s) on branch %s" % (
-                    record["id"], record["agent"], record.get("person") or "unknown person",
-                    record["branch"]))
-                if record["worktree"]:
-                    print("worktree: %s\n  cd %s" % (record["worktree"], record["worktree"]))
-                print("free it when the item is Done, Parked or Deferred: "
-                      "python3 .ai-sdlc/bin/sdlc.py unclaim %s" % record["id"])
-            return 0
-        if opts.command == "release":
-            # The claim command's old name. Same stdout, JSON and exit codes; one note on
-            # stderr that repeats the caller's own arguments under the new name.
-            rest = list(argv)
-            if "release" in rest:
-                rest = rest[rest.index("release") + 1:]
-            sys.stderr.write("release: deprecated, use: sdlc.py unclaim %s\n" % " ".join(rest))
-        if opts.command in ("release", "unclaim"):
-            record, error = claims_mod.release(
-                project, opts.item, opts.remove_worktree,
-                agent=getattr(opts, "agent", None) or identity(None, None, project)[0],
-                force=getattr(opts, "force", False),
-                sync_refs=getattr(opts, "sync_refs", False),
-            )
-            if error:
-                sys.stderr.write("%s: %s\n" % (opts.command, error))
-                return 1
-            if getattr(opts, "json", False):
-                print(json.dumps({"released": record["id"], "record": record}, indent=2))
-            else:
-                print("released %s (was %s)" % (record["id"], record.get("agent", "?")))
-            return 0
-        if opts.command == "claims":
-            held = claims_mod.list_claims(project, sync_refs=getattr(opts, "sync_refs", False))
-            if opts.json:
-                print(json.dumps(held, indent=2))
-            elif not held:
-                print("no active claims")
-            for c in [] if opts.json else held:
-                print("%-10s %-16s %-16s %-36s since %s  last commit %s" % (
-                    c["id"], c.get("agent", "?"), c.get("person") or "unknown person", c.get("branch", ""),
-                    c.get("since", "")[:10], c.get("last_commit", "")[:10] or "none"))
-            return 0
-        result = claims_mod.parallel(
-            project, sys.modules[__name__], view_mod,
-            sync_refs=getattr(opts, "sync_refs", False),
-        )
-        if opts.json:
-            print(json.dumps(result, indent=2))
-            return 0
-        for n, group in enumerate(result["groups"], 1):
-            print("group %d (can run together): %s" % (n, ", ".join(group)))
-        for c in result["conflicts"]:
-            print("conflict %s × %s: %s" % (c["a"], c["b"], ", ".join(c["files"] + c["single_writer"])))
-        if result["plan_first"]:
-            print("plan first (no Files that change): %s" % ", ".join(x["id"] for x in result["plan_first"]))
-        if not (result["groups"] or result["plan_first"]):
-            print("no unclaimed Ready items with finished dependencies")
-        return 0
-    if opts.command in ("lens", "audit"):
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        sys.dont_write_bytecode = True
-        import lens as lens_mod
-        if opts.command == "audit":
-            return run_audit(project, lens_mod, opts)
-        if opts.write and opts.area != "standards":
-            print("lens: --write needs --area standards", file=sys.stderr)
-            return 2
-        if opts.area == "standards":
-            return run_standards(project, lens_mod, opts)
-        import view
-        model = {"kit": kit_status(project), "alerts": doctor(project), "evidence": view.evidence_runs(project)}
-        data = lens_mod.lens(sys.modules[__name__], project, model, include_user=opts.user)
-        if opts.json:
-            key = {"deps": "dependencies", "deploy": "workflows"}.get(opts.area, opts.area)
-            print(json.dumps(data if not opts.area else data.get(key), indent=2))
-            return 0
-        print_lens(data, opts.area)
-        return 0
-    if opts.command in ("view", "metrics"):
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        sys.dont_write_bytecode = True  # no __pycache__ next to kit files in a project
-        import view
-        if opts.command == "metrics":
-            return view.print_metrics(sys.modules[__name__], project, opts)
-        return view.run(sys.modules[__name__], project, opts)
-    if opts.command == "log":
-        since = opts.since
-        if not since and opts.id:
-            found = item_commits(project, opts.id)
-            if not found:
-                sys.stderr.write("log: no commit carries a `Work-Item: %s` trailer\n" % opts.id)
-                return 2
-            since = found[-1][1].split(" ")[0]
-            if not since:
-                sys.stderr.write("log: %s starts at the root commit; pass --since\n" % opts.id)
-                return 2
-        if not since:
-            sys.stderr.write("log: give --since <ref>, or --id <item>\n")
-            return 2
-        if str(since).startswith("-") or not project.git("rev-parse", "--verify", "--quiet", since + "^{commit}").strip():
-            sys.stderr.write("log: %r is not a commit\n" % since)
-            return 2
-        lines, orphans = log_entries(project, since)
-        if opts.id:
-            lines = [line for line in lines if line.split(" · ")[1] == opts.id]
-            orphans = []
-        if opts.write:
-            written = write_log(project, lines)
-            if not getattr(opts, "json", False):
-                dest = ("%s/project/worklog/" % project.docs) if _shards_mod.is_sharded(project, for_write=True) else ("%s/project/worklog.md" % project.docs)
-                print("wrote %d line(s) to %s" % (len(written), dest))
-            lines = written
-        if getattr(opts, "json", False):
-            print(json.dumps({
-                "since": since,
-                "id": opts.id,
-                "wrote": bool(opts.write),
-                "entries": lines,
-                "orphans": orphans,
-            }, indent=2))
-            return 0
-        for line in lines:
-            print(line)
-        for orphan in orphans:
-            print("no work item ID: %s" % orphan, file=sys.stderr)
-        return 0
-    if opts.command == "trailers":
-        agent, model = identity(opts.agent, opts.model, project)
-        # No agent detected: a person is committing, and a person has no Model trailer
-        # (process/05-change-control.md). `unknown` would fail ci-check.
-        tags = [("Work-Item", opts.item)] + ([("Agent", "human")] if agent == "unknown" else
-                                             [("Agent", agent), ("Model", model)])
-        if getattr(opts, "json", False):
-            print(json.dumps(dict(tags), indent=2))
-        else:
-            print("\n".join("%s: %s" % pair for pair in tags))
-        return 0
-    if opts.command == "review":
-        path, record, error = review(project, opts.item, opts.role, opts.by, opts.model,
-                                     opts.stage, opts.base, opts.timeout)
-        if error:
-            sys.stderr.write("review: %s\n" % error)
-            return 2
-        if getattr(opts, "json", False):
-            out_rec = dict(record, path=path)
-            print(json.dumps(out_rec, indent=2))
-        else:
-            print("review saved: %s" % path)
-            print("  reviewer  %s / %s" % (record["reviewer_agent"], record["reviewer_model"]))
-            print("  author    %s / %s" % (record["author_agent"], record["author_model"]))
-            print("  %s; verdict: %s" % (record["independence"], record["verdict"]))
-        return 0
-    if opts.command == "bite":
-        if opts.restore:
-            restored = bite_restore(project)
-            print("restored %d file(s)%s" % (len(restored), (": " + ", ".join(restored))
-                                             if restored else ""))
-            return 0
-        command = " ".join(opts.test_command).strip()
-        if command.startswith("-- "):
-            command = command[3:]
-        if not command:
-            parser.error("bite needs a test command")
-        result, error = bite(project, command, opts.base, opts.timeout, item=opts.item)
-        if error:
-            sys.stderr.write("bite: %s\n" % error)
-            return 2
-        if opts.json:
-            print(json.dumps(result, indent=2))
-        else:
-            print_bite(result)
-        return 0 if result["bites"] else 1
-    if opts.command == "plan-check":
-        if opts.pre:
-            result, error = plan_precheck(project, opts.item)
-        else:
-            result, error = plan_check(project, opts.item, opts.base)
-        if error:
-            sys.stderr.write("plan-check: %s\n" % error)
-            return 2
-        if opts.json:
-            print(json.dumps(result, indent=2))
-        elif opts.pre:
-            print_plan_precheck(result)
-        else:
-            print_plan_check(result)
-        if opts.pre:
-            return 1 if result["missing"] or result["broad"] else 0
-        gaps = result["unplanned"] or result["untouched"] or result["broad"]
-        return 1 if opts.strict and gaps else 0
-    if opts.command == "ext":
-        return runtime_module("ext").main(sys.modules[__name__], project, opts)
-    if opts.command == "ci-check":
-        head = opts.head
-        if head == "event":
-            head, error = ci_event_head(os.environ.get("GITHUB_EVENT_PATH", ""))
-            if error:
-                sys.stderr.write("ci-check: %s\n" % error)
-                return 2
-        result, error = ci_check(project, opts.base, head, opts.charter_ref)
-        if error:
-            sys.stderr.write("ci-check: %s\n" % error)
-            return 2
-        if opts.json:
-            print(json.dumps(result, indent=2))
-        else:
-            print_ci_check(result)
-        return 1 if result["findings"] else 0
-    if opts.command == "config":
-        changes = {}
-        if opts.effort:
-            changes["effort"] = opts.effort
-        if opts.independent_review:
-            changes["independent_review"] = opts.independent_review
-        if opts.tier_rules:
-            changes["tier_rules"] = opts.tier_rules
-        if opts.decision_style:
-            changes["decision_style"] = opts.decision_style
-        if opts.dev_method:
-            changes["dev_method"] = opts.dev_method
-        if getattr(opts, "specs", None):
-            changes["specs"] = opts.specs
-        if getattr(opts, "slop_filter", None):
-            changes["slop_filter"] = opts.slop_filter
-        if getattr(opts, "discovered_defects", None):
-            changes["discovered_defects"] = opts.discovered_defects
-        if opts.reviewer:
-            changes["preferred_reviewer"] = opts.reviewer
-        if opts.token_saving:
-            changes["token_saving"] = opts.token_saving
-        if opts.set_check:
-            chk_map = {}
-            for item_kv in opts.set_check:
-                if "=" not in item_kv:
-                    parser.error("--set-check must be STAGE=COMMAND")
-                k, v = item_kv.split("=", 1)
-                chk_map[k.strip()] = v.strip()
-            changes["checks"] = chk_map
-        if opts.allow_extension:
-            changes["allow_extension"] = opts.allow_extension
-        if changes:
-            res, err = configure_kit(project, changes)
-            if err:
-                sys.stderr.write("config: %s\n" % err)
-                return 2
-            if opts.json:
-                print(json.dumps(res, indent=2))
-            else:
-                for line in res["applied"]:
-                    print("updated: %s" % line)
-            return 0
-        status = kit_status(project)
-        if opts.json:
-            print(json.dumps(status, indent=2))
-        else:
-            c = status["constraints"]
-            print("kit v%s (%s profile) · token-saving: %s" % (
-                status["kit_version"], status["profile"],
-                "on" if status["token_saving"] else "off"))
-            print("  effort: %s · independent review: %s · reviewer: %s" % (
-                c["effort_mode"], c["independent_review"], c["preferred_reviewer"]))
-            print("  tier rules: %s · decision style: %s · dev method: %s" % (
-                c["tier_rules"], c["decision_style"], c["dev_method"]))
-        return 0
-    if opts.command == "fix" and opts.action in ("rotate-worklog", "normalise-status",
-                                                  "link-evidence", "migrate-shards"):
-        finish_mod = runtime_module("finish")
-        report = getattr(finish_mod, opts.action.replace("-", "_"))(
-            sys.modules[__name__], project, opts.apply)
-        if opts.json:
-            print(json.dumps({"action": opts.action, "applied": bool(opts.apply), "report": report}, indent=2))
-        else:
-            print("\n".join(report))
-            if not opts.apply and not report[0].startswith(("worklog.md is", "every")):
-                print("(preview: add --apply to write it)")
-        return 0
-    if opts.command == "fix" and opts.action == "merge-driver":
-        return fix_merge_driver(project, opts.json)
-    if opts.command == "fix":
-        if (opts.action == "unlock-tests" or opts.unlock_tests) and not os.environ.get("AI_SDLC_APPROVAL"):
-            if any(os.environ.get(k) for k in AGENT_SESSION_ENVS):
-                sys.stderr.write(
-                    "fix: unlocking reproducing tests from an agent session requires human approval "
-                    "(AI_SDLC_APPROVAL=<ticket>) or verified completion via `sdlc.py finish <ID>`\n"
-                )
-                return 1
-        res = fix_kit(project, opts.action, {"unlock_tests": opts.unlock_tests})
-        if opts.json:
-            print(json.dumps(res, indent=2))
-        else:
-            if res["repaired"]:
-                for line in res["repaired"]:
-                    print("fixed: %s" % line)
-            else:
-                print("nothing needed repair")
-        return 0
-    selected = None
-    if opts.stage:
-        selected = set(s.strip().replace("checks.", "") for s in opts.stage.split(","))
-        unknown = sorted(selected - set(STAGES))
-        if unknown:
-            parser.error("unknown stage: %s (stages: %s)" % (", ".join(unknown),
-                                                              ", ".join(STAGES)))
-    if not project.charter:
-        sys.stderr.write("no charter at %s: nothing says which commands to run\n"
-                         % project.charter_path)
-        return 2
-    summary, text = verify(project, selected, opts.timeout, parallel=getattr(opts, "parallel", False),
-                           item=opts.item)
-    if getattr(opts, "json", False):
-        print(json.dumps(summary, indent=2))
-    else:
-        print(text)
-    failed = [e for e in summary["stages"] if e["result"].startswith("Verified: fail")]
-    return 1 if failed else 0
+    opts._argv = list(argv)  # the deprecated `release` repeats the caller's arguments
+    cmd = COMMANDS.get(opts.command)
+    needs = cmd is None or cmd.needs_project
+    project = Project(opts.root or default_root()) if needs else None
+    return dispatch_command(project, opts, parser)
 
 
 if __name__ == "__main__":
