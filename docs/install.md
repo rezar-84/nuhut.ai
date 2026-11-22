@@ -413,7 +413,7 @@ optional/skills` shows what a newer version ships.
 
 ### Upgrading to 6.0
 
-Three rules get stricter. Each one can stop `finish` on an existing project:
+These rules get stricter. Each one can stop work that used to pass on an existing project:
 
 - **Commits are attributed by trailer only.** A commit belongs to an item only when it
   carries a `Work-Item: <ID>` trailer. A mention in the subject or body no longer counts,
@@ -425,6 +425,20 @@ Three rules get stricter. Each one can stop `finish` on an existing project:
   the people who may waive in that row and merge it.
 - **A placeholder Approvers row refuses every waiver.** Fix: fill the row. The upgrade
   prints a notice when it is still blank.
+- **An agent's session cannot waive.** Without a terminal, a process that carries an
+  agent tool's environment (`CLAUDECODE`, `GEMINI_CLI`, ...) cannot record a waiver or
+  close an item on one already in the ledger, whatever `NUHUT_USER` or `git user.name`
+  says. Fix: the approver runs the waiver in their own terminal.
+- **Agents cannot edit the kit's code, wiring or evidence.** The hooks now deny agent
+  edits and shell writes to `.ai-sdlc/bin/**`, `.ai-sdlc/profile.json`,
+  `.ai-sdlc/git-hooks/**`, `.claude/settings.json`, `.gemini/settings.json`,
+  `.cursor/hooks.json` and the evidence ledger. Fix: make those changes yourself.
+- **`ext update` asks before new code of an allowed extension runs.** Without a terminal
+  it refuses unless given `--yes`. Fix: add `--yes` to scripts.
+
+With `--git-hooks`, `pre-commit` refuses a commit that changes a path in
+`.ai-sdlc/protected.txt` only when the commit comes from an agent's session, as the list
+bound only agent edits in 5.x; `test-lock.txt` binds every committer.
 
 `finish` also needs a full verify run (no `--stage`) on the item's newest code commit.
 Fix: run `sdlc.py verify --item <ID>` again after the last code change.
