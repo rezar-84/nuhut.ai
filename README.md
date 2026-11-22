@@ -163,7 +163,7 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 | **Releases and deploys** | `deploy record` which version went to which environment, with its commits and items · `deploy list` what runs where |
 | **Specs** | `spec list \| show \| validate \| apply` |
 | **Writing** | `slop` find the phrasings that read as machine-written (`--strict` fails the file) |
-| **Setup** | `config` see or change the charter's constraints · `fix` safe repairs · `ext` add, update, remove, search and package [extensions](docs/extensions.md) as Claude Code, Gemini, Codex or Kiro plugins |
+| **Setup** | `config` see or change the charter's constraints · `fix` safe repairs · `ext` add, update, remove, search and package [extensions](docs/extensions.md) as Claude Code, Gemini, Codex or Kiro plugins · `notify` the webhook for items that wait on a person (`--test` sends one) |
 
 In Claude Code: `/sdlc-plan`, `/sdlc-build`, `/sdlc-verify`, `/sdlc-review`, `/sdlc-finish`, `/sdlc-log`,
 `/sdlc-doctor`, `/sdlc-slop`. Every flag: [command reference](docs/cli.md).
