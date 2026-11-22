@@ -4511,6 +4511,42 @@ def run_audit(project, lens_mod, opts):
     return 1 if (opts.strict and worst) else 0
 
 
+def run_standards(project, lens_mod, opts):
+    """`lens --area standards`: report the conventions; --write drafts the page once."""
+    std = lens_mod.standards(project)
+    rel = os.path.join(project.docs, "project", "standards.md").replace(os.sep, "/")
+    if opts.write:
+        target = project.path(rel)
+        if os.path.exists(target):
+            print("standards: %s exists; not overwriting it. Compare by hand with "
+                  "`sdlc.py lens --area standards`." % rel)
+            return 1
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write(lens_mod.standards_markdown(std))
+        print("standards: drafted %s; review it before anyone relies on it" % rel)
+        return 0
+    if opts.json:
+        print(json.dumps(std, indent=2))
+        return 0
+    print("Standards (%d source file(s) sampled)" % std["files_scanned"])
+    print("  tooling      %s" % (", ".join("%s (%s)" % (t["tool"], t["path"]) for t in std["tooling"]) or "none found"))
+    for n in std["naming"]:
+        print("  naming       %-22s functions %s, types %s%s" % (
+            n["language"], n["functions"] or "unclear", n["classes"] or "unclear",
+            (", files " + n["files"]) if n["files"] else ""))
+    t = std["tests"]
+    print("  tests        %s, %d file(s)%s" % (t["layout"], t["count"],
+                                               (" · " + ", ".join(t["patterns"])) if t["patterns"] else ""))
+    for i in std["imports"]:
+        print("  imports      %-22s %s (%d absolute, %d relative, %d alias)" % (
+            i["language"], i["style"], i["absolute"], i["relative"], i["alias"]))
+    c = std["commits"]
+    print("  commits      %s (%d of %d conventional)" % (c["convention"], c["conventional"], c["sampled"]))
+    print("Read-only. Draft %s with: python3 .ai-sdlc/bin/sdlc.py lens --area standards --write" % rel)
+    return 0
+
+
 def print_lens(data, area=None):
     s = data["summary"]
 
@@ -4574,7 +4610,7 @@ Records and checks
 
 Viewer and reports
   view                the project as an interactive page; --serve keeps it live      view --serve
-  lens                stack, deps, build errors, security, deploy, env, agents       lens --area security
+  lens                stack, deps, build, security, deploy, env, agents, standards   lens --area security
   audit               run the dependency scanner and keep the vulnerable packages    audit
   metrics             process measures from the records and git                       metrics
 
@@ -4653,7 +4689,7 @@ EXAMPLES = {
     "next-id": ["next-id", "next-id --sync-refs --json", "next-id --kind adr"],
     "render": ["render", "render --check"],
     "merge-shard": ["merge-shard BASE OURS THEIRS   # what git runs; set it up with: fix merge-driver"],
-    "lens": ["lens", "lens --area build", "lens --user --json"],
+    "lens": ["lens", "lens --area build", "lens --area standards --write", "lens --user --json"],
     "audit": ["audit", "audit --strict           # exit 1 on a critical or high vulnerability"],
     "sync": ["sync                     # as of the last fetch", "sync --fetch             # fetch first",
              "sync --fetch --strict    # exit 1 when behind the default branch too (CI, before finish)"],
@@ -4866,8 +4902,10 @@ def main(argv):
     fx.add_argument("--json", action="store_true", help="print repair result as JSON")
     ln = sub.add_parser("lens", help="the project lens: stack, dependencies, build errors, "
                                      "security, deploy, containers, env names and the agentic stack")
-    ln.add_argument("--area", choices=("stack", "deps", "build", "security", "deploy", "env", "agents"),
-                    help="print one area only")
+    ln.add_argument("--area", choices=("stack", "deps", "build", "security", "deploy", "env", "agents", "standards"),
+                    help="print one area only; standards reads the coding conventions the code follows")
+    ln.add_argument("--write", action="store_true",
+                    help="with --area standards: draft <docs>/project/standards.md (never overwrites)")
     ln.add_argument("--user", action="store_true",
                     help="also list user-level skills, commands, subagents, MCP servers and plugins (~/.claude)")
     ln.add_argument("--json", action="store_true", help="print the lens as JSON")
@@ -5577,6 +5615,11 @@ def main(argv):
         import lens as lens_mod
         if opts.command == "audit":
             return run_audit(project, lens_mod, opts)
+        if opts.write and opts.area != "standards":
+            print("lens: --write needs --area standards", file=sys.stderr)
+            return 2
+        if opts.area == "standards":
+            return run_standards(project, lens_mod, opts)
         import view
         model = {"kit": kit_status(project), "alerts": doctor(project), "evidence": view.evidence_runs(project)}
         data = lens_mod.lens(sys.modules[__name__], project, model, include_user=opts.user)
