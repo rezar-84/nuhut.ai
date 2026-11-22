@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **The kit installed in this repository now carries the released version.** The 5.0.0 release left `.ai-sdlc/manifest.json`, `profile.json` and the `AGENTS.md` version line at 4.0.0. `tools/semver.py bump` now restamps them and re-hashes the managed `AGENTS.md` region; `semver.py restamp` repairs them by hand; `validate.py` fails when they disagree with `VERSION` (NUHT-011).
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.

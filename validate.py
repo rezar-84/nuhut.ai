@@ -432,6 +432,28 @@ def no_private_leaks(errors):
                           % (path.relative_to(ROOT), match.group(0)))
 
 
+def self_install_version(errors, version):
+    """The kit installed into this repository must carry the VERSION it was released as.
+    tools/semver.py bump restamps it; this catches a release that skipped the restamp."""
+    stamps = []
+    for rel in (".ai-sdlc/manifest.json", ".ai-sdlc/profile.json"):
+        path = ROOT / rel
+        if path.is_file():
+            try:
+                stamps.append((rel, json.loads(path.read_text(encoding="utf-8")).get("kit_version")))
+            except ValueError:
+                errors.append("%s is not valid JSON" % rel)
+    agents = ROOT / "AGENTS.md"
+    if agents.is_file():
+        found = re.search(r"<!-- Nuhut kit v([^ ]+?)\. ", agents.read_text(encoding="utf-8"))
+        if found:
+            stamps.append(("AGENTS.md", found.group(1)))
+    for rel, stamp in stamps:
+        if stamp != version:
+            errors.append("%s says kit_version %s but VERSION is %s; run python3 tools/semver.py "
+                          "restamp" % (rel, stamp, version))
+
+
 def main():
     if sys.argv[1:] == ["--reading-lists"]:
         print_reading_lists()
@@ -575,6 +597,7 @@ def main():
     card_fidelity(errors)
     single_viewer(errors)
     docs_stay_true(errors)
+    self_install_version(errors, version)
     reading_budget(errors)
     no_private_leaks(errors)
 

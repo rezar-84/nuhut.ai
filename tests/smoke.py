@@ -3753,6 +3753,14 @@ def test_semver():
     write(d, "VERSION", "4.0.0\n")
     write(d, ".claude-plugin/plugin.json", '{\n  "name": "x",\n  "version": "4.0.0"\n}\n')
     write(d, "CHANGELOG.md", "# Changelog\n\n## Unreleased\n\n## 4.0.0 — 2026-10-19\n\n- first\n")
+    # The kit installed into its own repository: the release must restamp it too.
+    agents_region = ("<!-- ai-sdlc:kit-begin -->\n<!-- Nuhut kit v4.0.0. Section 9 is project-owned. -->\n"
+                     "## 1. Rules\n<!-- ai-sdlc:kit-end -->")
+    write(d, "AGENTS.md", "# Contract\n" + agents_region + "\n## 9. Project\n")
+    write(d, ".ai-sdlc/manifest.json", json.dumps({
+        "schema": 1, "kit_version": "4.0.0", "docs_dir": "handbook", "files": {"a": "b"},
+        "regions": {"AGENTS.md": hashlib.sha256(agents_region.encode("utf-8")).hexdigest()}}, indent=2) + "\n")
+    write(d, ".ai-sdlc/profile.json", json.dumps({"schema": 2, "kit_version": "4.0.0"}, indent=2) + "\n")
     os.makedirs(os.path.join(d, "tools"))
     shutil.copy(tool, os.path.join(d, "tools", "semver.py"))
     subprocess.call(["git", "add", "-A"], cwd=d)
@@ -3790,6 +3798,18 @@ def test_semver():
           and '"version": "5.0.0"' in read(d, ".claude-plugin/plugin.json")
           and "## Unreleased\n\n## 5.0.0 — " in changelog and "- refactor(api)!: drop the old flag" in changelog
           and "## 4.0.0 — 2026-10-19" in changelog, changelog[:300])
+    stamped = json.loads(read(d, ".ai-sdlc/manifest.json"))
+    new_agents = read(d, "AGENTS.md")
+    new_region = new_agents[new_agents.find("<!-- ai-sdlc:kit-begin"):
+                            new_agents.find("<!-- ai-sdlc:kit-end -->") + len("<!-- ai-sdlc:kit-end -->")]
+    check("bump restamps the self-install: manifest, profile and the AGENTS.md version line",
+          stamped.get("kit_version") == "5.0.0"
+          and json.loads(read(d, ".ai-sdlc/profile.json")).get("kit_version") == "5.0.0"
+          and "<!-- Nuhut kit v5.0.0. Section 9" in new_agents and stamped.get("files") == {"a": "b"},
+          json.dumps(stamped)[:300])
+    check("bump re-hashes the AGENTS.md managed region, so upgrade does not see a local edit",
+          stamped.get("regions", {}).get("AGENTS.md") == hashlib.sha256(new_region.encode("utf-8")).hexdigest(),
+          stamped.get("regions"))
     subprocess.call(["git", "add", "-A"], cwd=d)
     subprocess.call(git + ["commit", "-qm", "chore(release): v5.0.0 [skip ci]"], cwd=d)
     check("the release commit itself starts no new release", nxt() == "5.0.0", nxt())

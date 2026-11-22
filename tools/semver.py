@@ -9,13 +9,15 @@ script writes (`chore(release): vX.Y.Z`) is never counted.
 
     python3 tools/semver.py next [--json]          the version a merge to main would get
     python3 tools/semver.py next --prerelease      X.Y.Z-dev.N+sha, for a branch build
-    python3 tools/semver.py bump [--dry-run]       write VERSION, plugin.json, CHANGELOG.md
+    python3 tools/semver.py restamp                the self-install's version stamps = VERSION
+    python3 tools/semver.py bump [--dry-run]       write VERSION, plugin.json, CHANGELOG.md, self-install stamps
 
 Standard library only; runs on Python 3.8.
 """
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -141,17 +143,62 @@ def write_release(root, info, today=None):
     changelog = os.path.join(root, "CHANGELOG.md")
     if os.path.isfile(changelog):
         write_changelog(changelog, version, info["subjects"], today)
+    stamp_self_install(root, version)
     return version
+
+
+AGENTS_BEGIN = "<!-- ai-sdlc:kit-begin"
+AGENTS_END = "<!-- ai-sdlc:kit-end -->"
+SELF_INSTALL_FILES = ("AGENTS.md", ".ai-sdlc/manifest.json", ".ai-sdlc/profile.json")
+
+
+def stamp_self_install(root, version):
+    """Restamp the kit installed into its own repository with the new version.
+
+    Only the version stamps change: the manifest and profile kit_version, and the
+    "Nuhut kit vX" line inside the AGENTS.md managed region, whose hash the manifest
+    records (install.py agents_split), so it is recomputed and upgrade sees no edit."""
+    manifest_path = os.path.join(root, ".ai-sdlc", "manifest.json")
+    if not os.path.isfile(manifest_path):
+        return
+    with open(manifest_path, encoding="utf-8") as h:
+        manifest = json.load(h)
+    manifest["kit_version"] = version
+    agents_path = os.path.join(root, "AGENTS.md")
+    if os.path.isfile(agents_path):
+        with open(agents_path, encoding="utf-8") as h:
+            text = h.read()
+        text = re.sub(r"(<!-- Nuhut kit v)[0-9][^. ]*(?:\.[0-9][^. ]*)*(\. )", r"\g<1>%s\g<2>" % version, text, count=1)
+        with open(agents_path, "w", encoding="utf-8") as h:
+            h.write(text)
+        start, end = text.find(AGENTS_BEGIN), text.find(AGENTS_END)
+        if 0 <= start <= end and "AGENTS.md" in (manifest.get("regions") or {}):
+            region = text[start:end + len(AGENTS_END)]
+            manifest["regions"]["AGENTS.md"] = hashlib.sha256(region.encode("utf-8")).hexdigest()
+    with open(manifest_path, "w", encoding="utf-8") as h:
+        h.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    profile_path = os.path.join(root, ".ai-sdlc", "profile.json")
+    if os.path.isfile(profile_path):
+        with open(profile_path, encoding="utf-8") as h:
+            profile = json.load(h)
+        profile["kit_version"] = version
+        with open(profile_path, "w", encoding="utf-8") as h:
+            h.write(json.dumps(profile, indent=2, sort_keys=True) + "\n")
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("command", choices=("next", "bump"))
+    ap.add_argument("command", choices=("next", "bump", "restamp"))
     ap.add_argument("--root", default=ROOT)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--prerelease", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
+    if args.command == "restamp":
+        version = current_version(args.root)
+        stamp_self_install(args.root, version)
+        print(version)
+        return 0
     info = plan(args.root)
     if args.command == "next":
         if args.prerelease:
