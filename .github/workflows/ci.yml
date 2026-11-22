@@ -32,8 +32,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile
-        run: python -m py_compile install.py install_ui.py validate.py tests/smoke.py optional/runtime/*.py tools/semver.py tools/build_view.py tools/demo_project.py benchmarks/lib/scoring.py benchmarks/effort-modes/*.py benchmarks/kit-value/*.py
+        run: python -m py_compile install.py install_ui.py validate.py tests/smoke.py tests/run.py tests/unit/*.py optional/runtime/*.py tools/semver.py tools/build_view.py tools/demo_project.py benchmarks/lib/scoring.py benchmarks/effort-modes/*.py benchmarks/kit-value/*.py
       - name: Validate kit
         run: python validate.py
+      - name: Run unit tests
+        run: python -m unittest discover tests/unit
       - name: Run installer smoke tests
         run: python tests/smoke.py
