@@ -2701,6 +2701,26 @@ def test_scaffolding():
     check("GitLab CI adapter generated",
           code == 0 and "npm run build" in read(d, ".gitlab-ci.yml") and
           "when: manual" in read(d, ".gitlab-ci.yml"))
+    gitlab = read(d, ".gitlab-ci.yml")
+    check("GitLab CI runs ci-check on merge requests with full history",
+          "ci-check" in gitlab and "merge_request_event" in gitlab and "GIT_DEPTH: 0" in gitlab, gitlab)
+    targets = (("bitbucket", "bitbucket-pipelines.yml", "depth: full"),
+               ("gitea", ".gitea/workflows/nuhut.yml", "fetch-depth: 0"),
+               ("generic", "ci/nuhut-check.sh", "--unshallow"))
+    for provider, rel, depth in targets:
+        code, out = run([d, "APP", "-y", "--scaffold-ci", provider])
+        text = read(d, rel)
+        check("--scaffold-ci %s writes %s running doctor and ci-check with full history" % (provider, rel),
+              code == 0 and "sdlc.py doctor --strict" in text and "ci-check" in text
+              and "--head env" in text and depth in text and "{" + "{" not in text, out[-300:] + text)
+    check("the generic script is executable and needs NUHUT_BASE",
+          os.access(os.path.join(d, "ci/nuhut-check.sh"), os.X_OK)
+          and "NUHUT_BASE" in read(d, "ci/nuhut-check.sh"))
+    check("the Gitea workflow is GitHub Actions syntax on pull_request",
+          "  pull_request:" in read(d, ".gitea/workflows/nuhut.yml")
+          and "actions/checkout@v4" in read(d, ".gitea/workflows/nuhut.yml"))
+    code, out = run([d, "APP", "-y", "--scaffold-ci", "azure"])
+    check("an unknown --scaffold-ci provider is refused", code != 0, out[-300:])
     with open(os.path.join(d, ".gitlab-ci.yml"), "a") as fh:
         fh.write("# project-owned marker\n")
     code, out = run([d, "APP", "-y", "--scaffold-ci", "gitlab"])
@@ -5098,7 +5118,7 @@ def test_ci_check():
     quiet = ("AI_SDLC_AGENT", "AI_SDLC_MODEL", "CLAUDECODE", "GEMINI_CLI", "CODEX_SANDBOX",
              "CODEX_HOME", "CURSOR_TRACE_ID", "CURSOR_AGENT", "ANTHROPIC_MODEL",
              "CLAUDE_CODE_MODEL", "GEMINI_MODEL", "OPENAI_MODEL", "CODEX_MODEL",
-             "GITHUB_EVENT_PATH")
+             "GITHUB_EVENT_PATH") + CI_ENV_VARS
 
     def sdlc(*args, **kw):
         env = dict((k, v) for k, v in os.environ.items() if k not in quiet)
@@ -5173,6 +5193,30 @@ def test_ci_check():
           code == 0 and data.get("head") == head and data.get("items") == ["CIC-1"], out)
     code, out = sdlc("ci-check", "--base", "main", "--head", "event")
     check("--head event with no event file is a usage error", code == 2, out)
+    code, out = sdlc("ci-check", "--head", "clean", "--json",
+                     env={"CI_MERGE_REQUEST_TARGET_BRANCH_NAME": "clean"})
+    data = json.loads(out) if out.strip().startswith("{") else {}
+    check("ci-check with no --base takes the GitLab target branch",
+          code == 0 and data.get("base") == "refs/heads/clean" and data.get("commits") == [], out)
+    code, out = sdlc("ci-check", "--head", "clean", env={"NUHUT_BASE": "clean",
+                                                          "CI_MERGE_REQUEST_TARGET_BRANCH_NAME": "nope"})
+    check("NUHUT_BASE wins over the provider's variable", code == 0 and "no commits" in out, out)
+    code, out = sdlc("ci-check", "--head", "clean", env={"BITBUCKET_PR_DESTINATION_BRANCH": "-x"})
+    check("a CI base starting with - is a usage error naming the variable",
+          code == 2 and "BITBUCKET_PR_DESTINATION_BRANCH" in out, out)
+    code, out = sdlc("ci-check", "--base", "main", "--head", "env", "--json",
+                     env={"CI_COMMIT_SHA": head})
+    data = json.loads(out) if out.strip().startswith("{") else {}
+    check("--head env reads CI_COMMIT_SHA", code == 0 and data.get("head") == head, out)
+    code, out = sdlc("ci-check", "--base", "main", "--head", "env", "--json",
+                     env={"GITHUB_EVENT_PATH": event, "BITBUCKET_COMMIT": "f" * 40})
+    data = json.loads(out) if out.strip().startswith("{") else {}
+    check("--head env prefers the GitHub event file to BITBUCKET_COMMIT",
+          code == 0 and data.get("head") == head, out)
+    code, out = sdlc("ci-check", "--base", "main", "--head", "env", "--json")
+    data = json.loads(out) if out.strip().startswith("{") else {}
+    check("--head env with no CI variables judges HEAD",
+          code in (0, 1) and len(data.get("head") or "") == 40, out)
     code, out = sdlc("ci-check", "--base=-x")
     check("a --base starting with - is refused", code == 2 and "not a commit" in out, out)
 
@@ -5302,6 +5346,139 @@ def test_ci_check():
           "branch protection" in workflow and "CODEOWNERS" in workflow, workflow)
     check("a pull request template is written", "Work-Item" in template and "ci-check" in template, template)
     shutil.rmtree(d, ignore_errors=True)
+
+
+CI_ENV_VARS = ("NUHUT_BASE", "NUHUT_HEAD", "GITHUB_BASE_REF", "GITHUB_EVENT_PATH",
+               "CI_MERGE_REQUEST_TARGET_BRANCH_NAME", "CI_COMMIT_SHA",
+               "BITBUCKET_PR_DESTINATION_BRANCH", "BITBUCKET_COMMIT",
+               "SYSTEM_PULLREQUEST_TARGETBRANCH", "CHANGE_TARGET")
+
+
+def test_ci_context():
+    """NUHT-038: one reader of CI context for GitHub, Gitea, GitLab, Bitbucket, Azure and
+    Jenkins; ci-check and trusted_ref use it; doctor says when nothing enforces the checks."""
+    print("CI context: provider-neutral base and head, trusted_ref, doctor enforcement line")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import registry
+    sys.path.pop(0)
+    sha = "a" * 40
+    every = {"NUHUT_BASE": "nb", "GITHUB_BASE_REF": "gh", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME": "gl",
+             "BITBUCKET_PR_DESTINATION_BRANCH": "bb", "SYSTEM_PULLREQUEST_TARGETBRANCH": "refs/heads/az",
+             "CHANGE_TARGET": "jk"}
+    order = ["NUHUT_BASE", "GITHUB_BASE_REF", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
+             "BITBUCKET_PR_DESTINATION_BRANCH", "SYSTEM_PULLREQUEST_TARGETBRANCH", "CHANGE_TARGET"]
+    seen = []
+    for i in range(len(order)):
+        env = dict((k, every[k]) for k in order[i:])
+        seen.append(registry.ci_base(env)[:2])
+    check("ci_base takes NUHUT_BASE, then GitHub/Gitea, GitLab, Bitbucket, Azure, Jenkins",
+          seen == [("nb", "NUHUT_BASE"), ("gh", "GITHUB_BASE_REF"),
+                   ("gl", "CI_MERGE_REQUEST_TARGET_BRANCH_NAME"),
+                   ("bb", "BITBUCKET_PR_DESTINATION_BRANCH"),
+                   ("az", "SYSTEM_PULLREQUEST_TARGETBRANCH"), ("jk", "CHANGE_TARGET")], str(seen))
+    check("an Azure target branch loses its refs/heads/ prefix",
+          registry.ci_base({"SYSTEM_PULLREQUEST_TARGETBRANCH": "refs/heads/release/1.2"})[0] == "release/1.2")
+    check("no CI variables: no base and no error", registry.ci_base({}) == (None, None, None))
+    bad = registry.ci_base({"CI_MERGE_REQUEST_TARGET_BRANCH_NAME": "--upload-pack=x"})
+    check("a base starting with - is refused with the variable named",
+          bad[0] is None and bad[2] and "CI_MERGE_REQUEST_TARGET_BRANCH_NAME" in bad[2], str(bad))
+    check("a base with .. is refused", registry.ci_base({"NUHUT_BASE": "a..b"})[0] is None)
+
+    tmp = tempfile.mkdtemp(prefix="sdlc-cictx-")
+    event = os.path.join(tmp, "event.json")
+    with open(event, "w") as fh:
+        json.dump({"pull_request": {"head": {"sha": "b" * 40}}}, fh)
+    push = os.path.join(tmp, "push.json")
+    with open(push, "w") as fh:
+        json.dump({"ref": "refs/heads/main"}, fh)
+    heads = [registry.ci_head(e)[:2] for e in (
+        {"NUHUT_HEAD": "feature/x", "GITHUB_EVENT_PATH": event, "CI_COMMIT_SHA": sha},
+        {"GITHUB_EVENT_PATH": event, "CI_COMMIT_SHA": sha, "BITBUCKET_COMMIT": "c" * 40},
+        {"GITHUB_EVENT_PATH": push, "CI_COMMIT_SHA": sha},
+        {"BITBUCKET_COMMIT": "c" * 40},
+        {})]
+    check("ci_head takes NUHUT_HEAD, the GitHub event file, CI_COMMIT_SHA, then BITBUCKET_COMMIT",
+          heads == [("feature/x", "NUHUT_HEAD"), ("b" * 40, "GITHUB_EVENT_PATH"),
+                    (sha, "CI_COMMIT_SHA"), ("c" * 40, "BITBUCKET_COMMIT"), (None, None)], str(heads))
+    bad = registry.ci_head({"CI_COMMIT_SHA": "-rf"})
+    check("a head that is not a commit id is refused", bad[0] is None and bad[2], str(bad))
+    bad = registry.ci_head({"NUHUT_HEAD": "-x"})
+    check("a NUHUT_HEAD starting with - is refused", bad[0] is None and bad[2], str(bad))
+
+    # trusted_ref: no origin/HEAD, the branch names itself Default branch, GitLab names the target.
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false",
+           "-c", "core.hooksPath=/dev/null"]
+    repo = os.path.join(tmp, "repo")
+    subprocess.call(["git", "init", "-q", "-b", "trunk", repo])
+    charter = "| **Default branch** | %s |\n"
+    write(repo, ".ai-sdlc/profile.json", json.dumps({"docs_dir": "docs"}))
+    write(repo, "docs/project/charter.md", charter % "trunk")
+    subprocess.call(git + ["add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "seed"], cwd=repo)
+    subprocess.call(git + ["checkout", "-qb", "evil"], cwd=repo)
+    write(repo, "docs/project/charter.md", charter % "evil")
+    subprocess.call(git + ["commit", "-qam", "evil"], cwd=repo)
+    saved = dict((k, os.environ.pop(k)) for k in CI_ENV_VARS if k in os.environ)
+    try:
+        alone = registry.trusted_ref(repo)
+        os.environ["CI_MERGE_REQUEST_TARGET_BRANCH_NAME"] = "trunk"
+        gitlab = registry.trusted_ref(repo)
+    finally:
+        for k in CI_ENV_VARS:
+            os.environ.pop(k, None)
+        os.environ.update(saved)
+    check("trusted_ref follows CI_MERGE_REQUEST_TARGET_BRANCH_NAME over the branch's own charter",
+          alone == "refs/heads/evil" and gitlab == "refs/heads/trunk", "%s %s" % (alone, gitlab))
+
+    # doctor: advisory with no remote or no CI file the kit knows; CI (<provider>) otherwise.
+    d = os.path.join(tmp, "doc")
+    subprocess.call(["git", "init", "-q", "-b", "main", d])
+    run([d, "ENF", "-y"])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def doctor(*args):
+        env = dict((k, v) for k, v in person_env().items() if k not in CI_ENV_VARS)
+        return subprocess.run([sys.executable, script, "doctor"] + list(args), cwd=d, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              universal_newlines=True).stdout
+
+    def enforcement():
+        out = doctor("--json")
+        try:
+            items = json.loads(out)
+        except ValueError:
+            items = []
+        return [i for i in items if i.get("check") == "enforcement"], out
+
+    found, out = enforcement()
+    check("doctor with no remote says enforcement: advisory, as a warning",
+          len(found) == 1 and found[0]["level"] == "warn"
+          and found[0]["message"].startswith("enforcement: advisory")
+          and "remote" in found[0]["message"], out[-800:])
+    out = doctor("--strict")
+    check("the advisory line does not fail doctor --strict",
+          "enforcement: advisory" in out and not any(
+              ln.startswith("fail") and "enforcement" in ln for ln in out.splitlines()), out[-800:])
+    subprocess.call(["git", "remote", "add", "origin", "https://example.invalid/r.git"], cwd=d)
+    found, out = enforcement()
+    check("a remote but no CI file is still advisory",
+          len(found) == 1 and found[0]["message"].startswith("enforcement: advisory")
+          and "CI" in found[0]["message"], out[-800:])
+    write(d, ".gitlab-ci.yml", "records:\n  script:\n    - python3 .ai-sdlc/bin/sdlc.py doctor --strict\n")
+    found, out = enforcement()
+    check("a remote and a GitLab file that runs sdlc.py: enforcement: CI (GitLab), as info",
+          len(found) == 1 and found[0]["level"] == "info"
+          and found[0]["message"].startswith("enforcement: CI (GitLab)"), out[-800:])
+    os.remove(os.path.join(d, ".gitlab-ci.yml"))
+    write(d, "bitbucket-pipelines.yml", "image: python:3\n")
+    found, out = enforcement()
+    check("a CI file that never runs sdlc.py does not count", len(found) == 1
+          and found[0]["message"].startswith("enforcement: advisory"), out[-800:])
+    write(d, "ci/nuhut-check.sh", "#!/bin/sh\npython3 .ai-sdlc/bin/sdlc.py ci-check --head env\n")
+    found, out = enforcement()
+    check("the generic script counts as CI (generic script)", len(found) == 1
+          and found[0]["message"].startswith("enforcement: CI (generic script)"), out[-800:])
+    shutil.rmtree(tmp, ignore_errors=True)
 
 
 def test_shards_and_parallel_worktrees():
@@ -8743,7 +8920,7 @@ def main():
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_git_hooks, test_shell_write_guards,
-                 test_runtime, test_view, test_view_remote, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_ci_check, test_kit_value_benchmark, test_kit_value_checks,
+                 test_runtime, test_view, test_view_remote, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_ci_check, test_ci_context, test_kit_value_benchmark, test_kit_value_checks,
                  test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
                  test_domain_detection,

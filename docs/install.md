@@ -165,7 +165,7 @@ to install the docs under a different directory, `--harness <list>`, `--profile
 <full|compact>`, `--effort-mode <lean|normal|beast>`, `--dev-method <item|epic>`,
 `--decision-style <ask|guide|autopilot>`, `--specs <on|off>`, `--slop-filter <off|on|strict>`, `--acquisition-profile <standard|advanced>`,
 `--hooks`, `--git-hooks [all|secrets]`, `--mcp`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
-`--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`,
+`--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab|bitbucket|gitea|generic>`, `--deploy <list>`,
 `--plain`, `--sections <list>`, `--upgrade`, `--repair` and `--uninstall`.
 
 **Living specs.** The Process section asks *Keep living specs of what the system does?*
@@ -240,16 +240,32 @@ Two explicit flags turn detection into project-owned starting files:
 ./install.sh /path/to/project ACME -y --scaffold-tests
 ./install.sh /path/to/project ACME -y --scaffold-ci github
 ./install.sh /path/to/project ACME -y --scaffold-ci gitlab
+./install.sh /path/to/project ACME -y --scaffold-ci bitbucket
+./install.sh /path/to/project ACME -y --scaffold-ci gitea
+./install.sh /path/to/project ACME -y --scaffold-ci generic
 ```
 
 `--scaffold-tests` creates `docs/project/test-plan.md` and
 `.ai-sdlc/testing-profile.json`, both marked as detected and requiring confirmation.
-`--scaffold-ci` creates `.github/workflows/quality.yml` or `.gitlab-ci.yml` from the
-project's detected/confirmed commands. With none, it still writes the `doctor --strict`
+`--scaffold-ci` creates one CI file from the project's detected/confirmed commands:
+
+| Provider | File | What runs |
+| --- | --- | --- |
+| `github` | `.github/workflows/quality.yml` | on `pull_request`: doctor, the base branch's `ci-check`, the commands |
+| `gitea` | `.gitea/workflows/nuhut.yml` | the same workflow (Gitea and Forgejo Actions run GitHub Actions syntax), with `ci-check --head env` |
+| `gitlab` | `.gitlab-ci.yml` | a `records` job on merge requests (`GIT_DEPTH: 0`): doctor and the target branch's `ci-check`; a manual-only `quality` job with the commands |
+| `bitbucket` | `bitbucket-pipelines.yml` | on pull requests (`clone: depth: full`): doctor, the destination branch's `ci-check`, the commands |
+| `generic` | `ci/nuhut-check.sh` | an executable shell script for any other CI (Azure Pipelines, Jenkins, Buildkite, ...): it unshallows the clone, fetches `origin/$NUHUT_BASE`, runs doctor and the target branch's `ci-check --head env`. Set `NUHUT_BASE` to the target branch, and `NUHUT_HEAD` when the checkout is not the change's last commit |
+
+Every `ci-check` step takes the checker from the target branch's `.ai-sdlc/bin` (it
+warns and runs the change's own copy when the target has none) and reads the target
+branch and head commit from the CI's own variables; see `ci-check` in
+[cli.md](cli.md). `doctor` reports `enforcement: advisory` until one of these files, or
+another CI file the kit recognises, runs `sdlc.py`. With none, it still writes the `doctor --strict`
 and `ci-check` steps and a TODO naming `sdlc.py config --set-check`. Scaffolding never
 overwrites an existing file, never installs a dependency, and leaves runtime and service
-version confirmation to the project charter. The GitLab job is manual-only until a
-human confirms the commands and makes it automatic.
+version confirmation to the project charter. The GitLab `quality` job is manual-only
+until a human confirms the commands and makes it automatic.
 
 The GitHub workflow runs on `pull_request` (never `pull_request_target`, so a fork gets
 no secrets and a read-only token) and on `workflow_dispatch`. It checks out the full
