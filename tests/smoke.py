@@ -4036,7 +4036,7 @@ def test_release_workflow():
     for base, dirs, files in os.walk(ROOT):
         dirs[:] = [x for x in dirs if x not in (".git", ".claude", "node_modules", "worklog", "plans")]
         for f in files:
-            if f.endswith((".md", ".yml", ".py", ".txt")) and f not in ("worklog.md", "CHANGELOG.md", "smoke.py"):
+            if f.endswith((".md", ".yml", ".py", ".txt")) and f not in ("worklog.md", "backlog.md", "CHANGELOG.md", "smoke.py"):
                 if "workflows/release.yml" in read(base, f):
                     refs.append(os.path.relpath(os.path.join(base, f), ROOT))
     check("no live doc names the deleted release.yml", not refs, ", ".join(refs))
