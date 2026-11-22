@@ -8003,6 +8003,137 @@ def test_issue_sync():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_mcp_server():
+    print("MCP server: JSON-RPC over stdio, read-only tools, verify only when allowed")
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-mcp-"))
+    subprocess.call(["git", "init", "-q", d])
+    write(d, ".mcp.json", json.dumps({"mcpServers": {"other": {"command": "other-server"}}}))
+    code, out = run([d, "MCT", "-y", "--mcp"])
+    check("install --mcp exits 0", code == 0, out[-400:])
+    try:
+        cfg = json.loads(read(d, ".mcp.json") or "{}")
+    except ValueError:
+        cfg = {}
+    servers = cfg.get("mcpServers", {})
+    check("--mcp merges into an existing .mcp.json, keeping other servers",
+          servers.get("other") == {"command": "other-server"} and "nuhut" in servers, str(cfg))
+    args = (servers.get("nuhut") or {}).get("args", [])
+    check("the entry starts sdlc.py mcp, without --allow-verify",
+          "mcp" in args and "--allow-verify" not in args, str(args))
+    check("the installer says how to enable verify", "--allow-verify" in out, out[-400:])
+    if "nuhut" in servers:
+        servers["nuhut"]["args"] = list(args) + ["--custom"]
+        write(d, ".mcp.json", json.dumps(cfg))
+        code, out = run([d, "MCT", "-y", "--mcp"])
+        check("re-running --mcp never overwrites an existing nuhut entry",
+              "--custom" in json.loads(read(d, ".mcp.json"))["mcpServers"]["nuhut"]["args"],
+              read(d, ".mcp.json"))
+    e = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-mcp-bad-"))
+    write(e, ".mcp.json", "{not json")
+    code, out = run([e, "MCT", "-y", "--mcp"])
+    check("an unreadable .mcp.json is left alone and named",
+          read(e, ".mcp.json") == "{not json" and ".mcp.json" in out, out[-300:])
+    shutil.rmtree(e, ignore_errors=True)
+    code, out = run([os.path.realpath(tempfile.mkdtemp(prefix="sdlc-nomcp-")), "MCT", "-y"])
+    check("without --mcp no .mcp.json is written", ".mcp.json" not in out, out[-300:])
+
+    sdlc = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    check("mcp_server.py is installed with the runtime",
+          os.path.isfile(os.path.join(d, ".ai-sdlc", "bin", "mcp_server.py")))
+    subprocess.call([sys.executable, sdlc, "item", "add", "--title", "MCP probe item"], cwd=d,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    worklog_before = read(d, "docs/project/worklog.md")
+
+    def session(lines, *extra):
+        p = subprocess.Popen([sys.executable, sdlc, "mcp"] + list(extra), cwd=d,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out_b, err_b = p.communicate(("\n".join(lines) + "\n").encode("utf-8"), timeout=240)
+        parsed, bad = {}, []
+        for ln in out_b.decode("utf-8", "replace").splitlines():
+            try:
+                msg = json.loads(ln)
+                parsed[msg.get("id")] = msg
+            except (ValueError, AttributeError):
+                bad.append(ln)
+        return p.returncode, parsed, bad, err_b.decode("utf-8", "replace")
+
+    def call(i, name, arguments=None):
+        return json.dumps({"jsonrpc": "2.0", "id": i, "method": "tools/call",
+                           "params": {"name": name, "arguments": arguments or {}}})
+
+    def text_of(msg):
+        res = (msg or {}).get("result") or {}
+        return "".join(c.get("text", "") for c in res.get("content", []))
+
+    def is_error(msg):
+        msg = msg or {}
+        return "error" in msg or (msg.get("result") or {}).get("isError") is True
+
+    lines = [
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                               "clientInfo": {"name": "smoke", "version": "0"}}}),
+        json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        call(3, "item_list"),
+        call(4, "item_show", {"id": "MCT-001"}),
+        call(5, "item_show", {"id": "../../etc/passwd"}),
+        call(6, "doctor"),
+        call(7, "finish_status", {"id": "MCT-001"}),
+        call(8, "status"),
+        call(9, "verify", {"id": "MCT-001"}),
+        call(10, "finish", {"id": "MCT-001"}),
+        "{this is not json",
+        json.dumps({"jsonrpc": "2.0", "id": 11, "method": "no/such"}),
+        call(12, "item_show", {"id": "MCT-1 --json"}),
+        call(13, "item_show", {"id": "--root=/"}),
+    ]
+    code, got, bad, err = session(lines)
+    check("every stdout line is JSON", not bad and len(got) >= 14,
+          "bad=%r got=%r err=%s" % (bad[:3], sorted(got, key=str), err[-300:]))
+    init = (got.get(1) or {}).get("result") or {}
+    check("initialize answers the protocol version and a tools capability",
+          init.get("protocolVersion") == "2025-06-18" and "tools" in init.get("capabilities", {}), str(init))
+    names = sorted(t.get("name") for t in ((got.get(2) or {}).get("result") or {}).get("tools", []))
+    check("tools/list is read-only by default",
+          names == ["doctor", "finish_status", "item_list", "item_show", "status"], str(names))
+    check("item_list returns the items", "MCT-001" in text_of(got.get(3)), str(got.get(3))[:300])
+    check("item_show returns one item", "MCP probe item" in text_of(got.get(4)), str(got.get(4))[:300])
+    check("a malformed id is refused before use",
+          is_error(got.get(5)) and is_error(got.get(12)) and is_error(got.get(13)),
+          str([got.get(5), got.get(12), got.get(13)])[:400])
+    check("doctor runs", text_of(got.get(6)).strip() != "" and not is_error(got.get(6)), str(got.get(6))[:300])
+    check("finish_status says what is owed", "MCT-001" in text_of(got.get(7)), str(got.get(7))[:300])
+    check("status summarises the board", "MCT-001" in text_of(got.get(8)) or "Ready" in text_of(got.get(8)),
+          str(got.get(8))[:300])
+    check("verify is not callable without --allow-verify", "error" in (got.get(9) or {}), str(got.get(9))[:300])
+    check("finish is never exposed", "error" in (got.get(10) or {}), str(got.get(10))[:300])
+    check("bad JSON is a parse error", (got.get(None) or {}).get("error", {}).get("code") == -32700,
+          str(got.get(None)))
+    check("an unknown method is -32601", (got.get(11) or {}).get("error", {}).get("code") == -32601,
+          str(got.get(11)))
+    check("a read-only session writes no worklog", read(d, "docs/project/worklog.md") == worklog_before, "")
+
+    code, got, bad, err = session([lines[0], lines[2], call(3, "verify", {"id": "MCT-001"})], "--allow-verify")
+    names = [t.get("name") for t in ((got.get(2) or {}).get("result") or {}).get("tools", [])]
+    check("--allow-verify adds verify and nothing that writes records",
+          "verify" in names and not set(names) & {"finish", "waive", "unclaim", "release", "ext"}, str(names))
+    check("verify returns a result", "result" in (got.get(3) or {}) and not bad, str(got.get(3))[:300])
+
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    try:
+        import mcp_server
+        clean = mcp_server.clean_output("a\x1b[31mred\x1b[0m\x07b\x00" + "x" * 200000)
+        check("output is capped at 64 KB", len(clean.encode("utf-8")) <= 64 * 1024, str(len(clean)))
+        check("control characters are stripped",
+              not re.search(r"[\x00-\x08\x0b-\x1f\x7f]", clean) and clean.startswith("aredb"), clean[:20])
+    except ImportError as exc:
+        check("mcp_server imports", False, str(exc))
+    finally:
+        sys.path.pop(0)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -8035,7 +8166,8 @@ def main():
                  test_github_approvals,
                  test_dora_metrics,
                  test_webhook_notify,
-                 test_issue_sync):
+                 test_issue_sync,
+                 test_mcp_server):
         test()
     print("")
     if failures:

@@ -75,7 +75,7 @@ RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
                  "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py",
                  "registry.py", "status.py", "skillgen.py", "ext.py", "net.py", "releases.py",
-                 "notify.py")
+                 "notify.py", "mcp_server.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -640,6 +640,7 @@ Which AI tools read it
 Enforcement  (off unless asked for)
   --hooks                Claude Code hooks that refuse unsafe commits and edits
   --git-hooks [secrets]  git hooks every agent and human inherits
+  --mcp                  register the read-only MCP server in .mcp.json (Claude Code)
 
 What gets installed
   --deploy <list>        platform checklists, e.g. vercel,cloudflare-edge (or none)
@@ -721,7 +722,12 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      core.hooksPath directory gets a one-line call appended, never
                      replaced. With pre-commit.com or lefthook the entry to add is
                      printed instead. Never implied by another flag.
-  --preset <name>    solo, team or regulated: sets effort mode, decision style,
+  --mcp              register the kit's MCP server (`sdlc.py mcp`) as "nuhut" in
+                     .mcp.json, which Claude Code reads. Merged into an existing file;
+                     an existing "nuhut" entry or an unreadable file is left alone. The
+                     tools are read-only; the verify tool needs --allow-verify added to
+                     the entry's args by hand.
+  --preset <name>   solo, team or regulated: sets effort mode, decision style,
                      development method and tier rules together (solo: lean, guide,
                      item, standard; team: normal, guide, item, standard; regulated:
                      normal, ask, item, strict). Any of those flags given as well wins.
@@ -843,6 +849,7 @@ class Options(object):
         self.decision_given = False
         self.acquisition_given = False
         self.hooks = False
+        self.mcp = False            # --mcp: register the MCP server in .mcp.json
         self.finish_guard = None   # None: on for a fresh Claude Code install, off on upgrade
         self.preset = ""
         self.tier_rules = "standard"
@@ -986,6 +993,8 @@ def parse_args(argv):
             i += 1
         elif arg == "--hooks":
             o.hooks = True
+        elif arg == "--mcp":
+            o.mcp = True
         elif arg == "--git-hooks":
             o.git_hooks = "all"
             if i + 1 < len(argv) and argv[i + 1] in ("all", "secrets"):
@@ -2374,6 +2383,8 @@ def equivalent_command(w):
         parts.append("--hooks")
     if o.git_hooks:
         parts += ["--git-hooks"] + (["secrets"] if o.git_hooks == "secrets" else [])
+    if o.mcp:
+        parts.append("--mcp")
     if o.gitignore_tools:
         parts.append("--gitignore-tools")
     if o.git_exclude:
@@ -3949,6 +3960,42 @@ class Installer(object):
         ("commit-msg", 'sh .ai-sdlc/git-hooks/commit-msg "$1"'),
     )
 
+    def install_mcp(self):
+        """--mcp: register `sdlc.py mcp` as the "nuhut" server in .mcp.json. The file is the
+        project's, shared with other servers: the entry is merged in, an existing "nuhut"
+        entry is never replaced, and a file that is not a JSON object is left alone."""
+        if not self.o.mcp:
+            return
+        dest = ensure_inside(self.target, self.target / ".mcp.json")
+        entry = {"command": "python3", "args": [RUNTIME_REL, "mcp"]}
+        how = ('                 verify is off: to let the agent run the checks, add '
+               '"--allow-verify" to the nuhut entry\'s args')
+        data = {}
+        if dest.exists():
+            try:
+                data = json.loads(dest.read_text(encoding="utf-8") or "{}")
+            except (ValueError, UnicodeDecodeError):
+                data = None
+            if not isinstance(data, dict) or not isinstance(data.get("mcpServers", {}), dict):
+                print("  note           .mcp.json is not a JSON object with mcpServers; left "
+                      "alone. Add the nuhut server by hand:")
+                print('                 "nuhut": %s' % json.dumps(entry))
+                print(how)
+                return
+            if "nuhut" in data.get("mcpServers", {}):
+                self.skipped += 1
+                print("  skip (exists)  .mcp.json (nuhut server)")
+                return
+        verb = "merge" if dest.exists() else "add"
+        if self.o.dry_run:
+            print("  would %-7s .mcp.json (nuhut server)" % verb)
+            return
+        data.setdefault("mcpServers", {})["nuhut"] = entry
+        atomic_write_text(dest, json.dumps(data, indent=2) + "\n")
+        self.added += 1
+        print("  %-14s .mcp.json (nuhut server: read-only tools)" % verb)
+        print(how)
+
     def install_git_hooks(self):
         """Harness-independent guards git itself runs. The scripts are kit-managed under
         .ai-sdlc/git-hooks/; the project's own hook mechanism gets one line that calls
@@ -5523,6 +5570,7 @@ def main(argv):
             inst.scaffold()
             inst.install_hooks()
             inst.install_git_hooks()
+            inst.install_mcp()
             inst.apply_git_ignores()
             inst.apply_git_attributes()
             inst.record_manifest()

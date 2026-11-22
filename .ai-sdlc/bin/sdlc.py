@@ -4693,6 +4693,7 @@ Work items and agents
   sync                behind the remote or the default branch? conflicts? next command  sync --fetch
   review <ID>         one role's review of the diff, by another model family          review ACME-12 --role security --by codex
   log                 draft worklog lines from commits and verify runs                log --since main --write
+  mcp                 the records as read-only MCP tools over stdio                   mcp --allow-verify
 
 Releases and deploys
   deploy record       write releases/<version>.json and a deploys.jsonl line          deploy record --version 1.4.0 --env prod
@@ -4783,6 +4784,8 @@ EXAMPLES = {
     "parallel": ["parallel", "parallel --json"],
     "dispatch": ["dispatch --dry-run", "dispatch --workers 2 --by claude",
                  "dispatch --workers 3 --by codex --reviewer claude --pr"],
+    "mcp": ["mcp                      # read-only tools: item_list, item_show, doctor, finish_status, status",
+            "mcp --allow-verify       # also the verify tool, which writes evidence"],
 }
 
 
@@ -5752,6 +5755,12 @@ class Command(object):
         self.needs_project = needs_project
 
 
+def _cmd_mcp(project, opts, parser):
+    return runtime_module("mcp_server").serve(
+        project.root, os.path.abspath(__file__), allow_verify=opts.allow_verify,
+        version=str(project.manifest.get("kit_version") or ""))
+
+
 COMMANDS = {}
 _VERB_DEST = "_verb"
 _COMMAND_NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
@@ -5803,7 +5812,7 @@ for _name, _handler in (
         ("log", _cmd_log), ("trailers", _cmd_trailers), ("review", _cmd_review),
         ("bite", _cmd_bite), ("plan-check", _cmd_plan_check), ("ext", _cmd_ext),
         ("ci-check", _cmd_ci_check), ("config", _cmd_config), ("verify", _cmd_verify),
-        ("fix", _cmd_fix)):
+        ("fix", _cmd_fix), ("mcp", _cmd_mcp)):
     register_command(_name, _handler, core=True)
 del _name, _handler
 register_command("merge-shard", _cmd_merge_shard, core=True).needs_project = False
@@ -6253,6 +6262,11 @@ def build_parser():
     au.add_argument("--timeout", type=int, default=600, help="seconds before the scanner is stopped")
     au.add_argument("--strict", action="store_true", help="exit 1 on a critical or high vulnerability")
     au.add_argument("--json", action="store_true", help="print the stored result as JSON")
+    mc = sub.add_parser("mcp", help="serve the records as read-only MCP tools over stdio "
+                                    "(JSON-RPC 2.0), for Claude Code and other MCP clients")
+    mc.add_argument("--allow-verify", dest="allow_verify", action="store_true",
+                    help="also offer the verify tool, which runs the charter's checks and "
+                    "writes evidence")
     for name, sp_ in sub.choices.items():
         if name in EXAMPLES:
             sp_.formatter_class = argparse.RawDescriptionHelpFormatter
