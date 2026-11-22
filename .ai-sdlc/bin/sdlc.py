@@ -1070,7 +1070,7 @@ def check_bite_leftover(project, out):
                 "`sdlc.py bite --restore`")
 
 
-DOCTOR_CACHE_VERSION = 3
+DOCTOR_CACHE_VERSION = 4
 
 
 def _doctor_input_digest(project, today):
@@ -1180,6 +1180,7 @@ def doctor(project, today=None, use_cache=True):
         check_responses(project, out)
         check_verified_claims(project, out)
         check_attribution(project, out)
+        check_people(project, out)
         check_placeholders(project, out)
         check_pointer(project, out)
         check_harness_parity(project, out)
@@ -1689,26 +1690,46 @@ def person_key(name):
     return re.sub(r"[`@]", "", str(name or "")).strip().lower()
 
 
-def people(project):
-    """{handle: set of lowercase names it answers to} from <docs>/project/people.json
-    (NUHT-023), read from the default branch. {} when there is no registry. Accepts
-    {"people": [...]}, a list of {"handle", "name", "aliases", "git_names", "emails"},
-    or {handle: {...}}."""
-    text, _ = trusted_text(project, os.path.join(project.docs, "project", "people.json"))
+PEOPLE_REL = os.path.join("project", "people.json")
+
+
+def people_entries(project):
+    """{handle: {"handle", "name", "roles", "github", ...}} from <docs>/project/people.json
+    (NUHT-023), read from the default branch (`trusted_text`). {} when there is no
+    registry or it lists nobody. Accepts {"people": [...]}, a bare list, or
+    {handle: {...}}."""
+    cache = getattr(project, "_build_cache", None)
+    if cache is not None and "people" in cache:
+        return cache["people"]
+    text, _ = trusted_text(project, os.path.join(project.docs, PEOPLE_REL))
     try:
         data = json.loads(text) if (text or "").strip() else None
     except ValueError:
-        return {}
+        data = None
     if isinstance(data, dict) and isinstance(data.get("people"), list):
         data = data["people"]
     if isinstance(data, dict):
         data = [dict(v, handle=k) if isinstance(v, dict) else {"handle": k}
-                for k, v in data.items()]
+                for k, v in data.items() if k not in ("note", "people")]
     found = {}
     for entry in data if isinstance(data, list) else []:
-        if not isinstance(entry, dict) or not str(entry.get("handle") or "").strip():
+        if not isinstance(entry, dict) or not person_key(entry.get("handle")):
             continue
-        handle = person_key(entry["handle"])
+        roles_v = entry.get("roles")
+        found[person_key(entry["handle"])] = dict(
+            entry, handle=person_key(entry["handle"]), name=str(entry.get("name") or ""),
+            roles=[str(r) for r in roles_v] if isinstance(roles_v, list) else [],
+            github=person_key(entry.get("github")))
+    if cache is not None:
+        cache["people"] = found
+    return found
+
+
+def people(project):
+    """{handle: set of lowercase names it answers to}: the handle, name, github login and
+    any aliases, git_names, emails or names. {} when there is no registry."""
+    found = {}
+    for handle, entry in people_entries(project).items():
         names = set([handle])
         for key in ("name", "git_name", "email", "github"):
             if entry.get(key):
@@ -1718,6 +1739,80 @@ def people(project):
                 names.update(person_key(v) for v in entry[key] if v)
         found[handle] = names
     return found
+
+
+def handle_for_github(project, login):
+    """The people.json handle whose `github` field is <login> (case and a leading @
+    ignored), or None. Only the github field counts: a display name is not a login."""
+    key = person_key(login)
+    if not key:
+        return None
+    for handle, entry in people_entries(project).items():
+        if entry.get("github") == key:
+            return handle
+    return None
+
+
+def role_slugs(project):
+    """Role slugs an Owner cell may hold: the role playbooks, the charter's Active roles,
+    and software-engineer (the default owner, which has no playbook)."""
+    slugs = set(["software-engineer"])
+    folder = project.path(os.path.join(project.docs, "roles"))
+    try:
+        slugs.update(n[:-3] for n in os.listdir(folder) if n.endswith(".md") and n != "README.md")
+    except OSError:
+        pass
+    slugs.update(name for name, _, _ in roles(project.charter or ""))
+    return slugs
+
+
+def resolve_owner(project, value):
+    """(owner to store, error). A role slug stays as written; with a people.json registry
+    a person is stored as their handle and anything else is refused. Without a registry
+    the value is kept: there is nothing to check it against."""
+    value = (value or "").strip()
+    if not value or value in role_slugs(project):
+        return value, None
+    registry = people(project)
+    if not registry:
+        return value, None
+    handle = resolve_person(registry, value)
+    if handle:
+        return handle, None
+    return None, ("%r is neither a role nor a handle in %s/%s; use a role slug (e.g. "
+                  "software-engineer) or add the person to people.json"
+                  % (value, project.docs, PEOPLE_REL.replace(os.sep, "/")))
+
+
+PERSON_WARNING = ("no person identity: set NUHUT_USER=<handle> or map git user.name in "
+                  "project/people.json")
+_person_warned = []
+
+
+def person_identity(project, read_only=False, warn=True):
+    """{"person", "raw", "source", "warning"} for the human behind this command.
+    NUHUT_USER is taken as written when there is no registry (it is a deliberate
+    statement) and must resolve when there is one; git user.name counts only when
+    people.json maps it. Anything else gives person None, never a guess. The warning goes
+    to stderr at most once per process, and not at all under CI=true for a read-only
+    command; warn=False leaves printing to the caller (a --json result)."""
+    registry = people(project)
+    raw = (os.environ.get("NUHUT_USER") or "").strip()
+    source = "NUHUT_USER" if raw else ""
+    if not raw:
+        raw = project.git("config", "user.name").strip()
+        source = "git user.name" if raw else ""
+    person = None
+    if raw and registry:
+        person = resolve_person(registry, raw)
+    elif raw and source == "NUHUT_USER":
+        person = person_key(raw) or None
+    warning = None if person else PERSON_WARNING
+    quiet = read_only and (os.environ.get("CI") or "").strip().lower() == "true"
+    if warning and warn and not quiet and not _person_warned:
+        _person_warned.append(True)
+        sys.stderr.write("warning: %s\n" % warning)
+    return {"person": person, "raw": raw, "source": source, "warning": warning}
 
 
 def resolve_person(registry, name):
@@ -2518,6 +2613,48 @@ def check_verified_claims(project, out):
                     "this item's commits. Only verify makes a result Verified")
 
 
+def check_people(project, out):
+    """With a people.json registry: open items whose owner is neither a role nor a
+    handle (one line per owner), and how many claims record no person (one line)."""
+    registry = people(project)
+    rel = os.path.join(project.docs, PEOPLE_REL)
+    if registry:
+        slugs = role_slugs(project)
+        stray = {}
+        try:
+            merged = _shards_mod.merged_items(project)
+        except Exception:
+            merged = {}
+        for iid in sorted(merged, key=id_sort_key):
+            it = merged[iid]
+            owner = str(it.get("owner") or "").strip()
+            if not owner or it.get("status") in ("Done", "Dropped") or owner in slugs:
+                continue
+            if person_key(owner) in registry:
+                continue
+            stray.setdefault(owner, []).append(iid)
+        for owner, ids in sorted(stray.items()):
+            out.add("warn", "people", rel,
+                    "owner %r on %s is neither a role nor a handle in people.json"
+                    % (owner, ", ".join(ids[:8]) + (" ..." if len(ids) > 8 else "")),
+                    fix="%s item set <ID> --owner <handle or role>, or add the person to %s"
+                        % (SDLC, rel), who="owner")
+    try:
+        held = runtime_module("claims").list_claims(project)
+    except Exception:
+        held = []
+    missing = [c for c in held if not c.get("person")]
+    if missing:
+        out.add("warn" if registry else "info", "people", "claims",
+                "%d claim%s record%s no person (%s)" % (
+                    len(missing), "" if len(missing) == 1 else "s",
+                    "s" if len(missing) == 1 else "",
+                    ", ".join(c.get("id", "?") for c in missing[:8])
+                    + (" ..." if len(missing) > 8 else "")),
+                fix="Claim with NUHUT_USER=<handle> set, or map git user.name in %s; "
+                    "re-claim to record the person" % rel, who="owner")
+
+
 def check_attribution(project, out):
     """Since 6.0 only a Work-Item trailer attributes a commit. Items that commit messages
     mention but no trailer names lost their commits; approver names that people.json
@@ -2537,12 +2674,19 @@ def check_attribution(project, out):
     if registry:
         names, source = approver_names(project)
         for name in names:
-            if resolve_person(registry, name) is None:
+            handle = resolve_person(registry, name)
+            if handle is None:
                 out.add("warn", "approvers", "%s Approvers" % project.charter_path,
                         "%r is not a handle in people.json (read from %s), so it cannot "
                         "waive verify" % (name, source),
                         fix="Use the person's people.json handle in the Approvers row, or "
                             "add them to people.json", who="owner")
+            elif person_key(name) != handle:
+                out.add("warn", "approvers", "%s Approvers" % project.charter_path,
+                        "%r is a name, not a handle; write %s, the people.json handle it "
+                        "resolves to (read from %s)" % (name, handle, source),
+                        fix="Replace %r with %s in the Approvers row" % (name, handle),
+                        who="owner")
 
 
 def budgets(project):
@@ -4728,7 +4872,7 @@ def main(argv):
     it_p.add_argument("--tier", choices=("1", "2", "3"), help="risk tier (1, 2, or 3)")
     it_p.add_argument("--effort", choices=("Lean", "Normal", "Beast", "lean", "normal", "beast", ""),
                       help="per-item effort override")
-    it_p.add_argument("--owner", help="owner role slug, e.g. software-engineer")
+    it_p.add_argument("--owner", help="owner: a role slug (e.g. software-engineer) or a people.json handle")
     it_p.add_argument("--status", help="status, e.g. Ready, In progress, Parked, Done")
     it_p.add_argument("--depends", help="comma-separated dependency IDs")
     it_p.add_argument("--touch", help="comma-separated file or glob patterns for parallel scheduling")
@@ -5048,6 +5192,11 @@ def main(argv):
             if not opts.title:
                 sys.stderr.write("item add: --title is required\n")
                 return 2
+            if opts.owner:
+                opts.owner, err_o = resolve_owner(project, opts.owner)
+                if err_o:
+                    sys.stderr.write("item add: --owner %s\n" % err_o)
+                    return 2
             item_id = opts.target
             if not item_id:
                 claims_mod = runtime_module("claims")
@@ -5150,7 +5299,11 @@ def main(argv):
             if opts.effort is not None:
                 updated["effort"] = opts.effort
             if opts.owner is not None:
-                updated["owner"] = opts.owner
+                owner_v, err_o = resolve_owner(project, opts.owner)
+                if err_o:
+                    sys.stderr.write("item set: --owner %s\n" % err_o)
+                    return 2
+                updated["owner"] = owner_v
             if opts.status is not None:
                 updated["status"] = opts.status
             if opts.depends is not None:
@@ -5216,18 +5369,31 @@ def main(argv):
         claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
         if opts.command == "claim":
             agent = opts.agent or identity(None, None, project)[0]
+            # Never a silent stand-in: an unknown agent or person is recorded as such and
+            # said out loud (on stderr, or inside the --json result).
+            notes = []
+            if agent == "unknown":
+                notes.append("no agent identity: pass --agent <name> or set AI_SDLC_AGENT")
+                if not opts.json:
+                    sys.stderr.write("warning: %s\n" % notes[-1])
+            who = person_identity(project, warn=not opts.json)
+            if who["warning"]:
+                notes.append(who["warning"])
             record, error = claims_mod.claim(
                 project, view_mod, opts.item, agent, opts.worktree,
                 opts.no_worktree, opts.mark, opts.base,
                 sync_refs=getattr(opts, "sync_refs", False),
+                person=who["person"],
             )
             if error:
                 sys.stderr.write("claim: %s\n" % error)
                 return 1
             if opts.json:
-                print(json.dumps(record, indent=2))
+                print(json.dumps(dict(record, warnings=notes) if notes else record, indent=2))
             else:
-                print("claimed %s for %s on branch %s" % (record["id"], record["agent"], record["branch"]))
+                print("claimed %s for %s (%s) on branch %s" % (
+                    record["id"], record["agent"], record.get("person") or "unknown person",
+                    record["branch"]))
                 if record["worktree"]:
                     print("worktree: %s\n  cd %s" % (record["worktree"], record["worktree"]))
                 print("release it when the item is Done, Parked or Deferred: "
@@ -5255,8 +5421,9 @@ def main(argv):
             elif not held:
                 print("no active claims")
             for c in [] if opts.json else held:
-                print("%-10s %-16s %-36s since %s  last commit %s" % (c["id"], c.get("agent", "?"), c.get("branch", ""),
-                                                                    c.get("since", "")[:10], c.get("last_commit", "")[:10] or "none"))
+                print("%-10s %-16s %-16s %-36s since %s  last commit %s" % (
+                    c["id"], c.get("agent", "?"), c.get("person") or "unknown person", c.get("branch", ""),
+                    c.get("since", "")[:10], c.get("last_commit", "")[:10] or "none"))
             return 0
         result = claims_mod.parallel(
             project, sys.modules[__name__], view_mod,

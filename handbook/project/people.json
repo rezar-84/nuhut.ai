@@ -1,0 +1,4 @@
+{
+  "note": "The people who own work, claim items and approve here. Each entry: handle (what Owner, Approvers and NUHUT_USER use), name (the git user.name it answers to), roles (role slugs), github (login). Only a human edits this file; the runtime reads it from the default branch. See project/charter.md, Approvers.",
+  "people": []
+}

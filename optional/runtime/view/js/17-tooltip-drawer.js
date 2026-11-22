@@ -9,7 +9,7 @@
       var chips = el("div", { cls: "tt-chips" });
       chips.appendChild(colChip(it.column));
       if (it.tier) chips.appendChild(el("span", { cls: "chip", text: "Tier " + it.tier }));
-      if (it.owner) chips.appendChild(el("span", { cls: "chip", text: it.owner }));
+      if (it.owner) chips.appendChild(el("span", { cls: "chip", text: personLabel(it.owner) }));
       ttEl.appendChild(chips);
       var metaLines = [];
       if (n.blocked) {
@@ -298,7 +298,7 @@
     chips.appendChild(colChip(it.column));
     if (it.status && it.status !== it.column) chips.appendChild(el("span", { cls: "chip", text: it.status }));
     if (it.tier) chips.appendChild(el("span", { cls: "chip", text: "Tier " + it.tier }));
-    if (it.owner) chips.appendChild(el("span", { cls: "chip", text: it.owner }));
+    if (it.owner) chips.appendChild(el("span", { cls: "chip", text: personLabel(it.owner) }));
     body.appendChild(chips);
 
     var steps = el("div", { cls: "steps", style: "margin-bottom: 12px;", title: "Lifecycle progress" });
@@ -485,7 +485,7 @@
       tabContent.textContent = "";
       if (dTab === "overview") {
         var t = el("table");
-        [["Task", it.title], ["Tier", it.tier], ["Owner role", it.owner], ["Depends on", it.depends_text],
+        [["Task", it.title], ["Tier", it.tier], ["Owner", personLabel(it.owner)], ["Depends on", it.depends_text],
          ["Status", it.status], ["Backlog section", it.section]].concat(Object.keys(it.extra || {}).map(function (k) { return [k, it.extra[k]]; }))
           .forEach(function (r) { if (r[1]) t.appendChild(el("tr", null, [el("th", { text: r[0] }), el("td", null, [inline(r[1])])])); });
         tabContent.appendChild(t);

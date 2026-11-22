@@ -602,6 +602,13 @@ def _build_inner(rt, project):
         model["claims"], model["parallel"] = [], {"groups": [], "conflicts": [], "plan_first": [], "candidates": [],
                                                   "error": str(exc)}
     try:
+        # people.json (default branch): a claim's person and a handle owner show by name.
+        model["people"] = dict((h, {"name": e.get("name", ""), "github": e.get("github", ""),
+                                    "roles": e.get("roles", [])})
+                               for h, e in rt.people_entries(project).items())
+    except Exception:
+        model["people"] = {}
+    try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import shards as shards_mod
         import dispatch as dispatch_mod

@@ -748,6 +748,14 @@
     var x = (it && it.extra) || {};
     return (it && it.owner) || x.Owner || x["Owner role"] || x["Owner Role"] || "";
   }
+  // A people.json handle as shown: "Name (handle)" when the registry names it. An owner
+  // that is a role slug, or not in the registry, shows as written.
+  function personLabel(handle) {
+    var p = handle && M && M.people && M.people[handle];
+    return p && p.name ? p.name + " (" + handle + ")" : (handle || "");
+  }
+  // The human on a claim; a claim made without one records null and says so.
+  function claimPerson(c) { return c && c.person ? personLabel(c.person) : "unknown person"; }
   function h(level, text) { return el("h" + level, { text: text }); }
 
   // Inline markdown: code, bold, links, and work item IDs. Text nodes only.
@@ -2084,7 +2092,7 @@
     held.slice(0, 4).forEach(function (c) {
       var open = function () { openItemDrawer(c.id); };
       var row = el("div", { cls: "sum-row", role: "listitem" }, [claimChip(c), el("strong", { text: c.id }), el("span", { cls: "muted sum-txt", text: c.branch })]);
-      row.addEventListener("click", open); makeInteractive(row, open, c.id + " claimed by " + c.agent);
+      row.addEventListener("click", open); makeInteractive(row, open, c.id + " claimed by " + claimPerson(c) + " via " + c.agent);
       parRows.appendChild(row);
     });
     if (par.groups && par.groups.length) parRows.appendChild(el("p", { style: "font-size: 12.5px; margin: 8px 0 0;" },
@@ -2480,8 +2488,9 @@
   function claimOf(id) { return (M.claims || []).filter(function (c) { return c.id === id; })[0] || null; }
   function claimChip(c, long) {
     var days = c.since ? Math.max(0, Math.floor((Date.now() - Date.parse(c.since)) / 86400000)) : null;
-    return el("span", { cls: "claim-chip", title: "Claimed by " + c.agent + (c.since ? " on " + c.since.slice(0, 10) : "") + (c.worktree ? " · worktree " + c.worktree : "") + " · branch " + c.branch,
-      text: (long ? "claimed by " : "") + c.agent + (days !== null ? " · " + days + "d" : "") });
+    var who = claimPerson(c);
+    return el("span", { cls: "claim-chip", title: "Claimed by " + who + " via " + c.agent + (c.since ? " on " + c.since.slice(0, 10) : "") + (c.worktree ? " · worktree " + c.worktree : "") + " · branch " + c.branch,
+      text: (long ? "claimed by " : "") + (c.person || "unknown person") + " · " + c.agent + (days !== null ? " · " + days + "d" : "") });
   }
   function viewDashParallel() {
     tab("dashboard");
@@ -2908,7 +2917,7 @@
       var chips = el("div", { cls: "tt-chips" });
       chips.appendChild(colChip(it.column));
       if (it.tier) chips.appendChild(el("span", { cls: "chip", text: "Tier " + it.tier }));
-      if (it.owner) chips.appendChild(el("span", { cls: "chip", text: it.owner }));
+      if (it.owner) chips.appendChild(el("span", { cls: "chip", text: personLabel(it.owner) }));
       ttEl.appendChild(chips);
       var metaLines = [];
       if (n.blocked) {
@@ -3197,7 +3206,7 @@
     chips.appendChild(colChip(it.column));
     if (it.status && it.status !== it.column) chips.appendChild(el("span", { cls: "chip", text: it.status }));
     if (it.tier) chips.appendChild(el("span", { cls: "chip", text: "Tier " + it.tier }));
-    if (it.owner) chips.appendChild(el("span", { cls: "chip", text: it.owner }));
+    if (it.owner) chips.appendChild(el("span", { cls: "chip", text: personLabel(it.owner) }));
     body.appendChild(chips);
 
     var steps = el("div", { cls: "steps", style: "margin-bottom: 12px;", title: "Lifecycle progress" });
@@ -3384,7 +3393,7 @@
       tabContent.textContent = "";
       if (dTab === "overview") {
         var t = el("table");
-        [["Task", it.title], ["Tier", it.tier], ["Owner role", it.owner], ["Depends on", it.depends_text],
+        [["Task", it.title], ["Tier", it.tier], ["Owner", personLabel(it.owner)], ["Depends on", it.depends_text],
          ["Status", it.status], ["Backlog section", it.section]].concat(Object.keys(it.extra || {}).map(function (k) { return [k, it.extra[k]]; }))
           .forEach(function (r) { if (r[1]) t.appendChild(el("tr", null, [el("th", { text: r[0] }), el("td", null, [inline(r[1])])])); });
         tabContent.appendChild(t);

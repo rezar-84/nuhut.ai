@@ -224,8 +224,9 @@
   function claimOf(id) { return (M.claims || []).filter(function (c) { return c.id === id; })[0] || null; }
   function claimChip(c, long) {
     var days = c.since ? Math.max(0, Math.floor((Date.now() - Date.parse(c.since)) / 86400000)) : null;
-    return el("span", { cls: "claim-chip", title: "Claimed by " + c.agent + (c.since ? " on " + c.since.slice(0, 10) : "") + (c.worktree ? " · worktree " + c.worktree : "") + " · branch " + c.branch,
-      text: (long ? "claimed by " : "") + c.agent + (days !== null ? " · " + days + "d" : "") });
+    var who = claimPerson(c);
+    return el("span", { cls: "claim-chip", title: "Claimed by " + who + " via " + c.agent + (c.since ? " on " + c.since.slice(0, 10) : "") + (c.worktree ? " · worktree " + c.worktree : "") + " · branch " + c.branch,
+      text: (long ? "claimed by " : "") + (c.person || "unknown person") + " · " + c.agent + (days !== null ? " · " + days + "d" : "") });
   }
   function viewDashParallel() {
     tab("dashboard");
