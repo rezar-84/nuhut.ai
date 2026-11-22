@@ -11,7 +11,7 @@ Grouped the way `sdlc.py --help` groups them:
 | --- | --- |
 | Records and checks | `doctor`, `verify`, `finish`, `bite`, `plan-check`, `render` |
 | Viewer and reports | `view`, `lens`, `audit`, `metrics` |
-| Work items and agents | `item`, `next-id`, `claim`, `release`, `claims`, `parallel`, `trailers`, `sync`, `review`, `log`, `guard` |
+| Work items and agents | `item`, `next-id`, `claim`, `release`, `claims`, `parallel`, `trailers`, `sync`, `review`, `log`, `guard`, `mcp` |
 | Specs | `spec` |
 | Writing | `slop` |
 | Setup | `config`, `fix` |
@@ -38,6 +38,7 @@ was refused, `2` a usage error.
 | **`release <ID>`** / **`claims`** | `--agent`, `--force`, `--remove-worktree`, `--sync-refs`, `--json` | Frees a claimed item (verifying `agent`, which defaults to your trailer identity, and `host` unless `--force`), or lists active local and remote claims. With `--sync-refs` ownership is checked against the remote lease and the ref is deleted with `--force-with-lease`; a stale local record is dropped and the remote lease left alone. |
 | **`parallel`** | `--sync-refs`, `--json` | Groups unclaimed Ready items with finished dependencies so no two in a group touch overlapping files (from item `touch` globs, plan *Files that change*, or spec deltas; Tier 1 items still require a written plan). |
 | **`dispatch`** | `--workers N`, `--by claude\|codex\|gemini\|cmd:<cmd>`, `--model`, `--reviewer`, `--max-items`, `--tier`, `--max-retries`, `--pr`, `--no-merge`, `--sync-refs`, `--dry-run`, `--json` | Executes conflict-free waves of Ready items across isolated git worktrees using a headless builder CLI, runs `verify` (with bounded repair retries), optional independent `review`, and single-shot `finish`, merges completed Tier 2/3 branches (or opens PRs with `--pr`), and writes telemetry to `.ai-sdlc/dispatch/`. |
+| **`mcp`** | `--allow-verify` | Serves the records to Claude Code and other MCP clients: JSON-RPC 2.0 over stdio, one message per line (`initialize`, `tools/list`, `tools/call`, `ping`). The tools are read-only: `item_list` (optional `status`, `tier`), `item_show`, `doctor`, `finish_status` (what `finish --dry-run` says is owed) and `status` (counts by status, open items, claims, `sync`). `verify` (runs `verify --item <ID>` and returns its summary) is offered only with `--allow-verify`, because it writes evidence. `finish`, waivers, `release` and extension commands are never exposed.<br>An `id` must match `^[A-Z][A-Z0-9]*-[0-9]+$` before it is used; each tool runs `sdlc.py` with a fixed argument list and no shell. Tool output is capped at 64 KB with control characters stripped. Only JSON-RPC goes to stdout; diagnostics go to stderr. `install.sh <dir> --mcp` registers it in `.mcp.json`. |
 | **`audit`** | `--strict`, `--timeout`, `--json` | Runs the charter's `scan` stage in its JSON form (npm/pnpm/yarn audit, pip-audit, osv-scanner, cargo audit, govulncheck). It keeps the vulnerable packages under `.ai-sdlc/evidence/<stamp>-audit/` for the lens. The kit fetches nothing itself. |
 | **`metrics`** | `--json` | Calculates quantitative project health metrics: work-in-progress (WIP), verification pass rate, cycle time, lead time, time waiting on humans, lifecycle record gaps, and usage against the charter's optional agent budget per tier. |
 | **`log`** | `--since <ref>`, `--id <ID>`, `--write` | Drafts worklog lines, one per work item, from the commits since `<ref>` (IDs from subjects or `Work-Item` trailers) and the verify runs recorded on them. `--id` drafts one item's line, from just before its first commit unless `--since` says otherwise. `--write` inserts them under the worklog's marker, newest first, skipping items the worklog already names. Records become byproducts, not essays. |
@@ -85,6 +86,7 @@ and `--explain <topic>` explains a concept. The ones you will use most:
 | `--specs on\|off` | Living specs of what the system does (default off) |
 | `--slop-filter off\|on\|strict` | Hold prose to a no-AI-tells standard (default off); with `--upgrade`, turns it on for an existing install |
 | `--hooks`, `--git-hooks [secrets]` | Enforcement: tool-call guards, and commit guards every tool and person inherits |
+| `--mcp` | Register `sdlc.py mcp` as the `nuhut` server in `.mcp.json`, merged into an existing file and never replacing an existing `nuhut` entry. Read-only tools; add `--allow-verify` to its `args` to offer `verify` |
 | `--deploy <list>` | Deploy platform checklists |
 | `--profile compact` | Shorter documents for small models |
 | `--dry-run` | List what would be written |

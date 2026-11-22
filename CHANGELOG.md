@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **`sdlc.py mcp` serves the records as MCP tools over stdio (NUHT-031).** A stdlib JSON-RPC 2.0 server (`optional/runtime/mcp_server.py`) answers `initialize`, `tools/list` and `tools/call` with read-only tools: `item_list`, `item_show`, `doctor`, `finish_status` (what `finish --dry-run` says is owed) and `status`. `verify` is offered only with `--allow-verify`; `finish`, waivers, `release` and extension commands are never exposed. Item IDs are checked against `^[A-Z][A-Z0-9]*-[0-9]+$` before use, tool output is capped at 64 KB with control characters stripped, and stdout carries only JSON-RPC. `install.sh <dir> --mcp` merges a `nuhut` entry into `.mcp.json` for Claude Code without `--allow-verify`, never replaces an existing entry, leaves an unreadable file alone, and prints how to turn verify on.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.

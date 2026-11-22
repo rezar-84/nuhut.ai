@@ -164,7 +164,7 @@ in this mode — without a terminal there is nobody to ask. Other flags: `--docs
 to install the docs under a different directory, `--harness <list>`, `--profile
 <full|compact>`, `--effort-mode <lean|normal|beast>`, `--dev-method <item|epic>`,
 `--decision-style <ask|guide|autopilot>`, `--specs <on|off>`, `--slop-filter <off|on|strict>`, `--acquisition-profile <standard|advanced>`,
-`--hooks`, `--git-hooks [all|secrets]`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
+`--hooks`, `--git-hooks [all|secrets]`, `--mcp`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
 `--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`,
 `--plain`, `--sections <list>`, `--upgrade`, `--repair` and `--uninstall`.
 

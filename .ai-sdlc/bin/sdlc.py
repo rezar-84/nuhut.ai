@@ -3697,6 +3697,7 @@ Work items and agents
   sync                behind the remote or the default branch? conflicts? next command  sync --fetch
   review <ID>         one role's review of the diff, by another model family          review ACME-12 --role security --by codex
   log                 draft worklog lines from commits and verify runs                log --since main --write
+  mcp                 the records as read-only MCP tools over stdio                   mcp --allow-verify
 
 Specs (when the charter's Specs row is on)
   spec                list, show, validate, apply <ID> [--write]                       spec apply ACME-12 --write
@@ -3759,6 +3760,8 @@ EXAMPLES = {
     "parallel": ["parallel", "parallel --json"],
     "dispatch": ["dispatch --dry-run", "dispatch --workers 2 --by claude",
                  "dispatch --workers 3 --by codex --reviewer claude --pr"],
+    "mcp": ["mcp                      # read-only tools: item_list, item_show, doctor, finish_status, status",
+            "mcp --allow-verify       # also the verify tool, which writes evidence"],
 }
 
 
@@ -4042,6 +4045,11 @@ def main(argv):
     au.add_argument("--timeout", type=int, default=600, help="seconds before the scanner is stopped")
     au.add_argument("--strict", action="store_true", help="exit 1 on a critical or high vulnerability")
     au.add_argument("--json", action="store_true", help="print the stored result as JSON")
+    mc = sub.add_parser("mcp", help="serve the records as read-only MCP tools over stdio "
+                                    "(JSON-RPC 2.0), for Claude Code and other MCP clients")
+    mc.add_argument("--allow-verify", dest="allow_verify", action="store_true",
+                    help="also offer the verify tool, which runs the charter's checks and "
+                    "writes evidence")
     for name, sp_ in sub.choices.items():
         if name in EXAMPLES:
             sp_.formatter_class = argparse.RawDescriptionHelpFormatter
@@ -4051,6 +4059,10 @@ def main(argv):
         parser.print_help()
         return 2
     project = Project(opts.root or default_root())
+    if opts.command == "mcp":
+        return runtime_module("mcp_server").serve(
+            project.root, os.path.abspath(__file__), allow_verify=opts.allow_verify,
+            version=str(project.manifest.get("kit_version") or ""))
     if opts.command == "doctor":
         items = doctor(project, use_cache=not getattr(opts, "no_cache", False))
         if opts.baseline:
