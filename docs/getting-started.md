@@ -47,6 +47,9 @@ cd /path/to/your-project
 python3 .ai-sdlc/bin/sdlc.py doctor
 ```
 
+Joining a project that already has the kit? Follow [the joining checklist](joining.md)
+instead, then run `python3 .ai-sdlc/bin/sdlc.py status`.
+
 A fresh install reports warnings, not failures, mostly blank charter rows. Open
 `docs/project/charter.md` and fill in what you know: what the project is, who it is for,
 and the check commands (`checks.unit`, `checks.lint` …) if detection missed any. A blank

@@ -120,6 +120,9 @@ python3 .ai-sdlc/bin/sdlc.py claim ACME-12   # atomic claim, its branch, its own
 python3 .ai-sdlc/bin/sdlc.py parallel        # which Ready items can run side by side
 ```
 
+Joining a project someone else set up? [The joining checklist](docs/joining.md) ends
+with `sdlc.py status`, which says what to do next on your branch.
+
 Claims are shared by every worktree, so a second agent is refused. `parallel` groups
 Ready items whose plans touch different files, and treats migrations, lockfiles and the
 charter as single-writer. [Multi-agent work](docs/multi-agent.md).
@@ -153,6 +156,7 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 
 | | |
 | --- | --- |
+| **Start here** | `status` what to do next: missing setup, your items and the step each owes, Parked on you, Ready to take |
 | **Records and checks** | `doctor` audit the records · `verify` run the checks, keep the evidence · `bite` prove a test catches the change · `plan-check` diff vs plan (`--pre` before the build) · `finish` close an item: evidence, review, worklog draft, status · `render` materialise `backlog.md` and `worklog.md` from shards |
 | **Viewer and reports** | `view` the project as one page (`--serve` live) · `lens` stack, build, security, deploy, env, agents · `audit` vulnerable packages · `metrics` process measures |
 | **Work items and agents** | `item` per-item shards · `next-id` atomic ID allocation · `claim` / `release` / `claims` · `parallel` · `dispatch` headless multi-worker queue execution · `trailers` commit trailers · `sync` behind the remote? conflicts? · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |

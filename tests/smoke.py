@@ -3469,6 +3469,113 @@ def test_claims():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_status():
+    print("status: setup gaps first, then the next step for your items, Ready and Parked")
+    d = tempfile.mkdtemp(prefix="sdlc-status-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", repo])
+    code, out = run([repo, "STX", "-y"])
+    check("installs", code == 0, out[-300:])
+    backlog = read(repo, "docs/project/backlog.md")
+
+    def add_rows(text, heading, rows):
+        at = text.index(heading)
+        sep = text.index("| --- ", at)
+        end = text.index("\n", sep) + 1
+        return text[:end] + rows + text[end:]
+    backlog = add_rows(backlog, "## Now", "| STX-1 | Login form | 2 | software-engineer |  | In progress |\n")
+    backlog = add_rows(backlog, "## Next",
+                       "| STX-2 | Billing page | 2 | software-engineer |  | Ready |\n"
+                       "| STX-4 | Auth rewrite | 1 | security |  | Ready |\n"
+                       "| STX-5 | Needs STX-1 | 2 | software-engineer | STX-1 | Ready |\n")
+    backlog = add_rows(backlog, "## Parked",
+                       "| STX-3 | Pricing copy | 2 | copywriter |  | Parked | alice, bob | merge approval (Tier 2) | 2026-11-01 |\n"
+                       "| STX-6 | Other approval | 2 | copywriter |  | Parked | carol | merge approval (Tier 2) | 2026-11-01 |\n")
+    write(repo, "docs/project/backlog.md", backlog)
+    write(repo, "docs/project/plans/STX-2.md", "# STX-2\n\n## Files that change\n\n- `src/billing.py`\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore: backlog"], cwd=repo)
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+    bindir = os.path.join(d, "bin")
+    os.makedirs(bindir)
+    os.symlink(shutil.which("git"), os.path.join(bindir, "git"))
+    base_env = dict(os.environ, PATH=bindir, NUHUT_USER="alice")
+
+    def sdlc(*args, **env):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, env=dict(base_env, **env), timeout=120)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+
+    code, out = sdlc("-h")
+    check("the main help lists status first, under Start here",
+          re.search(r"Start here\n\s+status\b", out) is not None
+          and out.index("status") < out.index("doctor"), out[:600])
+    code, out = sdlc("claim", "STX-1", "--no-worktree", "--agent", "agent-a")
+    check("claims STX-1 for the test", code == 0, out)
+    subprocess.call(["git", "checkout", "-q", "feat/STX-1-login-form"], cwd=repo)
+    code, out = sdlc("status", "--json")
+    try:
+        st = json.loads(out)
+    except ValueError:
+        st = {}
+    check("status --json reads", code == 0 and isinstance(st, dict) and st.get("branch") == "feat/STX-1-login-form",
+          out[:600])
+    mine = dict((i.get("id"), i) for i in st.get("items", []))
+    check("a claimed item with no commit owes its build", mine.get("STX-1", {}).get("next") == "build",
+          json.dumps(st.get("items"))[:400])
+    ready = [r.get("id") for r in st.get("ready", [])]
+    check("Ready items you can take are listed, and not those with open dependencies",
+          "STX-2" in ready and "STX-5" not in ready and "STX-1" not in ready, str(ready))
+    check("a Tier 1 Ready item with no plan is offered as plan first",
+          "STX-4" in [r.get("id") for r in st.get("plan_first", [])], json.dumps(st.get("plan_first")))
+    parked = [r.get("id") for r in st.get("parked", [])]
+    check("items Parked on you are listed and others' are not", parked == ["STX-3"], str(parked))
+    check("the doctor finding count is reported", isinstance(st.get("doctor", {}).get("fail"), int)
+          and isinstance(st.get("doctor", {}).get("warn"), int), json.dumps(st.get("doctor")))
+    setup = dict((s.get("check"), s) for s in st.get("setup", []))
+    check("gh missing is reported when Tier 1 items exist",
+          "gh" in setup and "gh" in setup["gh"].get("fix", ""), json.dumps(st.get("setup")))
+    check("no people.json: identity is not reported", "identity" not in setup, json.dumps(st.get("setup")))
+    check("no custom merge driver declared: nothing reported", "merge-driver" not in setup)
+    write(repo, "src/login.py", "def login():\n    return True\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "feat(STX-1): login form"], cwd=repo)
+    code, out = sdlc("status", "--json")
+    st = json.loads(out) if code == 0 else {}
+    mine = dict((i.get("id"), i) for i in st.get("items", []))
+    check("after a commit the next owed step is verify", mine.get("STX-1", {}).get("next") == "verify",
+          json.dumps(st.get("items"))[:400])
+    # setup gaps: an unmapped identity, an unconfigured merge driver, an unauthenticated gh
+    write(repo, "docs/project/people.json", json.dumps({"people": [{"handle": "bob", "name": "Bob B"}]}))
+    write(repo, ".gitattributes", "docs/project/items/*.json merge=nuhut-shard\n*.png binary\n")
+    write(bindir, "gh", "#!/bin/sh\nexit 1\n")
+    os.chmod(os.path.join(bindir, "gh"), 0o755)
+    code, out = sdlc("status")
+    first = out.split("Your items")[0]
+    check("text status opens with the missing setup and its fixes",
+          "merge driver" in first and "fix merge-driver" in first and "people.json" in first
+          and "gh auth login" in first, out[:900])
+    check("text status shows the claimed item's next step", re.search(r"STX-1.*verify", out) is not None, out)
+    check("text status names the Parked item and the doctor count",
+          "STX-3" in out and "STX-6" not in out and re.search(r"doctor", out, re.I) is not None, out)
+    write(repo, "docs/project/people.json", json.dumps({"people": [{"handle": "alice", "name": "Alice A"}]}))
+    subprocess.call(["git", "config", "merge.nuhut-shard.driver", "true %O %A %B"], cwd=repo)
+    write(bindir, "gh", "#!/bin/sh\nexit 0\n")
+    code, out = sdlc("status", "--json")
+    st = json.loads(out) if code == 0 else {}
+    check("setup gaps clear once fixed", st.get("setup") == [], json.dumps(st.get("setup")))
+    check("identity resolves to the people.json handle", st.get("user", {}).get("handle") == "alice",
+          json.dumps(st.get("user")))
+    code, out = sdlc("status", NUHUT_USER="Alice A")
+    check("a people.json name maps too, and Parked matches by handle", code == 0 and "STX-3" in out
+          and "people.json" not in out, out)
+    code, out = sdlc("next", "--json")
+    check("there is no next alias", code != 0, out[:200])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_specs():
     print("living specs: validate, apply, import, doctor")
     d = tempfile.mkdtemp(prefix="sdlc-specs-")
@@ -5275,7 +5382,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_release_workflow, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
+                 test_epics, test_decision_and_stack, test_semver, test_release_workflow, test_lens, test_claims, test_status, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
                  test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
                  test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
                  test_installer_python_floor_and_finish_errors,
