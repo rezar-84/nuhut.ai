@@ -160,9 +160,31 @@ charter's **Agent budget per tier**.
 | Cursor | `CURSOR_TRACE_ID` or `CURSOR_AGENT` → `cursor` | not exposed; the agent writes it |
 | Any other, or a human | `AI_SDLC_AGENT` | `AI_SDLC_MODEL`, or `human` |
 
-Where the script prints `unknown`, replace it with what you know. Never guess a model:
-`unknown` is an honest value, and the doctor treats an unknown author as unjudgeable,
-not as independent.
+When no agent is detected, the script prints `Agent: human` and no `Model` line: a
+person committing by hand writes exactly that, and needs no Model. Where it prints
+`Model: unknown`, replace it with what you know. Never guess a model. `unknown` is an
+honest value locally, and the doctor treats an unknown author as unjudgeable, not as
+independent, but `sdlc.py ci-check` fails a pull request whose commits say `unknown`:
+set `AI_SDLC_AGENT` (and `AI_SDLC_MODEL`), or use `Agent: human`.
+
+`sdlc.py ci-check` judges a pull request's commits, merge commits included: each needs
+`Work-Item` and either `Agent` and `Model` or `Agent: human`. Commits by the bots
+`dependabot[bot]` and `github-actions[bot]` are exempt from this trailer rule only; the
+paths they change still meet the tier floor below.
+
+### The tier floor in CI
+
+`ci-check` also fails a commit whose changed paths are Tier 1 while its item is Tier 2
+or 3. The Tier 1 paths are the backticked globs in the charter's **Always Tier 1 here**
+row, read from the base branch so a pull request cannot weaken the row it is judged by.
+With no glob there, `auth/`, `migrations/` and `infra/` at any depth count. The kit's own
+enforcement surfaces always count: `.ai-sdlc/**` (not its generated state or
+`test-lock.txt`), `.github/workflows/**` and `handbook/project/people.json`. The
+charter counts only when a security-bearing row changes (Approvers, Always Tier 1 here,
+Extensions allowed, Notify webhook, Tier rules, Independent review required for). A pull
+request that lowers an item's tier below the base branch's backlog fails too. It also
+fails an item with no committed full verify record on its newest code commit (the rule
+`finish` applies) and a Tier 1 item with no review file.
 
 ## Approvals
 

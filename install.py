@@ -3572,7 +3572,8 @@ class Installer(object):
             candidates.extend((self.target / self.docs / "project" / "test-plan.md",
                                self.target / ".ai-sdlc" / "testing-profile.json"))
         if self.o.scaffold_ci == "github":
-            candidates.append(self.target / ".github" / "workflows" / "quality.yml")
+            candidates.extend((self.target / ".github" / "workflows" / "quality.yml",
+                               self.target / ".github" / "pull_request_template.md"))
         elif self.o.scaffold_ci == "gitlab":
             candidates.append(self.target / ".gitlab-ci.yml")
         if self.o.scaffold_ci and not [key for key in self.selected_commands()
@@ -4207,17 +4208,41 @@ class Installer(object):
         ordered = [(key, commands[key]) for _, _, key in CMD_FIELDS
                    if key not in ("run",) and key in commands]
         if provider == "github":
-            lines = ["name: Project quality", "", "on:", "  workflow_dispatch:",
+            # Never pull_request_target: a fork's PR gets no secrets and a read-only token.
+            # The PR's range is judged by the base branch's ci-check, read from the
+            # environment and the event file, so this text needs no GitHub expression.
+            lines = ["name: Project quality", "", "on:", "  pull_request:", "  workflow_dispatch:",
                      "", "permissions:", "  contents: read", "",
                      "jobs:", "  quality:", "    runs-on: ubuntu-latest", "    steps:",
                      "      - uses: actions/checkout@v4",
+                     "        with:",
+                     "          fetch-depth: 0",
                      "      - name: SDLC records",
-                     "        run: python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
+                     "        run: python3 .ai-sdlc/bin/sdlc.py doctor --strict",
+                     "      - name: PR records",
+                     "        if: github.event_name == 'pull_request'",
+                     "        run: |",
+                     '          mkdir -p "$RUNNER_TEMP/base"',
+                     '          if git archive "origin/$GITHUB_BASE_REF" .ai-sdlc/bin | tar -x -C "$RUNNER_TEMP/base" \\',
+                     '              && [ -f "$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py" ]; then',
+                     '            checker="$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py"',
+                     "          else",
+                     '            echo "::warning::origin/$GITHUB_BASE_REF has no .ai-sdlc/bin/sdlc.py; '
+                     'running this PR\'s own ci-check"',
+                     '            checker=".ai-sdlc/bin/sdlc.py"',
+                     "          fi",
+                     '          python3 "$checker" --root "$GITHUB_WORKSPACE" ci-check --base "origin/$GITHUB_BASE_REF" \\',
+                     '            --head event --charter-ref "origin/$GITHUB_BASE_REF"']
             for key, command in ordered:
                 lines.extend(("      - name: %s" % key.replace("_", " ").title(),
                               "        run: %s" % json.dumps(command)))
-            lines.extend(("", "# Manual-only by default. Confirm commands, runtime, and service versions",
-                          "# from the charter before adding push or pull_request triggers.", ""))
+            lines.extend(("",
+                          "# Runs on every pull request. Confirm the commands above, and the runtime and",
+                          "# service versions, against the charter: a wrong command fails every PR or",
+                          "# passes one it should not. ci-check binds only when branch protection on the",
+                          "# default branch requires the `quality` status and CODEOWNERS assigns",
+                          "# .github/workflows/** and .ai-sdlc/** to the people who approve Tier 1 work;",
+                          "# without both, a PR can edit or skip this job.", ""))
             return "\n".join(lines)
         lines = ["stages:", "  - quality", "", "quality:", "  stage: quality",
                  "  when: manual", "  script:",
@@ -4228,6 +4253,26 @@ class Installer(object):
                       "# from the charter before making this job automatic or required.", ""))
         return "\n".join(lines)
 
+    def pr_template_text(self):
+        """.github/pull_request_template.md: what ci-check judges, asked up front."""
+        docs = self.docs
+        return "\n".join((
+            "## Work item", "",
+            "Work-Item: <ID>",
+            "Tier: <1, 2 or 3>",
+            "Plan: <%s/project/plans/<ID>.md, or none at Tier 3>" % docs, "",
+            "## Evidence", "",
+            "- Verify run: <run name from `python3 .ai-sdlc/bin/sdlc.py verify --item <ID>`, "
+            "ledger committed>",
+            "- Review file: <%s/project/reviews/<ID>-<role>.md; required at Tier 1>" % docs, "",
+            "## Checklist", "",
+            "- [ ] Every commit ends with Work-Item, Agent and Model trailers "
+            "(`python3 .ai-sdlc/bin/sdlc.py trailers <ID>`), or `Agent: human`",
+            "- [ ] The verify run is on the last code commit and its ledger rows are committed",
+            "- [ ] The tier is not lower than the paths this PR changes imply (the charter's "
+            "Always Tier 1 here row)",
+            "- [ ] `python3 .ai-sdlc/bin/sdlc.py ci-check --base <default branch>` passes", ""))
+
     def scaffold(self):
         if self.o.scaffold_tests:
             self.scaffold_test_plan()
@@ -4235,6 +4280,9 @@ class Installer(object):
             dest = (self.target / ".github" / "workflows" / "quality.yml"
                     if self.o.scaffold_ci == "github" else self.target / ".gitlab-ci.yml")
             self.install_text(dest, self.ci_text(self.o.scaffold_ci))
+            if self.o.scaffold_ci == "github":
+                self.install_text(self.target / ".github" / "pull_request_template.md",
+                                  self.pr_template_text())
 
     # -- the answers -----------------------------------------------------------
     def tailor(self):

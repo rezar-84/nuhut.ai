@@ -2496,7 +2496,7 @@ def test_scaffolding():
     check("charter ticks generated test plan", "☑ test-plan" in read(d, "docs/project/charter.md"))
     check("GitHub CI uses detected commands",
           "actions/checkout@v4" in workflow and "npm run build" in workflow and
-          "workflow_dispatch" in workflow and "  pull_request:" not in workflow)
+          "workflow_dispatch" in workflow and "  pull_request:" in workflow)
     check("GitHub CI runs the doctor strictly before the quality commands",
           workflow.index("sdlc.py doctor --strict") < workflow.index("npm run build"), workflow)
     code, out = run([d, "APP", "-y", "--scaffold-ci", "gitlab"])
@@ -4659,6 +4659,220 @@ def test_finish_evidence_binding():
           "Approvers row is blank" not in out, out[-800:])
 
 
+def test_ci_check():
+    print("ci-check: a PR range needs trailers, a ledger record, a Tier 1 review and its tier floor")
+    d = tempfile.mkdtemp(prefix="sdlc-cic-")
+    subprocess.call(["git", "init", "-q", "-b", "main", d])
+    run([d, "CIC", "-y"])
+    for key, value in (("user.name", "tester"), ("user.email", "t@t"), ("commit.gpgsign", "false")):
+        subprocess.call(["git", "config", key, value], cwd=d)
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    quiet = ("AI_SDLC_AGENT", "AI_SDLC_MODEL", "CLAUDECODE", "GEMINI_CLI", "CODEX_SANDBOX",
+             "CODEX_HOME", "CURSOR_TRACE_ID", "CURSOR_AGENT", "ANTHROPIC_MODEL",
+             "CLAUDE_CODE_MODEL", "GEMINI_MODEL", "OPENAI_MODEL", "CODEX_MODEL",
+             "GITHUB_EVENT_PATH")
+
+    def sdlc(*args, **kw):
+        env = dict((k, v) for k, v in os.environ.items() if k not in quiet)
+        env.update(kw.get("env") or {})
+        p = subprocess.Popen([sys.executable, script] + list(args), cwd=d, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        o, _ = p.communicate()
+        return p.returncode, o.decode("utf-8", "replace")
+
+    def git(*args, **kw):
+        env = dict(os.environ, **(kw.get("env") or {}))
+        subprocess.call(["git"] + list(args), cwd=d, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, env=env)
+
+    def commit(message, item=None, agent="tester", model="m-1", env=None):
+        git("add", "-A")
+        if item:
+            message += "\n\nWork-Item: %s\nAgent: %s" % (item, agent)
+            if model:
+                message += "\nModel: %s" % model
+        git("commit", "-qm", message, env=env)
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=d).decode().strip()
+
+    def branch(name, start="main"):
+        git("switch", "-q", "-c", name, start)
+
+    def check_range(head, *extra, **kw):
+        return sdlc("ci-check", "--base", "main", "--head", head, *extra, **kw)
+
+    sdlc("config", "--set-check", "unit=true")
+    sdlc("config", "--set-check", "build=true")
+    charter = read(d, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| \*\*Default branch\*\* \|[^\n]*$", "| **Default branch** | `main` |", charter)
+    charter = re.sub(r"(?m)^\| \*\*Always Tier 1 here\*\* \|[^\n]*$",
+                     "| **Always Tier 1 here** | Infrastructure (`infra/**`) |", charter)
+    write(d, "docs/project/charter.md", charter)
+    backlog = read(d, "docs/project/backlog.md")
+    i = backlog.index("## Now")
+    j = backlog.index("\n", backlog.index("| --- ", i)) + 1
+    tiers = {1: 2, 2: 3, 3: 1, 4: 1, 5: 3, 6: 3, 7: 3, 8: 2, 9: 2, 10: 3}
+    rows = ["| CIC-%d | Change %d | %d | qa | | In progress |" % (n, n, t) for n, t in sorted(tiers.items())]
+    write(d, "docs/project/backlog.md", backlog[:j] + "\n".join(rows) + "\n" + backlog[j:])
+    commit("chore: install the kit and the records")
+
+    code, out = sdlc("trailers", "CIC-1")
+    check("trailers with no agent detected prints Agent: human and no Model",
+          code == 0 and "Agent: human" in out and "Model:" not in out and "unknown" not in out, out)
+
+    # A clean range: verified on the newest code commit, ledger committed.
+    branch("clean")
+    write(d, "src/a.txt", "a\n")
+    sdlc("verify", "--item", "CIC-1")
+    commit("feat(CIC-1): a", "CIC-1")
+    head = commit("chore(CIC-1): ledger", "CIC-1")
+    code, out = check_range("clean")
+    check("ci-check passes a clean range", code == 0, out)
+    code, out = check_range("clean", "--json")
+    data = json.loads(out) if out.strip().startswith("{") else {}
+    check("ci-check --json gives the range, its items and no findings",
+          code == 0 and data.get("findings") == [] and data.get("items") == ["CIC-1"]
+          and len(data.get("commits") or []) >= 1 and data.get("merge_base"), out)
+    event = os.path.join(d, ".git", "event.json")
+    with open(event, "w") as fh:
+        json.dump({"pull_request": {"head": {"sha": head}, "base": {"ref": "main"}}}, fh)
+    code, out = sdlc("ci-check", "--base", "main", "--head", "event", "--json",
+                     env={"GITHUB_EVENT_PATH": event})
+    data = json.loads(out) if out.strip().startswith("{") else {}
+    check("--head event reads pull_request.head.sha from $GITHUB_EVENT_PATH",
+          code == 0 and data.get("head") == head and data.get("items") == ["CIC-1"], out)
+    code, out = sdlc("ci-check", "--base", "main", "--head", "event")
+    check("--head event with no event file is a usage error", code == 2, out)
+    code, out = sdlc("ci-check", "--base=-x")
+    check("a --base starting with - is refused", code == 2 and "not a commit" in out, out)
+
+    # An untrailered merge commit fails, even when everything it merges is clean.
+    branch("merge-side", "clean")
+    write(d, "docs/project/notes-cic1.md", "notes\n")
+    commit("docs(CIC-1): notes", "CIC-1")
+    branch("merged", "clean")
+    git("merge", "-q", "--no-ff", "-m", "Merge branch 'merge-side'", "merge-side")
+    code, out = check_range("merged")
+    check("ci-check fails an untrailered merge commit",
+          code == 1 and "trailers" in out and "Merge branch" in out and "Work-Item" in out, out)
+
+    # A merge that adds a Tier 1 path is judged on what the merge itself brings in.
+    branch("infra-side")
+    write(d, "notes/c.md", "c\n")
+    commit("docs(CIC-2): note", "CIC-2")
+    branch("infra-merge")
+    write(d, "src/c.txt", "c\n")
+    commit("docs(CIC-2): c", "CIC-2")
+    git("merge", "-q", "--no-ff", "--no-commit", "infra-side")
+    write(d, "infra/x.tf", "resource {}\n")
+    commit("Merge branch 'infra-side'", "CIC-2")
+    code, out = check_range("infra-merge")
+    check("a merge adding infra/x.tf under a Tier 3 item fails the tier floor",
+          code == 1 and "infra/x.tf" in out and "CIC-2" in out and "tier" in out, out)
+
+    # Agent: human needs no Model; Agent: unknown fails with the fix.
+    branch("human")
+    write(d, "src/h.txt", "h\n")
+    commit("docs(CIC-5): by hand", "CIC-5", agent="human", model=None)
+    code, out = check_range("human")
+    check("Agent: human with no Model passes the trailer check", code == 0, out)
+    branch("unknown")
+    write(d, "src/u.txt", "u\n")
+    commit("docs(CIC-6): unknown", "CIC-6", agent="unknown", model="unknown")
+    code, out = check_range("unknown")
+    check("Agent: unknown fails and says to set AI_SDLC_AGENT or use Agent: human",
+          code == 1 and "set AI_SDLC_AGENT or use Agent: human" in out, out)
+
+    # A PR that empties the Always Tier 1 here globs is still judged by the base charter.
+    branch("weaken")
+    write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
+        "| **Always Tier 1 here** | Infrastructure (`infra/**`) |", "| **Always Tier 1 here** | Infrastructure |"))
+    commit("docs(CIC-7): reword", "CIC-7")
+    write(d, "infra/y.tf", "resource {}\n")
+    commit("docs(CIC-7): infra", "CIC-7")
+    code, out = check_range("weaken", "--charter-ref", "main")
+    check("a PR that empties the Always Tier 1 here globs still fails on infra/",
+          code == 1 and "infra/y.tf" in out, out)
+    check("a change to a security-bearing charter row counts as a Tier 1 path",
+          "charter.md" in out and "Always Tier 1 here" in out, out)
+
+    # Tier lowered from 1 to 3 against the base backlog.
+    branch("lower")
+    write(d, "docs/project/backlog.md", read(d, "docs/project/backlog.md").replace(
+        "| CIC-4 | Change 4 | 1 |", "| CIC-4 | Change 4 | 3 |"))
+    commit("docs(CIC-4): retier", "CIC-4")
+    code, out = check_range("lower")
+    check("a tier lowered from 1 to 3 against the base backlog fails",
+          code == 1 and "CIC-4" in out and "lowered from Tier 1 to Tier 3" in out, out)
+
+    # Partial and stale ledger records fail with what is wrong.
+    branch("partial")
+    write(d, "src/p.txt", "p\n")
+    sdlc("verify", "--stage", "unit", "--item", "CIC-8")
+    commit("feat(CIC-8): p", "CIC-8")
+    commit("chore(CIC-8): ledger", "CIC-8")
+    code, out = check_range("partial")
+    check("a partial ledger record fails and says it checks the record",
+          code == 1 and "no committed verify record for CIC-8" in out and "missing: build" in out, out)
+    branch("stale")
+    write(d, "src/s.txt", "1\n")
+    sdlc("verify", "--item", "CIC-9")
+    commit("feat(CIC-9): s", "CIC-9")
+    write(d, "src/s.txt", "2\n")
+    commit("feat(CIC-9): s again", "CIC-9")
+    commit("chore(CIC-9): ledger", "CIC-9")
+    code, out = check_range("stale")
+    check("a stale ledger record fails", code == 1 and "CIC-9" in out and "newest commit" in out, out)
+
+    # A Tier 1 item needs a review file.
+    branch("tier1")
+    write(d, "src/t.txt", "t\n")
+    sdlc("verify", "--item", "CIC-3")
+    commit("feat(CIC-3): t", "CIC-3")
+    commit("chore(CIC-3): ledger", "CIC-3")
+    code, out = check_range("tier1")
+    check("a Tier 1 item with no review file fails", code == 1 and "review" in out and "CIC-3" in out, out)
+    write(d, "docs/project/reviews/CIC-3-security.md", "# Review\n\n**Verdict:** pass\n")
+    commit("docs(CIC-3): review", "CIC-3")
+    code, out = check_range("tier1")
+    check("the same Tier 1 range passes once its review file is committed", code == 0, out)
+
+    # The kit's own enforcement surfaces are always Tier 1.
+    branch("workflow")
+    write(d, ".github/workflows/ci.yml", "on: push\n")
+    commit("ci(CIC-10): workflow", "CIC-10")
+    code, out = check_range("workflow")
+    check("a Tier 3 item changing .github/workflows/ fails the tier floor",
+          code == 1 and ".github/workflows/ci.yml" in out, out)
+
+    # Bots are exempt from the trailer check only.
+    bot = {"GIT_AUTHOR_NAME": "dependabot[bot]", "GIT_AUTHOR_EMAIL": "bot@example.invalid"}
+    branch("bot")
+    write(d, "package.json", "{}\n")
+    commit("build(deps): bump", env=bot)
+    code, out = check_range("bot")
+    check("an untrailered dependabot commit passes the trailer check", code == 0, out)
+    write(d, "infra/z.tf", "resource {}\n")
+    commit("build(deps): infra", env=bot)
+    code, out = check_range("bot")
+    check("a bot commit touching a Tier 1 path still fails", code == 1 and "infra/z.tf" in out, out)
+    shutil.rmtree(d, ignore_errors=True)
+
+    d = fixture("next")
+    code, out = run([d, "APP", "-y", "--scaffold-ci", "github"])
+    workflow = read(d, ".github/workflows/quality.yml") or ""
+    template = read(d, ".github/pull_request_template.md") or ""
+    check("the GitHub workflow runs on pull_request and runs ci-check from the base branch",
+          code == 0 and "  pull_request:" in workflow and "pull_request_target" not in workflow
+          and "ci-check --base" in workflow and "--head event" in workflow
+          and 'git archive "origin/$GITHUB_BASE_REF" .ai-sdlc/bin' in workflow
+          and "fetch-depth: 0" in workflow, workflow)
+    check("the generated workflow has no doubled braces", "{" + "{" not in workflow, workflow)
+    check("the workflow says the check binds only with branch protection and CODEOWNERS",
+          "branch protection" in workflow and "CODEOWNERS" in workflow, workflow)
+    check("a pull request template is written", "Work-Item" in template and "ci-check" in template, template)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_shards_and_parallel_worktrees():
     print("sharded store, Tier 2 touch globs, and 3-way conflict-free worktree merges")
     d = tempfile.mkdtemp(prefix="sdlc-shards-")
@@ -5471,7 +5685,7 @@ def main():
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_git_hooks, test_shell_write_guards,
-                 test_runtime, test_view, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_kit_value_benchmark, test_kit_value_checks,
+                 test_runtime, test_view, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_ci_check, test_kit_value_benchmark, test_kit_value_checks,
                  test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
                  test_domain_detection,

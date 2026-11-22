@@ -168,7 +168,7 @@ last-reviewed: 2026-11-13
 | **Decision style** | `Guide` |
 | **Tier rules** | `Standard` |
 | **Acquisition profile** | `Standard` |
-| **Always Tier 1 here** | Hook security enforcement (`hooks.py`), `view --serve` HTTP control plane, release workflow |
+| **Always Tier 1 here** | Hook security enforcement (`optional/runtime/hooks.py`), `view --serve` HTTP control plane, release workflow (`.github/workflows/**`) |
 | **Never Tier 1 here** | No PII or payment processing exists in this repository |
 | **Human approval required for** | Cutting a release tag, merging to `main`, weakening security hooks, or removing CLI commands |
 | **Independent review required for** | `none` |

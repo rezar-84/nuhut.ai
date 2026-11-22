@@ -247,8 +247,20 @@ Two explicit flags turn detection into project-owned starting files:
 `--scaffold-ci` creates `.github/workflows/quality.yml` or `.gitlab-ci.yml` from the
 project's detected/confirmed commands. It refuses an empty command set. Scaffolding never
 overwrites an existing file, never installs a dependency, and leaves runtime and service
-version confirmation to the project charter. Generated jobs are manual-only until a
-human confirms the commands and deliberately enables push or pull-request triggers.
+version confirmation to the project charter. The GitLab job is manual-only until a
+human confirms the commands and makes it automatic.
+
+The GitHub workflow runs on `pull_request` (never `pull_request_target`, so a fork gets
+no secrets and a read-only token) and on `workflow_dispatch`. It checks out the full
+history, runs `sdlc.py doctor --strict`, then `sdlc.py ci-check` taken from the base
+branch (`git archive "origin/$GITHUB_BASE_REF" .ai-sdlc/bin`), so a pull request is
+judged by the checker and the charter it is merging into; when the base has no
+`.ai-sdlc/bin/sdlc.py` yet, it runs the PR's own copy and warns. It also writes
+`.github/pull_request_template.md`. Confirm the generated commands against the charter
+before relying on it. The check binds only when branch protection on the default branch
+requires the `quality` status and CODEOWNERS assigns `.github/workflows/**` and
+`.ai-sdlc/**` to the people who approve Tier 1 work; without both, a pull request can
+edit or skip the job.
 
 The installer copies `AGENTS.md` to the project root, `docs/` into the project, the six
 slash commands into `.claude/commands/`, and the selected skills into `.claude/skills/`;
