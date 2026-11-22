@@ -63,6 +63,35 @@ deprecation line on stderr, and is removed in 7.0.
 
 `python3 .ai-sdlc/bin/sdlc.py claims` lists who holds what.
 
+### Worktree scripts
+
+A fresh worktree often needs work before it runs: installing dependencies, copying a
+`.env`, starting a database on its own port. The charter's optional **Worktree scripts**
+row, in the Concurrency table, names a command for each end. It is `none` by default.
+
+```sh
+python3 .ai-sdlc/bin/sdlc.py config --worktree-scripts "setup: npm ci && cp ../.env .env; teardown: docker compose down"
+python3 .ai-sdlc/bin/sdlc.py config --worktree-scripts none            # turn them off
+```
+
+- **Setup** runs in each new worktree that `claim` or `dispatch` creates. **Teardown** runs
+  in the worktree just before `release --remove-worktree` removes it (and before `dispatch`
+  removes a worker's worktree). Neither runs for `claim --no-worktree` or a plain `release`.
+- Both run through the shell with the worktree as the working directory and get
+  `NUHUT_ITEM` (the item ID), `NUHUT_PORT`, `NUHUT_WORKTREE`, `NUHUT_BRANCH` and
+  `NUHUT_MAIN_WORKTREE`.
+- **One port per worktree.** Each claim with a worktree gets the lowest port from the base
+  (4100, or `; port: <base>` in the row) that no other live claim holds and nothing on this
+  host is listening on. The port is kept in the claim record, so teardown sees the same one.
+- **Failures are reported.** A setup that exits non-zero makes `claim` exit 1 with the exit
+  code and the end of its output; the claim and the worktree are kept so you can look.
+  A failing teardown makes `release` exit 1 and release nothing; `--force` removes the
+  worktree anyway and prints the failure as a warning. In `dispatch`, a failed setup ends
+  that item as `setup_failed`, and a failed teardown is reported as `teardown_error`.
+- Commands may contain `;` themselves: a part only starts at `setup:`, `teardown:` or `port:`.
+- These are commands from the charter, run with your permissions, like the `checks.*` rows.
+  Review a change to the row as you would a change to a build script.
+
 ## What can run side by side
 
 ```sh

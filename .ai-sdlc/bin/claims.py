@@ -100,6 +100,159 @@ def is_main_worktree(project):
     return bool(main) and os.path.realpath(main) == os.path.realpath(project.root)
 
 
+# ---------------------------------------------------------------- worktree scripts
+
+WORKTREE_SCRIPTS_LABEL = "Worktree scripts"
+WORKTREE_SCRIPT_KEYS = ("setup", "teardown", "port")
+DEFAULT_PORT_BASE = 4100
+SCRIPT_TIMEOUT = 1800
+_KEY_SPLIT = re.compile(r";\s*(?=(?:setup|teardown|port)\s*:)", re.I)
+
+
+def _charter_cell(text, label):
+    for line in (text or "").splitlines():
+        body = line.strip()
+        if not (body.startswith("|") and body.endswith("|")):
+            continue
+        cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", body[1:-1])]
+        if len(cells) >= 2 and cells[0] == "**%s**" % label:
+            return cells[1]
+    return None
+
+
+def parse_worktree_scripts(raw):
+    """{"setup", "teardown", "port_base", "error"} from a `setup: <cmd>; teardown: <cmd>`
+    value. Blank, the template hint, or `none` means no scripts. An optional `port: <n>`
+    part sets the first port handed out (default 4100)."""
+    conf = {"setup": "", "teardown": "", "port_base": DEFAULT_PORT_BASE, "error": ""}
+    text = re.sub(r"_\([^)]*\)_", "", raw or "").strip()
+    if not text or text.strip("`").strip().lower() in ("none", "absent", "-"):
+        return conf
+    for part in _KEY_SPLIT.split(text):
+        key, sep, val = part.partition(":")
+        key = key.strip().strip("`").strip().lower()
+        val = val.strip().strip("`").strip()
+        if not sep or key not in WORKTREE_SCRIPT_KEYS:
+            conf["error"] = ("the charter's Worktree scripts row must read `setup: <cmd>; teardown: "
+                             "<cmd>` (or none), not %r" % text)
+            return conf
+        if key == "port":
+            if not val.isdigit() or not 1024 <= int(val) <= 65000:
+                conf["error"] = "Worktree scripts port must be a number from 1024 to 65000, not %r" % val
+                return conf
+            conf["port_base"] = int(val)
+        else:
+            conf[key] = val
+    return conf
+
+
+def worktree_scripts(project):
+    return parse_worktree_scripts(_charter_cell(getattr(project, "charter", "") or "",
+                                                WORKTREE_SCRIPTS_LABEL))
+
+
+def _port_free(port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def _ports_held(folder):
+    held = set()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return held
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as h:
+                port = json.load(h).get("port")
+        except (IOError, OSError, ValueError, AttributeError):
+            continue
+        if isinstance(port, int):
+            held.add(port)
+    return held
+
+
+def allocate_port(folder, base):
+    """The lowest port from base that no live claim holds and nothing on this host listens on."""
+    held = _ports_held(folder)
+    for port in range(base, min(base + 2000, 65536)):
+        if port not in held and _port_free(port):
+            return port
+    return 0
+
+
+def run_worktree_script(project, record, which):
+    """Run the charter's setup or teardown command in the record's worktree. None when no
+    command is set; otherwise a result whose `ok` is False on any failure, never raised."""
+    conf = worktree_scripts(project)
+    if conf["error"]:
+        return {"stage": which, "command": "", "ok": False, "exit_code": None,
+                "output": "", "error": conf["error"]}
+    command = conf.get(which) or ""
+    if not command:
+        return None
+    wt = record.get("worktree") or ""
+    result = {"stage": which, "command": command, "ok": False, "exit_code": None,
+              "output": "", "error": ""}
+    if not wt or not os.path.isdir(wt):
+        result["error"] = "%s script not run: the worktree %s does not exist" % (which, wt or "(none)")
+        return result
+    env = dict(os.environ)
+    env.update({
+        "NUHUT_ITEM": record.get("id") or "",
+        "NUHUT_PORT": str(record.get("port") or ""),
+        "NUHUT_WORKTREE": wt,
+        "NUHUT_BRANCH": record.get("branch") or "",
+        "NUHUT_MAIN_WORKTREE": main_worktree(project) or project.root,
+    })
+    try:
+        p = subprocess.run(command, shell=True, cwd=wt, env=env, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=SCRIPT_TIMEOUT)
+        result["exit_code"] = p.returncode
+        result["output"] = (p.stdout or b"").decode("utf-8", "replace")[-2000:]
+        result["ok"] = p.returncode == 0
+        if not result["ok"]:
+            result["error"] = "%s script `%s` exited %d" % (which, command, p.returncode)
+    except subprocess.TimeoutExpired as exc:
+        result["output"] = (exc.output or b"").decode("utf-8", "replace")[-2000:]
+        result["error"] = "%s script `%s` timed out after %ds" % (which, command, SCRIPT_TIMEOUT)
+    except OSError as exc:
+        result["error"] = "%s script `%s` could not start: %s" % (which, command, exc)
+    return result
+
+
+def _save_record(project, record):
+    folder = registry(project)
+    if not folder:
+        return
+    kept = dict((k, v) for k, v in record.items() if k not in ("setup_result", "teardown_result"))
+    try:
+        with open(os.path.join(folder, record["id"] + ".json"), "w", encoding="utf-8") as h:
+            json.dump(kept, h, indent=2)
+    except (IOError, OSError):
+        pass
+
+
+def run_setup(project, record):
+    """Run setup for a fresh claim and note the outcome on the claim record. Returns the
+    script result (None when no setup command is set)."""
+    res = run_worktree_script(project, record, "setup")
+    if res is not None:
+        record["setup"] = {"ok": res["ok"], "exit_code": res["exit_code"]}
+        record["setup_result"] = res
+        _save_record(project, record)
+    return res
+
+
 # ---------------------------------------------------------------- git CAS helpers
 
 def _commit_json_blob(project, filename, data, parent_sha="", message="nuhut"):
@@ -445,10 +598,13 @@ def _existing_item_branch(project, item):
 
 
 def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark=False,
-          base=None, sync_refs=False, remote="origin", person=None):
+          base=None, sync_refs=False, remote="origin", person=None, run_setup_script=True):
     """Returns (record, error). <person> is the people.json handle of the human behind
     the agent (sdlc.person_identity), or None when it is not known: recorded as null,
-    never guessed."""
+    never guessed. With a worktree and the charter's Worktree scripts set, the record
+    carries a port, and setup runs in the new worktree unless run_setup_script is False
+    (the caller then calls run_setup). A failed setup keeps the claim; the record's
+    `setup` says so and the caller reports it."""
     backlog = items(project, view_mod)
     it = backlog.get(item)
     if not it:
@@ -494,11 +650,19 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
     }
     if sync_refs:
         record["synced"] = True
+    scripts = worktree_scripts(project) if path else None
+    wants_port = bool(scripts and (scripts["setup"] or scripts["teardown"]))
 
     target = os.path.join(folder, item + ".json")
+    port_lock = os.path.join(folder, ".ports.lock")
+    locked = _acquire_lock(port_lock) if wants_port else False
     try:
+        if wants_port:
+            record["port"] = allocate_port(folder, scripts["port_base"]) or None
         fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     except FileExistsError:
+        if locked:
+            os.unlink(port_lock)
         try:
             with open(target, encoding="utf-8") as h:
                 held = json.load(h)
@@ -509,6 +673,11 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
         )
     with os.fdopen(fd, "w", encoding="utf-8") as h:
         json.dump(record, h, indent=2)
+    if locked:
+        try:
+            os.unlink(port_lock)
+        except OSError:
+            pass
 
     if sync_refs:
         commit_sha, c_err = _commit_json_blob(
@@ -562,6 +731,8 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
             return None, "git branch failed: %s" % (err_s or out_s)
     if mark:
         mark_status(project, item, it, "In progress")
+    if path and run_setup_script:
+        run_setup(project, record)
     return record, None
 
 
@@ -657,6 +828,15 @@ def release(project, item, remove_worktree=False, agent=None, force=False,
         ok, status_out, _ = _git_ok(wt, "status", "--porcelain")
         if status_out:
             return None, "the worktree %s has uncommitted changes; commit or stash them first" % wt
+        down = run_worktree_script(project, record, "teardown")
+        if down is not None:
+            record["teardown"] = {"ok": down["ok"], "exit_code": down["exit_code"]}
+            record["teardown_result"] = down
+            if not down["ok"] and not force:
+                tail = down["output"].strip()
+                return None, ("%s; nothing was released and the worktree is kept. Fix it and "
+                              "release again, or pass --force to remove the worktree anyway%s" % (
+                                  down["error"], ("\n" + tail) if tail else ""))
         ok, out_s, err_s = _git_ok(project.root, "worktree", "remove", wt)
         if not ok:
             return None, "git worktree remove failed: %s" % (err_s or out_s)

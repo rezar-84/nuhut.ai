@@ -109,6 +109,7 @@ last-reviewed: 2026-11-13
 | **Claiming a work item** | `python3 .ai-sdlc/bin/sdlc.py claim <ID>` (isolated worktree + sharded item state) |
 | **Single-writer files** | `VERSION`, `.claude-plugin/plugin.json`, `optional/runtime/view.html` |
 | **May merge to the default branch** | no — pull requests / human merge only |
+| **Worktree scripts** | none |
 
 ## Budgets
 

@@ -3905,8 +3905,9 @@ def kit_status(project):
     }
 
 
-def _set_charter_row(text, label, formatted_value):
-    """Replace or insert a `| **Label** | value |` row in charter.md."""
+def _set_charter_row(text, label, formatted_value, section="## Risk defaults"):
+    """Replace or insert a `| **Label** | value |` row in charter.md (a new row goes at the
+    end of the first table under `section`, or at the top of Risk defaults)."""
     lines = text.splitlines()
     target_cell = "**%s**" % label
     replaced = False
@@ -3916,6 +3917,20 @@ def _set_charter_row(text, label, formatted_value):
             lines[idx] = "| **%s** | %s |" % (label, formatted_value)
             replaced = True
             break
+    if not replaced and section != "## Risk defaults":
+        for idx, line in enumerate(lines):
+            if line.strip() == section:
+                j = idx + 1
+                while j < len(lines) and not lines[j].strip().startswith("|"):
+                    if lines[j].startswith("## "):
+                        break
+                    j += 1
+                if j < len(lines) and lines[j].strip().startswith("|"):
+                    while j < len(lines) and lines[j].strip().startswith("|"):
+                        j += 1
+                    lines.insert(j, "| **%s** | %s |" % (label, formatted_value))
+                    replaced = True
+                break
     if not replaced:
         # Insert at top of Risk defaults table if present
         for idx, line in enumerate(lines):
@@ -4139,6 +4154,22 @@ def configure_kit(project, changes):
         text = _set_charter_row(text, "Discovered defects", "`%s`" % dd_val)
         extra_profile["discovered_defects"] = dd_val
         applied.append("Discovered defects=%s" % dd_val)
+
+    if changes.get("worktree_scripts") is not None:
+        claims_mod = runtime_module("claims")
+        raw_ws = re.sub(r"[\r\n]+", " ", str(changes["worktree_scripts"])).strip()
+        conf = claims_mod.parse_worktree_scripts(raw_ws)
+        if conf["error"]:
+            return None, conf["error"]
+        if not (conf["setup"] or conf["teardown"]):
+            cell_ws = "none"
+        else:
+            parts = [k + ": " + conf[k] for k in ("setup", "teardown") if conf[k]]
+            if conf["port_base"] != claims_mod.DEFAULT_PORT_BASE:
+                parts.append("port: %d" % conf["port_base"])
+            cell_ws = "; ".join(parts).replace("|", "\\|")
+        text = _set_charter_row(text, claims_mod.WORKTREE_SCRIPTS_LABEL, cell_ws, section="## Concurrency")
+        applied.append("Worktree scripts=%s" % cell_ws.replace("\\|", "|"))
 
     if changes.get("preferred_reviewer"):
         rev = str(changes["preferred_reviewer"]).strip().lower()
@@ -4677,7 +4708,8 @@ EXAMPLES = {
     "bite": ["bite npm test", "bite --restore"],
     "config": ["config                   # show the constraints", "config --effort Lean --independent-review tier1",
                "config --specs on", "config --slop-filter strict", "config --set-check unit='npm test'",
-               "config --allow-extension lint-pack   # let an extension's code run once merged"],
+               "config --allow-extension lint-pack   # let an extension's code run once merged",
+               "config --worktree-scripts 'setup: npm ci; teardown: docker compose down'"],
     "ext": ["ext list", "ext add https://github.com/<owner>/<repo>.git --ref v1.0.0",
             "ext add ../my-extension      # a local directory", "ext update lint-pack --dry-run",
             "ext remove lint-pack", "ext search lint", "ext validate ../my-extension",
@@ -5266,16 +5298,27 @@ def _cmd_claims(project, opts, parser):
         if error:
             sys.stderr.write("claim: %s\n" % error)
             return 1
+        setup = record.pop("setup_result", None)
         if opts.json:
-            print(json.dumps(dict(record, warnings=notes) if notes else record, indent=2))
+            shown = dict(record, setup_result=setup) if setup else record
+            print(json.dumps(dict(shown, warnings=notes) if notes else shown, indent=2))
         else:
             print("claimed %s for %s (%s) on branch %s" % (
                 record["id"], record["agent"], record.get("person") or "unknown person",
                 record["branch"]))
             if record["worktree"]:
                 print("worktree: %s\n  cd %s" % (record["worktree"], record["worktree"]))
+            if setup and setup["ok"]:
+                print("setup: `%s` passed (NUHUT_PORT=%s)" % (setup["command"], record.get("port") or ""))
             print("free it when the item is Done, Parked or Deferred: "
                   "python3 .ai-sdlc/bin/sdlc.py unclaim %s" % record["id"])
+        if setup and not setup["ok"]:
+            tail = (setup.get("output") or "").strip()
+            sys.stderr.write("claim: %s. The claim and its worktree are kept: fix the cause and run "
+                             "the setup again by hand, or free it with `sdlc.py unclaim %s "
+                             "--remove-worktree`%s\n" % (setup["error"], record["id"],
+                                                          ("\n" + tail) if tail else ""))
+            return 1
         return 0
     if opts.command == "release":
         # The claim command's old name. Same stdout, JSON and exit codes; one note on
@@ -5294,10 +5337,17 @@ def _cmd_claims(project, opts, parser):
         if error:
             sys.stderr.write("%s: %s\n" % (opts.command, error))
             return 1
+        down = record.pop("teardown_result", None)
         if getattr(opts, "json", False):
-            print(json.dumps({"released": record["id"], "record": record}, indent=2))
+            print(json.dumps({"released": record["id"], "record": record, "teardown": down}, indent=2))
         else:
             print("released %s (was %s)" % (record["id"], record.get("agent", "?")))
+            if down and down["ok"]:
+                print("teardown: `%s` passed" % down["command"])
+        if down and not down["ok"]:
+            tail = (down.get("output") or "").strip()
+            sys.stderr.write("%s: warning: %s; the worktree was removed anyway (--force)%s\n" % (
+                opts.command, down["error"], ("\n" + tail) if tail else ""))
         return 0
     if opts.command == "claims":
         held = claims_mod.list_claims(project, sync_refs=getattr(opts, "sync_refs", False))
@@ -5524,6 +5574,8 @@ def _cmd_config(project, opts, parser):
         changes["slop_filter"] = opts.slop_filter
     if getattr(opts, "discovered_defects", None):
         changes["discovered_defects"] = opts.discovered_defects
+    if getattr(opts, "worktree_scripts", None) is not None:
+        changes["worktree_scripts"] = opts.worktree_scripts
     if opts.reviewer:
         changes["preferred_reviewer"] = opts.reviewer
     if opts.token_saving:
@@ -5859,6 +5911,9 @@ def build_parser():
     cfg.add_argument("--allow-extension", dest="allow_extension", action="append", default=[],
                      metavar="ID", help="add an extension id to the charter's Extensions allowed "
                      "row, so its code runs once the change is on the default branch")
+    cfg.add_argument("--worktree-scripts", dest="worktree_scripts", metavar="SCRIPTS",
+                     help="set the charter's Worktree scripts row: 'setup: <cmd>; teardown: <cmd>' "
+                          "(optional '; port: <base>'), or none")
     cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
     ex = sub.add_parser("ext", help="project extensions: list, add, update, remove, search the "
                                     "catalog, validate a manifest, package a plugin wrapper")

@@ -3652,6 +3652,136 @@ def test_status():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_worktree_scripts():
+    print("worktree scripts: setup on claim and dispatch, teardown on release, a port per worktree")
+    d = tempfile.mkdtemp(prefix="sdlc-wtscripts-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", repo])
+    code, out = run([repo, "WTS", "-y"])
+    check("worktree-scripts repo installs", code == 0, out[-300:])
+    charter = read(repo, "docs/project/charter.md")
+    row = re.search(r"(?m)^\| \*\*Worktree scripts\*\* \|(.*)\|$", charter)
+    check("the charter template carries an optional Worktree scripts row that defaults to none",
+          row is not None and "setup:" in row.group(1) and "none" in row.group(1).lower()
+          and charter.index("**Worktree scripts**") > charter.index("## Concurrency")
+          and charter.index("**Worktree scripts**") < charter.index("## Budgets"), row.group(0) if row else "")
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com", PYTHONDONTWRITEBYTECODE="1")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    for n in range(1, 6):
+        sdlc("item", "add", "--id", "WTS-00%d" % n, "--title", "Item %d" % n, "--tier", "2",
+             "--status", "Ready", "--touch", "src/m%d.py" % n)
+    subprocess.call(["git", "add", "-A"], cwd=repo, env=env)
+    subprocess.call(git + ["commit", "-qm", "chore(WTS-001): queue items"], cwd=repo, env=env)
+
+    log = os.path.join(d, "scripts.log")
+    hook = os.path.join(d, "hook.py")
+    with open(hook, "w", encoding="utf-8") as fh:
+        fh.write("import os, sys\n"
+                 "open(%r, 'a').write('%%s %%s %%s %%s\\n' %% (sys.argv[1], os.environ.get('NUHUT_ITEM'),\n"
+                 "    os.environ.get('NUHUT_PORT'), os.path.basename(os.getcwd())))\n"
+                 "sys.exit(int(sys.argv[2]) if len(sys.argv) > 2 else 0)\n" % log)
+
+    def entries():
+        try:
+            with open(log, encoding="utf-8") as fh:
+                return [line.split() for line in fh.read().splitlines()]
+        except IOError:
+            return []
+
+    py = sys.executable
+    code, out = sdlc("claim", "WTS-001", "--agent", "a")
+    check("with no Worktree scripts set, claim runs nothing", code == 0 and entries() == [], out)
+    sdlc("release", "WTS-001", "--agent", "a", "--remove-worktree")
+
+    code, out = sdlc("config", "--worktree-scripts",
+                     "setup: %s %s setup; teardown: %s %s teardown; port: 4710" % (py, hook, py, hook))
+    charter = read(repo, "docs/project/charter.md")
+    row = re.search(r"(?m)^\| \*\*Worktree scripts\*\* \|(.*)\|$", charter)
+    check("config --worktree-scripts writes the charter row in place",
+          code == 0 and row is not None and "teardown:" in row.group(1)
+          and charter.count("**Worktree scripts**") == 1, out + (row.group(0) if row else ""))
+    subprocess.call(["git", "add", "-A"], cwd=repo, env=env)
+    subprocess.call(git + ["commit", "-qm", "chore(WTS-001): worktree scripts"], cwd=repo, env=env)
+
+    code_a, out_a = sdlc("claim", "WTS-001", "--agent", "a", "--json")
+    code_b, out_b = sdlc("claim", "WTS-002", "--agent", "a", "--json")
+    rec_a = json.loads(out_a) if code_a == 0 else {}
+    rec_b = json.loads(out_b) if code_b == 0 else {}
+    setups = [e for e in entries() if e[0] == "setup"]
+    check("claim runs setup in the new worktree with NUHUT_ITEM and NUHUT_PORT",
+          code_a == 0 and code_b == 0 and len(setups) == 2
+          and setups[0][1] == "WTS-001" and setups[0][3] == "repo-WTS-001"
+          and setups[1][1] == "WTS-002", out_a + out_b + str(entries()))
+    check("each worktree gets its own port from the base",
+          rec_a.get("port") and rec_b.get("port") and rec_a["port"] != rec_b["port"]
+          and rec_a["port"] >= 4710 and rec_b["port"] >= 4710
+          and setups and setups[0][2] == str(rec_a["port"]), str((rec_a.get("port"), rec_b.get("port"))))
+
+    code, out = sdlc("release", "WTS-001", "--agent", "a")
+    check("release without --remove-worktree runs no teardown",
+          code == 0 and not [e for e in entries() if e[0] == "teardown"], out)
+    subprocess.call(["git", "worktree", "remove", os.path.join(d, "repo-WTS-001")], cwd=repo, env=env)
+    sdlc("claim", "WTS-001", "--agent", "a")
+    code, out = sdlc("release", "WTS-001", "--agent", "a", "--remove-worktree")
+    teardowns = [e for e in entries() if e[0] == "teardown"]
+    check("release --remove-worktree runs teardown in the worktree before removing it",
+          code == 0 and len(teardowns) == 1 and teardowns[0][1] == "WTS-001"
+          and teardowns[0][3] == "repo-WTS-001" and not os.path.isdir(os.path.join(d, "repo-WTS-001")), out)
+
+    sdlc("config", "--worktree-scripts",
+         "setup: %s %s setup 3; teardown: %s %s teardown 4" % (py, hook, py, hook))
+    code, out = sdlc("claim", "WTS-003", "--agent", "a")
+    check("a failing setup is reported with its exit code and the claim kept",
+          code == 1 and "setup" in out and "exit" in out and "3" in out
+          and os.path.isdir(os.path.join(d, "repo-WTS-003")), out)
+    code, out = sdlc("release", "WTS-002", "--agent", "a", "--remove-worktree")
+    check("a failing teardown is reported and nothing is released",
+          code == 1 and "teardown" in out and "4" in out
+          and os.path.isdir(os.path.join(d, "repo-WTS-002")), out)
+    code, cl = sdlc("claims", "--json")
+    check("the claim survives a failed teardown", '"WTS-002"' in cl, cl[:300])
+    code, out = sdlc("release", "WTS-002", "--agent", "a", "--remove-worktree", "--force")
+    check("--force releases past a failed teardown and still reports it",
+          code == 0 and "teardown" in out and "warning" in out.lower()
+          and not os.path.isdir(os.path.join(d, "repo-WTS-002")), out)
+    sdlc("release", "WTS-003", "--agent", "a", "--remove-worktree", "--force")
+
+    code, out = sdlc("config", "--worktree-scripts", "npm ci")
+    check("config refuses a Worktree scripts value without setup:/teardown:", code == 2, out)
+
+    # dispatch runs setup in each worker worktree; a failing setup stops that item, reported.
+    charter = read(repo, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| \*\*Default branch\*\* \|.*$", "| **Default branch** | `main` |", charter)
+    write(repo, "docs/project/charter.md", charter)
+    sdlc("config", "--worktree-scripts", "setup: %s %s setup 5; teardown: %s %s teardown" % (py, hook, py, hook))
+    sdlc("config", "--set-check", "unit=%s -c 'print(1)'" % py)
+    subprocess.call(["git", "add", "-A"], cwd=repo, env=env)
+    subprocess.call(git + ["commit", "-qm", "chore(WTS-004): dispatch fixture"], cwd=repo, env=env)
+    before = len(entries())
+    code, out = sdlc("dispatch", "--max-items", "1", "--workers", "1", "--by", "cmd:%s -c 'pass'" % py, "--json")
+    try:
+        rep = json.loads(out)
+    except ValueError:
+        rep = {}
+    items = rep.get("items") or []
+    new = entries()[before:]
+    check("dispatch runs setup in the worker worktree and reports a failure as setup_failed",
+          len(items) == 1 and items[0].get("status") == "setup_failed" and "5" in (items[0].get("error") or "")
+          and any(e[0] == "setup" for e in new), out[:800])
+    check("dispatch tears the worker worktree down after a failed setup",
+          any(e[0] == "teardown" and e[1] == items[0].get("item") for e in new) if items else False, str(new))
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_specs():
     print("living specs: validate, apply, import, doctor")
     d = tempfile.mkdtemp(prefix="sdlc-specs-")
@@ -7470,7 +7600,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_release_workflow, test_lens, test_lens_standards, test_claims, test_status, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
+                 test_epics, test_decision_and_stack, test_semver, test_release_workflow, test_lens, test_lens_standards, test_claims, test_worktree_scripts, test_status, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
                  test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
                  test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
                  test_installer_python_floor_and_finish_errors,
