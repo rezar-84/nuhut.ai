@@ -5575,6 +5575,20 @@ def test_installer_python_floor_and_finish_errors():
     shutil.rmtree(d, ignore_errors=True)
 
 
+# Tools added after v5 as their own built-in extensions (NUHT-020): the v5 parity checks
+# below look past them. The opencode harness is v5; its agents record is new.
+V6_AGENTS = ("opencode", "kiro", "acp")
+V6_HARNESSES = ("kiro", "acp")
+
+
+def _v5_only(table):
+    """<table> without the post-v5 tools: a dict of agents records or argv, or a tuple of
+    native harness ids."""
+    if isinstance(table, dict):
+        return dict((k, v) for k, v in table.items() if k not in V6_AGENTS)
+    return tuple(h for h in table if h not in V6_HARNESSES)
+
+
 def test_extension_registry():
     print("extension registry: built-in manifests, parity, overrides, refusals, fallback")
     sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
@@ -5635,8 +5649,9 @@ def test_extension_registry():
         ".cursorrules": "", ".windsurfrules": "", ".clinerules": "",
         ".roo/rules/agents.md": "# Project instructions\n\n", "CONVENTIONS.md": "# Conventions\n\n"}
     for name in sorted(v5):
+        got = _v5_only(tables[name]) if name == "HARNESS_NATIVE" else tables[name]
         check("parity: the registry's %s equals the v5 table" % name,
-              tables[name] == v5[name], "%r != %r" % (tables[name], v5[name]))
+              got == v5[name], "%r != %r" % (got, v5[name]))
     check("parity: the registry's pointer files equal the v5 table",
           dict(tables["HARNESS_POINTERS"]) == v5_pointers
           and len(tables["HARNESS_POINTERS"]) == len(v5_pointers))
@@ -5644,8 +5659,8 @@ def test_extension_registry():
           installer.HARNESS_ORDER == tables["HARNESS_ORDER"]
           and installer.PRESETS == tables["PRESETS"])
     check("parity: registry review and build argv equal the runtime's v5 fallback",
-          registry.agent_table(reg, "review") == _rt.v5_agent_table("review")
-          and registry.agent_table(reg, "build") == _rt.v5_agent_table("build"))
+          _v5_only(registry.agent_table(reg, "review")) == _rt.v5_agent_table("review")
+          and _v5_only(registry.agent_table(reg, "build")) == _rt.v5_agent_table("build"))
     hs = reg.harnesses()
     check("harness records carry hooks and lens fields",
           hs["claude"]["hooks"]["dialect"] == "claude"
@@ -5823,11 +5838,11 @@ def test_tool_support_in_extensions():
           and agents.get("cursor", {}).get("identity", {}).get("agent") == "cursor")
     # The v5 values, frozen here: the move must not change them.
     check("review and build argv are unchanged",
-          registry.agent_table(reg, "review") == {
+          _v5_only(registry.agent_table(reg, "review")) == {
               "claude": (["claude", "-p", "{prompt}", "--output-format", "text"], "--model"),
               "codex": (["codex", "exec", "{prompt}"], "--model"),
               "gemini": (["gemini", "-p", "{prompt}"], "--model")}
-          and registry.agent_table(reg, "build") == {
+          and _v5_only(registry.agent_table(reg, "build")) == {
               "claude": (["claude", "-p", "{prompt}", "--permission-mode", "acceptEdits",
                           "--output-format", "text"], "--model"),
               "codex": (["codex", "exec", "--full-auto", "{prompt}"], "--model"),
@@ -5835,7 +5850,7 @@ def test_tool_support_in_extensions():
     check("the review and build tables name the same tools",
           set(registry.agent_table(reg, "review")) == set(registry.agent_table(reg, "build")))
     try:
-        agent_env, model_env = registry.identity_env(reg)
+        agent_env, model_env = registry.identity_env_of(_v5_only(reg.agents()))
     except AttributeError as exc:
         agent_env, model_env = (), str(exc)
     check("AGENT_ENV and MODEL_ENV come from the agents records, in the v5 order",
@@ -5846,10 +5861,10 @@ def test_tool_support_in_extensions():
                             "GEMINI_MODEL", "OPENAI_MODEL", "CODEX_MODEL"),
           repr((agent_env, model_env)))
     try:
-        same = (_rt.v5_agent_table("review") == registry.agent_table(reg, "review")
-                and _rt.v5_agent_table("build") == registry.agent_table(reg, "build")
+        same = (_rt.v5_agent_table("review") == _v5_only(registry.agent_table(reg, "review"))
+                and _rt.v5_agent_table("build") == _v5_only(registry.agent_table(reg, "build"))
                 and _rt.V5_POINTER_FILES == registry.pointer_files(reg)
-                and _rt.v5_identity_env() == registry.identity_env(reg))
+                and _rt.v5_identity_env() == registry.identity_env_of(_v5_only(reg.agents())))
     except AttributeError:
         same = False
     check("the v5 fallback agrees with the registry", same)
@@ -5857,8 +5872,8 @@ def test_tool_support_in_extensions():
     check("the installer tables are unchanged",
           tables["HARNESS_ORDER"] == ("claude", "cursor", "copilot", "gemini", "windsurf",
                                       "cline", "roo", "amp", "aider")
-          and tables["HARNESS_NATIVE"] == ("codex", "jules", "zed", "factory", "opencode",
-                                           "antigravity")
+          and _v5_only(tables["HARNESS_NATIVE"]) == ("codex", "jules", "zed", "factory",
+                                                     "opencode", "antigravity")
           and tables["HARNESS_ALIASES"]["cursor"] == (".cursor/rules/agents.mdc", ".cursorrules")
           and installer.HARNESS_POINTERS == tables["HARNESS_POINTERS"])
     cmd = os.path.join(ROOT, "optional", "claude-commands", "sdlc-plan.md")
@@ -5943,6 +5958,96 @@ def test_tool_support_in_extensions():
           (p.stdout + p.stderr)[-500:])
     check("hooks keep their dialect when the registry is broken",
           hook("gemini").startswith('{"decision":"deny"'), hook("gemini"))
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_new_tool_extensions():
+    print("NUHT-020: OpenCode, Kiro and ACP agents as data-only built-in extensions")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    try:
+        import registry
+    except ImportError as exc:
+        check("optional/runtime/registry.py imports", False, str(exc))
+        return
+    reg = registry.load(None, kit=ROOT, use_cache=False)
+    new = ("opencode", "kiro", "acp")
+    check("the opencode, kiro and acp built-in extensions load without errors or notes",
+          all(e in reg.extensions and reg.extensions[e]["source"] == "built-in" for e in new)
+          and not reg.errors and not reg.notes,
+          json.dumps([sorted(reg.extensions), reg.errors, reg.notes])[:500])
+    check("their manifests say \"builtin\", since agents argv is an executable contribution",
+          all(reg.extensions.get(e, {}).get("manifest", {}).get("nuhut") == "builtin"
+              for e in new))
+    hs = reg.harnesses()
+    check("each new harness record declares hooks.dialect and lens dirs and mcp",
+          all(h in hs and "dialect" in hs[h].get("hooks", {})
+              and hs[h]["hooks"]["dialect"] in ("claude", "gemini", "cursor", None)
+              and isinstance(hs[h].get("lens", {}).get("dirs"), list)
+              and isinstance(hs[h].get("lens", {}).get("mcp"), list) for h in new),
+          json.dumps(dict((h, hs.get(h)) for h in new))[:600])
+    check("opencode and kiro harnesses come from their own extensions, not core",
+          hs.get("opencode", {}).get("extension") == "opencode"
+          and hs.get("kiro", {}).get("extension") == "kiro"
+          and hs.get("acp", {}).get("extension") == "acp")
+    review = registry.agent_table(reg, "review")
+    build = registry.agent_table(reg, "build")
+    check("opencode and kiro carry headless review and build argv",
+          review.get("opencode", ([None],))[0][0] == "opencode"
+          and build.get("opencode", ([None],))[0][0] == "opencode"
+          and review.get("kiro", ([None],))[0][0] == "kiro-cli"
+          and build.get("kiro", ([None],))[0][0] == "kiro-cli"
+          and all("{prompt}" in review[a][0] and "{prompt}" in build[a][0]
+                  for a in ("opencode", "kiro") if a in review and a in build),
+          repr((review, build))[:600])
+    check("the generic ACP record has no argv: ACP has no single headless CLI",
+          "acp" in reg.agents() and "acp" not in review and "acp" not in build)
+    with open(os.path.join(ROOT, "docs", "harnesses.md"), encoding="utf-8") as fh:
+        doc = fh.read()
+    check("docs/harnesses.md names OpenCode, Kiro and ACP and says guards do not run",
+          all(w in doc for w in ("OpenCode", "Kiro", "ACP", "`--harness opencode`"))
+          and re.search(r"(OpenCode|Kiro|ACP)[^\n]*guards do not run for this tool", doc), "")
+
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-newtools-"))
+    subprocess.call(["git", "init", "-q", "-b", "main", d])
+    code, out = run([d, "NTL", "-y", "--hooks", "--harness", "opencode,kiro,acp"])
+    check("install with --harness opencode,kiro,acp exits 0", code == 0, out[-600:])
+    for title in ("OpenCode", "Kiro", "ACP agents"):
+        check("install says guards do not run for %s" % title,
+              re.search(re.escape(title) + r"[^\n]*guards do not run for this tool", out),
+              out[-1500:])
+    check("the three extensions install as kit-managed files",
+          all(os.path.isfile(os.path.join(d, ".ai-sdlc", "extensions", e, "nuhut-extension.json"))
+              for e in new))
+    check("the shared skills are installed for the native tools",
+          os.path.isdir(os.path.join(d, ".agents", "skills")))
+    bindir = os.path.join(d, ".ai-sdlc", "bin")
+    fake = os.path.join(d, "fakebin")
+    os.makedirs(fake)
+    stub = os.path.join(fake, "opencode")
+    with open(stub, "w") as fh:
+        fh.write("#!%s\nimport sys\nassert sys.argv[1] == 'run', sys.argv\n"
+                 "assert 'Work item NTL-001' in sys.argv[-1]\n"
+                 "print('Verdict: Pass')\nprint('Checked: the diff')\n" % sys.executable)
+    os.chmod(stub, 0o755)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "add", "-A"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "chore: install the kit"], cwd=d)
+    write(d, "app.py", "V = 1\n")
+    subprocess.call(["git", "add", "app.py"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "feat(NTL-001): app\n\nWork-Item: NTL-001\n"
+                           "Agent: claude-code\nModel: claude-opus-5-5"], cwd=d)
+    roles = sorted(n[:-3] for n in os.listdir(os.path.join(d, "docs", "roles")) if n.endswith(".md"))
+    env = dict(os.environ, PATH=fake + os.pathsep + os.environ.get("PATH", ""))
+    p = subprocess.run([sys.executable, os.path.join(bindir, "sdlc.py"), "review", "NTL-001",
+                        "--role", roles[0], "--by", "opencode"], cwd=d, env=env,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    saved = [n for n in os.listdir(os.path.join(d, "docs", "project", "reviews"))
+             if n.startswith("NTL-001-")] if os.path.isdir(
+                 os.path.join(d, "docs", "project", "reviews")) else []
+    text = read(os.path.join(d, "docs", "project", "reviews"), saved[0]) if saved else ""
+    check("review --by opencode runs the fake opencode CLI and saves the review",
+          p.returncode == 0 and "**Reviewer agent:** opencode" in text and "Verdict: Pass" in text,
+          (p.stdout + text)[-800:])
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -6703,6 +6808,7 @@ def main():
                  test_installer_python_floor_and_finish_errors,
                  test_extension_registry,
                  test_tool_support_in_extensions, test_extension_cli,
+                 test_new_tool_extensions,
                  test_hotfix_fast_path,
                  test_people_registry,
                  test_shard_merge_driver,

@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "id": "opencode",
+  "version": "1.0.0",
+  "nuhut": "builtin",
+  "description": "OpenCode support: reads AGENTS.md; headless runs through `opencode run`",
+  "overrides": null,
+  "provides": {
+    "harnesses": [
+      {
+        "id": "opencode",
+        "order": 14,
+        "title": "OpenCode",
+        "native": true,
+        "pointer": null,
+        "markers": [
+          ".opencode",
+          "opencode.json"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [
+            ".opencode"
+          ],
+          "mcp": []
+        }
+      }
+    ],
+    "agents": [
+      {
+        "id": "opencode",
+        "order": 5,
+        "family": "varies",
+        "review": [
+          "opencode",
+          "run",
+          "{prompt}"
+        ],
+        "build": [
+          "opencode",
+          "run",
+          "{prompt}"
+        ],
+        "model_flag": "--model",
+        "identity": {
+          "agent": "opencode",
+          "env": [
+            "OPENCODE"
+          ],
+          "model_env": []
+        }
+      }
+    ],
+    "checks": [],
+    "presets": []
+  }
+}

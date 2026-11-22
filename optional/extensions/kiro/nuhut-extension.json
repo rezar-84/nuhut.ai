@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "id": "kiro",
+  "version": "1.0.0",
+  "nuhut": "builtin",
+  "description": "Kiro support: reads AGENTS.md; headless runs through `kiro-cli chat --no-interactive`",
+  "overrides": null,
+  "provides": {
+    "harnesses": [
+      {
+        "id": "kiro",
+        "order": 16,
+        "title": "Kiro",
+        "native": true,
+        "pointer": null,
+        "markers": [
+          ".kiro"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [
+            ".kiro"
+          ],
+          "mcp": [
+            ".kiro/settings/mcp.json"
+          ]
+        }
+      }
+    ],
+    "agents": [
+      {
+        "id": "kiro",
+        "order": 6,
+        "family": "varies",
+        "review": [
+          "kiro-cli",
+          "chat",
+          "--no-interactive",
+          "{prompt}"
+        ],
+        "build": [
+          "kiro-cli",
+          "chat",
+          "--no-interactive",
+          "--trust-all-tools",
+          "{prompt}"
+        ],
+        "model_flag": "--model",
+        "identity": {
+          "agent": "kiro",
+          "env": [],
+          "model_env": []
+        }
+      }
+    ],
+    "checks": [],
+    "presets": []
+  }
+}
