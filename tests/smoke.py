@@ -3610,7 +3610,11 @@ def test_status():
     check("gh missing is reported when Tier 1 items exist",
           "gh" in setup and "gh" in setup["gh"].get("fix", ""), json.dumps(st.get("setup")))
     check("no people.json: identity is not reported", "identity" not in setup, json.dumps(st.get("setup")))
-    check("no custom merge driver declared: nothing reported", "merge-driver" not in setup)
+    # The installer declares the nuhut-shard driver in .gitattributes (NUHT-025), and a
+    # fresh clone has not run `fix merge-driver` yet, so status reports it.
+    check("the installed nuhut-shard driver is reported until this clone configures it",
+          "merge-driver" in setup and "fix merge-driver" in setup["merge-driver"].get("fix", ""),
+          json.dumps(st.get("setup")))
     write(repo, "src/login.py", "def login():\n    return True\n")
     subprocess.call(["git", "add", "-A"], cwd=repo)
     subprocess.call(git + ["commit", "-qm", "feat(STX-1): login form\n\nWork-Item: STX-1"], cwd=repo)
