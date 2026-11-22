@@ -92,6 +92,26 @@ than add something new.
 | Release and deploy | The `sdlc-release` skill and runbook | Release record, deploy ledger, check the live environment, rollback |
 | Operate and fix | Incident mode, test lock, postmortem template | A hotfix fast path whose retroactive review `doctor` checks; postmortems linked to follow-up items |
 
+## Where the rules are enforced
+
+Local hooks and agent guards can always be skipped (`--no-verify`, a tool without hooks, or
+a teammate without the kit). A rule binds only where a merge can be refused, so the kit
+runs its checks at the point where code merges. That point depends on the git host:
+
+| Setup | Where the check runs | Binds when |
+| --- | --- | --- |
+| GitHub | `--scaffold-ci github` workflow; an organisation ruleset can require it in every repo | Branch protection requires the `quality` check (rulesets need a paid plan) |
+| GitLab | `--scaffold-ci gitlab`, a merge request pipeline | The branch is protected and pipelines must succeed; a pipeline execution policy covers every project (Ultimate) |
+| Gitea, Forgejo | `--scaffold-ci gitea` (Actions), or a server-side hook | The branch is protected and the status check is required |
+| Bitbucket, Azure DevOps, Jenkins | `--scaffold-ci bitbucket` or `generic`: a step running `ci-check` with `NUHUT_BASE` and `NUHUT_HEAD` | The host requires the build to pass before a merge |
+| A shared bare repository | A pre-receive hook that runs `ci-check` on each push (NUHT-039, proposed) | The hook is installed on the server |
+| Local git only | Local hooks and `doctor` | Never: `doctor` reports the repo as advisory (NUHT-038) |
+
+`ci-check` itself uses only git. It reads the target branch and head commit from each
+provider's variables (NUHT-038). Reading approvals from pull request reviews needs `gh` for
+now; readers for other hosts are planned as extensions (NUHT-039). Without one, `finish`
+falls back to the charter's Approvers row.
+
 ## Extension system
 
 The design is in [ADR 0003](../handbook/project/adr/0003-extension-system.md). In short:
