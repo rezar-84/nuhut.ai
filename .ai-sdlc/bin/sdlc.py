@@ -4676,7 +4676,8 @@ EXAMPLES = {
                "config --allow-extension lint-pack   # let an extension's code run once merged"],
     "ext": ["ext list", "ext add https://github.com/<owner>/<repo>.git --ref v1.0.0",
             "ext add ../my-extension      # a local directory", "ext update lint-pack --dry-run",
-            "ext remove lint-pack", "ext search lint", "ext validate ../my-extension"],
+            "ext remove lint-pack", "ext search lint", "ext validate ../my-extension",
+            "ext package lint-pack --for gemini  # writes dist/extensions/lint-pack/gemini/"],
     "fix": ["fix all", "fix shared-skills", "fix wire-pointer", "fix migrate-shards --apply",
             "fix rotate-worklog          # preview", "fix normalise-status --apply",
             "fix link-evidence --apply"],
@@ -4882,10 +4883,16 @@ def main(argv):
                      "row, so its code runs once the change is on the default branch")
     cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
     ex = sub.add_parser("ext", help="project extensions: list, add, update, remove, search the "
-                                    "catalog, validate a manifest")
-    ex.add_argument("action", choices=("list", "add", "update", "remove", "search", "validate"))
-    ex.add_argument("target", nargs="?", help="add: a git URL or local directory; update and "
-                    "remove: an extension id; search: a term; validate: a directory")
+                                    "catalog, validate a manifest, package a plugin wrapper")
+    ex.add_argument("action", choices=("list", "add", "update", "remove", "search", "validate",
+                                       "package"))
+    ex.add_argument("target", nargs="?", help="add: a git URL or local directory; update, "
+                    "remove and package: an extension id; search: a term; validate: a "
+                    "directory")
+    ex.add_argument("--for", dest="for_tool", choices=("claude", "gemini", "codex", "kiro"),
+                    help="package: the tool whose plugin wrapper to write")
+    ex.add_argument("--out", help="package: the directory to write into (default: "
+                    "dist/extensions/<id>/<tool>/)")
     ex.add_argument("--ref", help="add or update: the branch, tag or commit to install")
     ex.add_argument("--dry-run", action="store_true", help="update: print what would change")
     ex.add_argument("--json", action="store_true", help="list: print JSON")

@@ -536,6 +536,24 @@ def main():
             errors.append("%s: id: %r does not match its directory" % (rel, data.get("id")))
         if isinstance(data, dict) and data.get("nuhut") != "builtin":
             errors.append("%s: nuhut: a built-in extension says \"builtin\"" % rel)
+    # The kit's own Claude Code plugin is generated from core's `package` block (NUHT-019).
+    core_path = ROOT / "optional" / "extensions" / "core" / _registry.MANIFEST
+    plugin_path = ROOT / ".claude-plugin" / "plugin.json"
+    if core_path.is_file() and plugin_path.is_file():
+        try:
+            core = json.loads(core_path.read_text(encoding="utf-8"))
+            want = dict(_registry.package_files(core, "claude", version))
+            want = json.loads(want[".claude-plugin/plugin.json"])
+            have = json.loads(plugin_path.read_text(encoding="utf-8"))
+        except (ValueError, KeyError, AttributeError) as exc:
+            want, have = None, None
+            errors.append(".claude-plugin/plugin.json cannot be checked against core's "
+                          "package block: %s" % exc)
+        if want is not None and want != have:
+            errors.append(".claude-plugin/plugin.json differs from what "
+                          "optional/extensions/core/nuhut-extension.json generates; edit "
+                          "core's package block, then run python3 .ai-sdlc/bin/sdlc.py ext "
+                          "package core --for claude --out .")
     reg = _registry.load(None, kit=str(ROOT), warn=False, use_cache=False)
     for note in reg.notes:
         errors.append("%s: %s" % (note["path"], note["message"]))
