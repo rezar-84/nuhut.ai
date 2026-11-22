@@ -453,6 +453,11 @@ FIX_HINTS = (
     ("harnesses", r"git-ignored", "owner", "Remove {where} from .gitignore or your global "
      "gitignore so commands and skills travel to other devices on git pull"),
     ("harnesses", r"", "tool", SDLC + " fix shared-skills"),
+    ("hotfix", r"", "agent", SDLC + " review {item} --role <role> --by <harness> --stage retro"),
+    ("postmortem", r"not a work item", "agent", "Add the follow-up with " + SDLC + " item add, "
+     "or correct the ID in {where}"),
+    ("postmortem", r"", "agent", "Name each follow-up item ID and the test that reproduces the "
+     "failure in {where}"),
 )
 
 
@@ -1234,6 +1239,8 @@ def doctor(project, today=None, use_cache=True):
         check_sensitive(project, out)
         check_claims(project, out, today)
         check_specs(project, out, today)
+        check_hotfix(project, out, today)
+        check_postmortems(project, out)
         if can_cache and digest and cache_file:
             try:
                 cache_dir = os.path.dirname(cache_file)
@@ -2264,6 +2271,90 @@ def resolve_discovered_status(project, item_id, item_type, tier):
     if policy == "Auto-Ready (bite)":
         return "Parked", "Auto-Ready (bite) applies only to Tier 2 or 3 defects (got Tier %s %s)" % (t, itype)
     return "Parked", "charter Discovered defects policy is Parked (human triage required)"
+
+
+DEFAULT_RETRO_REVIEW_DAYS = 2
+
+
+def retro_review_window(charter):
+    """Days a hotfix has for its retroactive review: the charter's Retroactive review within
+    row, or DEFAULT_RETRO_REVIEW_DAYS when the row is absent or blank."""
+    cell = UNFILLED.sub("", labelled(charter or "", "Retroactive review within") or "")
+    found = re.search(r"[0-9]+", cell)
+    return int(found.group(0)) if found else DEFAULT_RETRO_REVIEW_DAYS
+
+
+def retro_reviews(project, item):
+    """The retroactive review files for <item>: <docs>/project/reviews/<ID>-retro*.md."""
+    return [r for r in review_records(project, item) if r["file"].startswith(item + "-retro")]
+
+
+def mark_hotfix(project, item_id, today=None):
+    """Mark <item_id> as a hotfix: hotfix true and the UTC time, the tier unchanged. The one
+    path behind `item set <ID> --hotfix` and `hotfix <ID>`. Returns (shard, error, exit code)."""
+    today = today or datetime.date.today().isoformat()
+    cur = _shards_mod.merged_items(project).get(item_id)
+    if not cur:
+        return None, "%s not found" % item_id, 2
+    updated = dict(cur)
+    if not _shards_mod.is_hotfix(cur) or not cur.get("hotfix_at"):
+        updated["hotfix"] = True
+        updated["hotfix_at"] = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ")
+    updated["updated"] = today
+    try:
+        return _shards_mod.save_item(project, updated, today=today), None, 0
+    except ValueError as exc:
+        return None, str(exc), 2
+
+
+def check_hotfix(project, out, today):
+    """A hotfix skips the pre-merge review and owes a retroactive one within the charter's
+    window. Past the window with no <ID>-retro*.md review file, doctor fails it."""
+    window = retro_review_window(project.charter)
+    for iid, it in sorted(_shards_mod.merged_items(project).items(), key=lambda kv: id_sort_key(kv[0])):
+        if not _shards_mod.is_hotfix(it) or it.get("status") == "Dropped":
+            continue
+        marked = str(it.get("hotfix_at") or "")[:10]
+        days = age_days(marked, today)
+        if days is None:
+            out.add("warn", "hotfix", "hotfix %s" % iid, "hotfix %s has no hotfix_at date, so "
+                    "its retroactive review window cannot be checked" % iid)
+        elif days > window and not retro_reviews(project, iid):
+            out.add("fail", "hotfix", "hotfix %s" % iid,
+                    "hotfix %s was marked %s and has no retroactive review after %d day(s); "
+                    "the charter's Retroactive review within is %d: write %s/project/reviews/"
+                    "%s-retro-<role>.md" % (iid, marked, days, window, project.docs, iid))
+
+
+FOLLOW_UP_ID = re.compile(r"\b[A-Z][A-Z0-9]*-[0-9]+\b")
+
+
+def check_postmortems(project, out):
+    """Each postmortem names its follow-up items, and they exist; and names the regression
+    test that reproduces the failure."""
+    folder = project.path(os.path.join(project.docs, "project", "postmortems"))
+    if not os.path.isdir(folder):
+        return
+    known = set(_shards_mod.merged_items(project))
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith(".md") or name.lower() == "readme.md":
+            continue
+        rel = os.path.join(project.docs, "project", "postmortems", name)
+        text = read(os.path.join(folder, name))
+        follow = re.search(r"^\*\*Follow-up items:\*\*(.*)$", text, re.M)
+        ids = FOLLOW_UP_ID.findall(UNFILLED.sub("", follow.group(1))) if follow else []
+        if not ids:
+            out.add("warn", "postmortem", rel, "postmortem names no follow-up item IDs on its "
+                    "**Follow-up items:** line")
+        missing = [i for i in ids if i not in known]
+        if missing:
+            out.add("fail", "postmortem", rel, "postmortem follow-up %s is not a work item in "
+                    "the backlog" % ", ".join(missing))
+        test = re.search(r"^\*\*Regression test:\*\*(.*)$", text, re.M)
+        if not test or not UNFILLED.sub("", test.group(1)).strip():
+            out.add("warn", "postmortem", rel, "postmortem names no regression test on its "
+                    "**Regression test:** line")
 
 
 def check_identity(project, out):
@@ -3974,6 +4065,7 @@ Viewer and reports
 
 Work items and agents
   item                manage sharded items: add, set, show, list                      item add --title "Fix auth"
+  hotfix <ID>         mark an item a hotfix (same as item set <ID> --hotfix)          hotfix ACME-12
   next-id             allocate the next work item or ADR ID (--sync-refs for CAS)     next-id --sync-refs
   render              materialize backlog.md and worklog.md from shards (--check)     render --check
   claim <ID>          take an item: atomic claim, its branch and its own worktree     claim ACME-12
@@ -4028,7 +4120,10 @@ EXAMPLES = {
             "fix link-evidence --apply"],
     "item": ["item add --title \"Fix empty input\" --type defect --tier 2 --touch src/parser.py",
              "item set ACME-012 --status Ready --effort Lean",
+             "item set ACME-012 --hotfix  # finish skips the pre-merge review; a retro review is owed",
              "item list --status Ready --json", "item show ACME-012 --json"],
+    "hotfix": ["hotfix ACME-012          # the same as item set ACME-012 --hotfix",
+               "review ACME-012 --role qa --by codex --stage retro  # the retroactive review"],
     "next-id": ["next-id", "next-id --sync-refs --json", "next-id --kind adr"],
     "render": ["render", "render --check"],
     "lens": ["lens", "lens --area build", "lens --user --json"],
@@ -4159,7 +4254,8 @@ def main(argv):
     rv.add_argument("--by", required=True, help="claude, codex, gemini, or cmd:<command> "
                     "(reads the prompt on stdin, prints the review)")
     rv.add_argument("--model", help="model to ask the harness for; recorded")
-    rv.add_argument("--stage", default="ship", choices=("design", "ship"))
+    rv.add_argument("--stage", default="ship", choices=("design", "ship", "retro"),
+                    help="design, ship, or retro (the retroactive review a hotfix owes)")
     rv.add_argument("--base", help="review the diff from this ref to the working tree "
                     "instead of the item's commits")
     rv.add_argument("--timeout", type=int, default=1800)
@@ -4294,9 +4390,16 @@ def main(argv):
     it_p.add_argument("--later-when", dest="later_when", help="when a Deferred item becomes relevant")
     it_p.add_argument("--dropped-reason", dest="dropped_reason", help="reason an item was Dropped")
     it_p.add_argument("--summary", help="optional short summary")
+    it_p.add_argument("--hotfix", action="store_true",
+                      help="on `set`: mark the item a hotfix (records hotfix:true and the time; the "
+                           "tier stays). finish then skips the pre-merge review and records a "
+                           "retroactive review owed within the charter's Retroactive review within")
     it_p.add_argument("--sync-refs", dest="sync_refs", action="store_true",
                       help="when auto-allocating ID on `add`, coordinate via refs/nuhut/seq on origin")
     it_p.add_argument("--json", action="store_true", help="print result as JSON")
+    hf_p = sub.add_parser("hotfix", help="mark a work item a hotfix: the same as `item set <ID> --hotfix`")
+    hf_p.add_argument("item", help="work item ID")
+    hf_p.add_argument("--json", action="store_true", help="print the item as JSON")
     dsp = sub.add_parser("dispatch", help="execute conflict-free waves of Ready items across isolated worker worktrees")
     dsp.add_argument("--workers", type=int, default=1, help="max parallel workers per wave (default: 1)")
     dsp.add_argument("--by", help="builder CLI: claude, codex, gemini, or cmd:<command>")
@@ -4586,6 +4689,10 @@ def main(argv):
                     print("  depends: %s" % ", ".join(it["depends"]))
                 if it.get("touch"):
                     print("  touch: %s" % ", ".join(it["touch"]))
+                if _shards_mod.is_hotfix(it):
+                    print("  hotfix: since %s · retroactive review: %s" % (
+                        it.get("hotfix_at") or "unknown",
+                        "on file" if retro_reviews(project, it["id"]) else (it.get("retro_review") or "owed once merged")))
             return 0
         if opts.action == "add":
             if not opts.title:
@@ -4718,11 +4825,29 @@ def main(argv):
             except ValueError as exc:
                 sys.stderr.write("item set: %s\n" % exc)
                 return 2
+            if getattr(opts, "hotfix", False):
+                saved, err_h, code_h = mark_hotfix(project, opts.target, today=today_iso)
+                if err_h:
+                    sys.stderr.write("item set: %s\n" % err_h)
+                    return code_h
             if opts.json:
                 print(json.dumps(saved, indent=2))
             else:
                 print("updated %s (%s, Tier %s)" % (saved["id"], saved["status"], saved["tier"]))
             return 0
+    if opts.command == "hotfix":
+        saved, err_h, code_h = mark_hotfix(project, opts.item)
+        if err_h:
+            sys.stderr.write("hotfix: %s\n" % err_h)
+            return code_h
+        if opts.json:
+            print(json.dumps(saved, indent=2))
+        else:
+            print("%s marked hotfix at %s (Tier %s stays). finish skips the pre-merge review; a "
+                  "retroactive review is owed within %d day(s)" % (
+                      saved["id"], saved["hotfix_at"], saved["tier"],
+                      retro_review_window(project.charter)))
+        return 0
     if opts.command == "dispatch":
         dispatch_mod = runtime_module("dispatch")
         report, rc = dispatch_mod.run_dispatch(sys.modules[__name__], project, opts)

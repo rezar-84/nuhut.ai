@@ -159,7 +159,7 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 | **Start here** | `status` what to do next: missing setup, your items and the step each owes, Parked on you, Ready to take |
 | **Records and checks** | `doctor` audit the records · `verify` run the checks, keep the evidence · `bite` prove a test catches the change · `plan-check` diff vs plan (`--pre` before the build) · `finish` close an item: evidence, review, worklog draft, status · `render` materialise `backlog.md` and `worklog.md` from shards |
 | **Viewer and reports** | `view` the project as one page (`--serve` live) · `lens` stack, build, security, deploy, env, agents · `audit` vulnerable packages · `metrics` process measures |
-| **Work items and agents** | `item` per-item shards · `next-id` atomic ID allocation · `claim` / `release` / `claims` · `parallel` · `dispatch` headless multi-worker queue execution · `trailers` commit trailers · `sync` behind the remote? conflicts? · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |
+| **Work items and agents** | `item` per-item shards · `hotfix` the hotfix fast path, retroactive review owed · `next-id` atomic ID allocation · `claim` / `release` / `claims` · `parallel` · `dispatch` headless multi-worker queue execution · `trailers` commit trailers · `sync` behind the remote? conflicts? · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |
 | **Specs** | `spec list \| show \| validate \| apply` |
 | **Writing** | `slop` find the phrasings that read as machine-written (`--strict` fails the file) |
 | **Setup** | `config` see or change the charter's constraints · `fix` safe repairs |

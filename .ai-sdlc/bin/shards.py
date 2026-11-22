@@ -234,7 +234,7 @@ def normalize_item(data, today=None):
     if isinstance(approvers, str):
         approvers = [a.strip() for a in approvers.split(",") if a.strip()]
 
-    return {
+    out = {
         "id": raw_id,
         "title": str(data.get("title") or raw_id).strip(),
         "type": itype,
@@ -255,6 +255,22 @@ def normalize_item(data, today=None):
         "later_when": str(data.get("later_when") or "").strip(),
         "dropped_reason": str(data.get("dropped_reason") or "").strip(),
     }
+    # Hotfix fields are written only on a hotfix, so ordinary shards keep their shape.
+    if is_hotfix(data):
+        out["hotfix"] = True
+        out["hotfix_at"] = str(data.get("hotfix_at") or "").strip()
+        retro = str(data.get("retro_review") or "").strip()
+        if retro:
+            out["retro_review"] = retro
+    return out
+
+
+def is_hotfix(data):
+    """True when an item shard (or its raw JSON) is marked as a hotfix."""
+    value = (data or {}).get("hotfix")
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "1")
+    return value is True
 
 
 def _atomic_write_text(path, content):

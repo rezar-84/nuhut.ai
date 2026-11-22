@@ -4912,6 +4912,106 @@ def test_json_and_doctor_cache():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_hotfix_fast_path():
+    import datetime as _dt
+    print("hotfix fast path: item set --hotfix, finish without the pre-merge review, "
+          "retroactive review and postmortem follow-ups in doctor")
+    d = tempfile.mkdtemp(prefix="sdlc-hotfix-")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", d])
+    run([d, "HFX", "-y"])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        return p.returncode, p.stdout, p.stderr
+
+    def doctor_findings(check_name):
+        rc_d, out_d, _ = sdlc("doctor", "--json", "--no-cache")
+        try:
+            return [f for f in json.loads(out_d) if f.get("check") == check_name]
+        except ValueError:
+            return [{"message": "unparsable doctor output: " + out_d[:300]}]
+
+    sdlc("config", "--set-check", "unit=true")
+    sdlc("item", "add", "--id", "HFX-001", "--title", "Checkout returns 500", "--type", "fix", "--tier", "1")
+    sdlc("item", "add", "--id", "HFX-002", "--title", "Login loop", "--type", "fix", "--tier", "2")
+    sdlc("item", "add", "--id", "HFX-003", "--title", "Ordinary Tier 1", "--tier", "1")
+
+    rc, out, err = sdlc("item", "set", "HFX-001", "--hotfix", "--json")
+    shard = json.loads(out) if rc == 0 and out.strip().startswith("{") else {}
+    check("item set --hotfix records hotfix:true and the time, and keeps the tier",
+          shard.get("hotfix") is True and re.match(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T", shard.get("hotfix_at", ""))
+          and shard.get("tier") == "1", out + err)
+    rc, out, err = sdlc("hotfix", "HFX-002", "--json")
+    shard2 = json.loads(out) if rc == 0 and out.strip().startswith("{") else {}
+    check("hotfix <ID> is a shortcut for the same path",
+          shard2.get("hotfix") is True and shard2.get("hotfix_at") and shard2.get("tier") == "2", out + err)
+    rc, out, err = sdlc("hotfix", "HFX-404")
+    check("hotfix on an unknown ID fails cleanly", rc == 2 and "not found" in err and "Traceback" not in err, err)
+    rc, out, err = sdlc("item", "show", "HFX-001")
+    check("item show names the hotfix", "hotfix" in out, out)
+    rc, out, err = sdlc("hotfix", "-h")
+    check("hotfix has help", rc == 0 and "item set" in out, out + err)
+
+    for n in (1, 3):
+        write(d, "src/f%d.txt" % n, str(n))
+        subprocess.call(["git", "add", "-A"], cwd=d)
+        subprocess.call(git + ["commit", "-qm", "fix(HFX-00%d): stop the bleed" % n], cwd=d)
+        sdlc("verify", "--item", "HFX-00%d" % n)
+
+    rc, out, err = sdlc("finish", "HFX-003")
+    check("an ordinary Tier 1 item still owes the ship review", rc == 1 and "OWED review" in out, out)
+    sdlc("finish", "HFX-001")
+    wl = os.path.join(d, "docs", "project", "worklog", "HFX-001.md")
+    if os.path.isfile(wl):
+        write(d, "docs/project/worklog/HFX-001.md", re.sub(r"(?m)^TODO\(finish\): .*$", "none.", read(d, "docs/project/worklog/HFX-001.md")))
+    write(d, "docs/project/worklog.md", re.sub(r"(?m)^TODO\(finish\): .*$", "none.", read(d, "docs/project/worklog.md")))
+    rc, out, err = sdlc("finish", "HFX-001")
+    check("a hotfix finishes without the pre-merge review and says a retroactive one is owed",
+          rc == 0 and "OWED review" not in out and "retroactive review owed" in out, out)
+    shard = json.loads(read(d, "docs/project/items/HFX-001.json") or "{}")
+    check("finish records the owed retroactive review on the item; Tier 1 still parks",
+          shard.get("retro_review") == "owed" and shard.get("status") == "Parked" and shard.get("tier") == "1",
+          str(shard))
+
+    check("doctor is quiet about a hotfix still inside its window", not doctor_findings("hotfix"))
+    old = (_dt.datetime.utcnow() - _dt.timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    shard["hotfix_at"] = old
+    write(d, "docs/project/items/HFX-001.json", json.dumps(shard, indent=2))
+    found = doctor_findings("hotfix")
+    check("doctor flags a hotfix with no retroactive review after the default 2 days",
+          len(found) == 1 and "HFX-001" in found[0].get("where", "") + found[0].get("message", "")
+          and found[0].get("level") == "fail", str(found))
+    charter = read(d, "docs/project/charter.md")
+    check("the charter template carries the Retroactive review within row",
+          "**Retroactive review within**" in charter)
+    write(d, "docs/project/charter.md", re.sub(r"(?m)^\| \*\*Retroactive review within\*\* \|.*$",
+                                               "| **Retroactive review within** | 10 days |", charter))
+    check("the charter row widens the window", not doctor_findings("hotfix"))
+    write(d, "docs/project/charter.md", charter)
+    write(d, "docs/project/reviews/HFX-001-retro-qa.md", "# Review — HFX-001\n\n**Stage:** retro\n")
+    check("a retroactive review file clears the finding", not doctor_findings("hotfix"))
+
+    template = read(d, "docs/templates/postmortem.md")
+    check("the postmortem template has follow-up items and a regression test field",
+          "**Follow-up items:**" in template and "**Regression test:**" in template, template[:400])
+    write(d, "docs/project/postmortems/2026-checkout-500.md",
+          "# Postmortem — checkout 500\n\n**Hotfix item:** HFX-001\n"
+          "**Follow-up items:** HFX-003, HFX-099\n**Regression test:** tests/test_checkout.py::test_500\n")
+    found = doctor_findings("postmortem")
+    check("doctor flags a postmortem follow-up that is not a work item, and only that one",
+          len(found) == 1 and "HFX-099" in found[0].get("message", "") and "HFX-003" not in found[0].get("message", ""),
+          str(found))
+    write(d, "docs/project/postmortems/2026-checkout-500.md",
+          "# Postmortem — checkout 500\n\n**Follow-up items:** HFX-003\n**Regression test:** _(path::name)_\n")
+    found = doctor_findings("postmortem")
+    check("doctor warns on a postmortem with no regression test",
+          len(found) == 1 and "regression test" in found[0].get("message", "").lower(), str(found))
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_dispatch_and_self_healing():
     print("headless dispatch: multi-worker waves, repair loop, self-healing triage, and telemetry")
     base = tempfile.mkdtemp(prefix="sdlc-dispatch-")
@@ -5386,7 +5486,8 @@ def main():
                  test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
                  test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
                  test_installer_python_floor_and_finish_errors,
-                 test_extension_registry):
+                 test_extension_registry,
+                 test_hotfix_fast_path):
         test()
     print("")
     if failures:

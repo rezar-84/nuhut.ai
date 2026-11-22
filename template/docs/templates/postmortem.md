@@ -8,6 +8,9 @@ last-reviewed: YYYY-MM-DD
 
 **Date:** YYYY-MM-DD **Severity:** S0 | S1
 **Duration:** <detection → resolution> **Author:** _(who)_
+**Hotfix item:** _(the ID the fix shipped under, e.g. {{PREFIX}}-###)_
+**Follow-up items:** _(the backlog IDs of the changes below, comma-separated; `sdlc.py doctor` checks each exists)_
+**Regression test:** _(path::name of the test that reproduces the failure and now passes)_
 
 > This document is **blameless**. It examines the system that allowed the failure — the
 > checks that did not exist, the signal nobody saw, the step that was easy to get wrong.

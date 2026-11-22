@@ -605,7 +605,24 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     policy = rt.independent_review_policy(project.charter, project.profile)[1]
     independent = [r for r in reviews
                    if re.match(r"(?i)independent\b", r["fields"].get("Independence", ""))]
-    if tier in policy and not independent and not already:
+    current = shards.merged_items(project).get(item) or {}
+    hotfix = shards.is_hotfix(current)
+    retro = rt.retro_reviews(project, item) if hotfix else []
+    if hotfix and retro:
+        out.append("review   hotfix: retroactive review %s" % ", ".join(r["file"] for r in retro))
+    elif hotfix:
+        # The fast path: no pre-merge review is owed, and the retroactive one is recorded.
+        window = rt.retro_review_window(project.charter)
+        try:
+            due = (datetime.datetime.strptime(str(current.get("hotfix_at") or today)[:10],
+                                              "%Y-%m-%d").date()
+                   + datetime.timedelta(days=window)).isoformat()
+        except ValueError:
+            due = "%d day(s) after the hotfix" % window
+        out.append("review   hotfix: the pre-merge review is skipped; retroactive review owed "
+                   "by %s: `%s review %s --role <role> --by <harness> --stage retro` (doctor "
+                   "fails it after that)" % (due, SDLC, item))
+    elif tier in policy and not independent and not already:
         owe("review   the charter wants an independent review at Tier %s: `%s review "
                      "%s --role <role> --by <a harness other than the author's>`"
                      % (tier, SDLC, item))
@@ -671,6 +688,8 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
             }
             sh["status"] = final
             sh["updated"] = today
+            if hotfix:
+                sh["retro_review"] = "done" if retro else "owed"
             if needs_human_gate:
                 sh["waiting_on"] = extra[0]
                 sh["park_reason"] = extra[1]
