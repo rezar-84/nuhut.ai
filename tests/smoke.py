@@ -4223,11 +4223,15 @@ def test_upgrade_to_41():
         after = read(d, "docs/project/charter.md").splitlines()
         added = [l for l in after if l not in charter_before.splitlines()]
         new_rows = ("| **Specs** |", "| **Slop filter** |", "| **Updating a branch** |",
-                    "| **Finish guard** |", "| **Allowed in records** |", "| **Discovered defects** |")
+                    "| **Finish guard** |", "| **Allowed in records** |", "| **Discovered defects** |",
+                    # 6.0: worktree scripts (NUHT-032), hotfix review window (NUHT-028) and
+                    # the extension code allowlist (NUHT-018).
+                    "| **Worktree scripts** |", "| **Retroactive review within** |",
+                    "| **Extensions allowed** |")
         check("project records keep every line; the charter only gains the new rows",
               all(l in after for l in charter_before.splitlines()) and len(added) == len(new_rows)
               and all(any(l.startswith(r) for l in added) for r in new_rows)
-              and read(d, "docs/project/worklog.md") == worklog_before, str(added)[:300])
+              and read(d, "docs/project/worklog.md") == worklog_before, str([l[:40] for l in added]))
         script = os.path.join(bin_dir, "sdlc.py")
         for args in (("lens", "--area", "stack"), ("claims",), ("spec", "list"), ("parallel",)):
             p = subprocess.run([sys.executable, script] + list(args), cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

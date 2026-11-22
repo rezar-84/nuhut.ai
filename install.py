@@ -2310,6 +2310,11 @@ def preview_files(w):
             inst.scaffold()
             inst.install_hooks()
             inst.install_git_hooks()
+            # The same steps the real install runs after these, so the preview's count is
+            # what gets written (the .gitattributes lines included).
+            inst.install_mcp()
+            inst.apply_git_ignores()
+            inst.apply_git_attributes()
     except (IOError, OSError, RuntimeError, ValueError):
         pass
     finally:
