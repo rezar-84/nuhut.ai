@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Agent tools are described by extension manifests (NUHT-016).** A new runtime module, `registry.py`, reads `nuhut-extension.json` manifests from `.ai-sdlc/local/extensions/` (the project's own) and `.ai-sdlc/extensions/` (the built-ins `core`, `claude`, `codex`, `gemini` and `cursor`, installed and refreshed as kit-managed files). The installer's harness tables and presets, and the agent CLIs behind `review --by` and `dispatch --by`, now come from the built-in manifests, which reproduce the 5.x tables exactly; a test checks that the two agree. A project extension can add harness and preset records, and replaces a built-in record only with `"overrides": "<built-in id>"`. Agent argv and check commands from project extensions are refused until NUHT-018. An invalid, too-new or out-of-range manifest is skipped with a stderr line naming the file and field, and is a `doctor` failure; `review --by codex` with a broken codex manifest says so instead of failing obscurely. Without `.ai-sdlc/extensions/`, the runtime uses the 5.x tables and `doctor` warns "registry missing, using v5 tables".
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.

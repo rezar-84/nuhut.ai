@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "id": "cursor",
+  "version": "1.0.0",
+  "nuhut": "builtin",
+  "description": "Cursor support",
+  "overrides": null,
+  "provides": {
+    "harnesses": [
+      {
+        "id": "cursor",
+        "order": 2,
+        "title": "Cursor",
+        "native": false,
+        "pointer": [
+          {
+            "path": ".cursor/rules/agents.mdc",
+            "header": "---\ndescription: Operating contract for this repository\nalwaysApply: true\n---\n\n"
+          },
+          {
+            "path": ".cursorrules",
+            "header": ""
+          }
+        ],
+        "markers": [
+          ".cursor",
+          ".cursorrules"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": "cursor",
+          "settings": ".cursor/hooks.json",
+          "events": {
+            "pre_shell": "beforeShellExecution"
+          }
+        },
+        "lens": {
+          "dirs": [
+            ".cursor"
+          ],
+          "mcp": [
+            ".cursor/mcp.json"
+          ]
+        }
+      }
+    ],
+    "agents": [],
+    "checks": [],
+    "presets": []
+  }
+}

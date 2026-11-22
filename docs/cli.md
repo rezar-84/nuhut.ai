@@ -53,6 +53,28 @@ Guides for the bigger commands: [the viewer](viewer.md) (`view`, `lens`, `audit`
 `review`), [living specs](specs.md) (`spec`), [the slop filter](slop-filter.md) (`slop`), and [the runtime](runtime.md) for evidence,
 `verify` and `bite`.
 
+### Where the agent tool tables come from
+
+`review --by` and `dispatch --by` take their agent CLIs from the extension registry
+(`.ai-sdlc/bin/registry.py`). It reads `nuhut-extension.json` manifests from
+`.ai-sdlc/local/extensions/<id>/` (the project's own) and `.ai-sdlc/extensions/<id>/` (the
+built-ins: `core`, `claude`, `codex`, `gemini`, `cursor`, refreshed by `--upgrade`). The
+installer reads the same built-ins for its `--harness` tables and presets.
+
+- A project extension can add harness and preset records. It replaces a built-in record
+  only when its manifest says `"overrides": "<built-in id>"`, and then only that
+  built-in's records, by id. Without `overrides`, a record that collides with a built-in
+  is ignored and `doctor` says why.
+- Agent argv and check commands from a project extension are refused for now, with a
+  `doctor` note. NUHT-018 adds the **Extensions allowed** charter row that enables them.
+- A manifest with a schema newer than 1, a `nuhut` range that excludes the running
+  version, or a field of the wrong type is skipped. The runtime prints one stderr line
+  naming the file and field, and `doctor` reports it at fail level. An unknown key under
+  `provides` is a warning.
+- If `.ai-sdlc/extensions/` does not exist (an install made before 6.0) or `registry.py`
+  cannot be imported, the runtime uses the 5.x tables and `doctor` warns "registry
+  missing, using v5 tables". `install.sh <project> --upgrade` restores them.
+
 ## Slash commands (Claude Code) and loop skills (other tools)
 
 | Command | Does |

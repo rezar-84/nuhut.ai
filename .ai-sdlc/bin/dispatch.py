@@ -22,6 +22,8 @@ import time
 
 import shards
 
+# The v5 table: the fallback when the registry is missing. The built-in extensions in
+# .ai-sdlc/extensions/ are the source (sdlc.agent_table); tests/smoke.py checks parity.
 BUILD_HARNESSES = {
     "claude": (["claude", "-p", "{prompt}", "--permission-mode", "acceptEdits", "--output-format", "text"], "--model"),
     "codex": (["codex", "exec", "--full-auto", "{prompt}"], "--model"),
@@ -80,7 +82,14 @@ def _save_dispatch_run(rt, project, record):
     return os.path.relpath(path, project.root)
 
 
-def _validate_harness(spec, role_label="builder"):
+def _build_table(rt, project):
+    if hasattr(rt, "agent_table"):
+        return rt.agent_table(project, "build")
+    return BUILD_HARNESSES
+
+
+def _validate_harness(spec, role_label="builder", table=None, broken=None):
+    table = BUILD_HARNESSES if table is None else table
     if not spec:
         return None, "--by is required unless --dry-run (claude, codex, gemini, or cmd:<command>)"
     if spec.startswith("cmd:"):
@@ -88,12 +97,16 @@ def _validate_harness(spec, role_label="builder"):
         if not cmd:
             return None, "%s cmd: requires a non-empty command" % role_label
         return ("cmd", cmd), None
-    if spec in BUILD_HARNESSES:
-        exe = BUILD_HARNESSES[spec][0][0]
+    if broken:
+        message = broken(spec)
+        if message:
+            return None, message
+    if spec in table:
+        exe = table[spec][0][0]
         if shutil.which(exe) is None:
             return None, "%s %r is not installed (no %r on PATH)" % (role_label, spec, exe)
         return (spec, None), None
-    return None, "%s must be claude, codex, gemini, or cmd:<command>" % role_label
+    return None, "%s must be %s, or cmd:<command>" % (role_label, ", ".join(sorted(table)))
 
 
 def _may_auto_merge(project, rt, pr_mode=False, no_merge=False):
@@ -294,7 +307,8 @@ def _extract_builder_notes(stdout_text, title):
     return summary, discovered
 
 
-def _run_builder_turn(rt, harness_kind, harness_cmd, model, prompt, wt_path, item_meta, attempt, timeout):
+def _run_builder_turn(rt, harness_kind, harness_cmd, model, prompt, wt_path, item_meta, attempt, timeout,
+                      table=None):
     env = dict(os.environ)
     env["NUHUT_DISPATCH_WORKER"] = "1"
     env["NUHUT_ITEM_ID"] = item_meta["id"]
@@ -310,7 +324,7 @@ def _run_builder_turn(rt, harness_kind, harness_cmd, model, prompt, wt_path, ite
             harness_cmd, cwd=wt_path, timeout=timeout, shell=True, input_text=prompt, env=env
         )
     else:
-        args_tpl, model_flag = BUILD_HARNESSES[harness_kind]
+        args_tpl, model_flag = (BUILD_HARNESSES if table is None else table)[harness_kind]
         args = [part.replace("{prompt}", prompt) for part in args_tpl]
         if model:
             args += [model_flag, model]
@@ -439,7 +453,9 @@ def run_dispatch(rt, project, opts):
         return preview, 0
 
     by_spec = getattr(opts, "by", None) or ""
-    parsed_builder, err = _validate_harness(by_spec, "builder")
+    build_table = _build_table(rt, project)
+    broken = (lambda spec: rt.broken_agent(project, spec)) if hasattr(rt, "broken_agent") else None
+    parsed_builder, err = _validate_harness(by_spec, "builder", build_table, broken)
     if err:
         return {"error": err}, 2
     harness_kind, harness_cmd = parsed_builder
@@ -449,7 +465,7 @@ def run_dispatch(rt, project, opts):
 
     reviewer_spec = getattr(opts, "reviewer", None) or ""
     if reviewer_spec:
-        _, rev_err = _validate_harness(reviewer_spec, "reviewer")
+        _, rev_err = _validate_harness(reviewer_spec, "reviewer", build_table, broken)
         if rev_err:
             return {"error": rev_err}, 2
     reviewer_model = getattr(opts, "reviewer_model", None) or ""
@@ -510,7 +526,8 @@ def run_dispatch(rt, project, opts):
                 attempts_used = attempt
                 prompt = _build_prompt(rt, wt_project, item_meta, attempt=attempt, failure_report=last_diag)
                 rc, out_s, err_s, timed_out = _run_builder_turn(
-                    rt, harness_kind, harness_cmd, builder_model, prompt, wt_path, item_meta, attempt, timeout
+                    rt, harness_kind, harness_cmd, builder_model, prompt, wt_path, item_meta, attempt, timeout,
+                    table=build_table,
                 )
                 last_stdout = out_s
                 wt_project.__init__(wt_path)

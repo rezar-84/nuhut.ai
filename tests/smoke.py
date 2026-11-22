@@ -4582,6 +4582,187 @@ def test_benchmarks_harnesses_and_effort_modes():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_extension_registry():
+    print("extension registry: built-in manifests, parity, overrides, refusals, fallback")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    try:
+        import registry
+        import sdlc as _rt
+        import dispatch as _dispatch
+    except ImportError as exc:
+        check("optional/runtime/registry.py imports", False, str(exc))
+        return
+    reg = registry.load(None, kit=ROOT, use_cache=False)
+    check("the kit's built-in extensions load without errors",
+          not reg.missing and not reg.errors and set(reg.extensions) >= {
+              "core", "claude", "codex", "gemini", "cursor"},
+          json.dumps(reg.errors)[:400])
+    check("built-in manifests say \"builtin\" and load as built-in",
+          all(e["manifest"].get("nuhut") == "builtin" and e["source"] == "built-in"
+              for e in reg.extensions.values()))
+    tables = registry.install_tables(reg)
+    for name in ("HARNESS_NATIVE", "HARNESS_ALIASES", "HARNESS_TITLES", "HARNESS_ORDER",
+                 "HARNESS_MARKERS", "PRESETS", "PRESET_HELP"):
+        check("parity: the registry's %s equals the v5 table" % name,
+              tables[name] == getattr(installer, "V5_" + name, None),
+              "%r != %r" % (tables[name], getattr(installer, "V5_" + name, None)))
+    check("parity: the registry's pointer files equal the v5 table",
+          dict(tables["HARNESS_POINTERS"]) == dict(getattr(installer, "V5_HARNESS_POINTERS", ()))
+          and len(tables["HARNESS_POINTERS"]) == len(getattr(installer, "V5_HARNESS_POINTERS", ())))
+    check("the installer reads its harness tables from the registry",
+          installer.HARNESS_ORDER == tables["HARNESS_ORDER"]
+          and installer.PRESETS == tables["PRESETS"])
+    check("parity: registry review argv equals REVIEW_HARNESSES",
+          registry.agent_table(reg, "review") == {
+              k: (list(v[0]), v[1]) for k, v in _rt.REVIEW_HARNESSES.items()})
+    check("parity: registry build argv equals BUILD_HARNESSES",
+          registry.agent_table(reg, "build") == {
+              k: (list(v[0]), v[1]) for k, v in _dispatch.BUILD_HARNESSES.items()})
+    hs = reg.harnesses()
+    check("harness records carry hooks and lens fields",
+          hs["claude"]["hooks"]["dialect"] == "claude"
+          and hs["claude"]["hooks"]["settings"] == ".claude/settings.json"
+          and hs["gemini"]["hooks"]["dialect"] == "gemini"
+          and hs["cursor"]["hooks"]["dialect"] == "cursor"
+          and hs["codex"]["hooks"]["dialect"] is None
+          and ".claude" in hs["claude"]["lens"]["dirs"])
+    check("version ranges: >= < == and builtin",
+          registry.version_ok(">=6.0.0,<7.0.0", "6.1.0")
+          and not registry.version_ok(">=6.0.0,<7.0.0", "7.0.0")
+          and registry.version_ok("==5.0.0", "5.0.0")
+          and not registry.version_ok(">=99", "5.0.0")
+          and registry.version_ok("builtin", "0.0.1"))
+
+    d = tempfile.mkdtemp(prefix="sdlc-ext-")
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "EXT", "-y"])
+    check("install exits 0", code == 0, out[-300:])
+    codex_rel = ".ai-sdlc/extensions/codex/nuhut-extension.json"
+    manifest = json.loads(read(d, ".ai-sdlc/manifest.json") or "{}")
+    check("built-in extensions install as kit-managed files",
+          os.path.isfile(os.path.join(d, codex_rel)) and codex_rel in manifest.get("files", {})
+          and os.path.isfile(os.path.join(d, ".ai-sdlc", "bin", "registry.py")))
+    check("the extensions directory is a managed prefix, local/ is not",
+          installer.is_managed_rel(codex_rel, "docs")
+          and not installer.is_managed_rel(".ai-sdlc/local/extensions/x/nuhut-extension.json",
+                                           "docs"))
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return (p.returncode, p.stdout.decode("utf-8", "replace"),
+                p.stderr.decode("utf-8", "replace"))
+
+    def ext_findings():
+        _, o, _ = sdlc("doctor", "--json")
+        try:
+            return [f for f in json.loads(o) if f.get("check") == "extensions"]
+        except ValueError:
+            return [{"level": "fail", "where": "", "message": "doctor output is not JSON: " + o[-300:]}]
+
+    found = ext_findings()
+    check("a fresh install has no extension findings", found == [], json.dumps(found)[:400])
+
+    local = os.path.join(d, ".ai-sdlc", "local", "extensions")
+
+    def put(ext_id, data):
+        write(d, ".ai-sdlc/local/extensions/%s/nuhut-extension.json" % ext_id, json.dumps(data))
+
+    def manifest_for(ext_id, **extra):
+        data = {"schema": 1, "id": ext_id, "version": "1.0.0", "nuhut": ">=1.0.0",
+                "description": "test", "overrides": None, "provides": {}}
+        data.update(extra)
+        return data
+
+    def reload():
+        return registry.load(d, kit=None, version=installer.VERSION, warn=False,
+                             use_cache=False)
+
+    codex_local = {"id": "codex", "title": "Codex Local", "pointer": None, "native": True,
+                   "markers": [".codex"], "skills_dir": ".agents/skills",
+                   "hooks": {"dialect": None, "settings": None, "events": {}},
+                   "lens": {"dirs": [], "mcp": []}}
+    put("codex-local", manifest_for("codex-local", overrides="codex",
+                                    provides={"harnesses": [codex_local]}))
+    r = reload()
+    h = r.harnesses()
+    check("an override with \"overrides\" replaces only that harness record",
+          h["codex"]["title"] == "Codex Local" and h["codex"]["source"] == "override"
+          and h["claude"]["source"] == "built-in" and not r.errors,
+          json.dumps([r.errors, r.notes])[:400])
+    put("codex-local", manifest_for("codex-local", provides={"harnesses": [codex_local]}))
+    r = reload()
+    check("without \"overrides\" a colliding record is ignored, with a note",
+          r.harnesses()["codex"]["source"] == "built-in"
+          and any("overrides" in n["message"] for n in r.notes), json.dumps(r.notes)[:400])
+    put("codex-local", manifest_for("codex-local", overrides="codex", provides={
+        "agents": [{"id": "codex", "family": "openai", "review": ["evil", "{prompt}"],
+                    "build": ["evil", "{prompt}"], "model_flag": "--model"}]}))
+    r = reload()
+    check("a project agents override is refused in this item",
+          r.agents()["codex"]["review"][0] == "codex" and r.agents()["codex"]["source"] == "built-in"
+          and any("NUHT-018" in n["message"] for n in r.notes), json.dumps(r.notes)[:400])
+    found = ext_findings()
+    check("doctor notes the refused executable contribution",
+          any("NUHT-018" in f["message"] for f in found), json.dumps(found)[:400])
+    shutil.rmtree(local)
+
+    put("future", manifest_for("future", nuhut=">=99"))
+    put("schema-two", manifest_for("schema-two", schema=2))
+    put("widgets", manifest_for("widgets", provides={"widgets": [1]}))
+    put("fake-builtin", manifest_for("fake-builtin", nuhut="builtin"))
+    r = reload()
+    errs = dict((e["id"], e) for e in r.errors)
+    check("a range of >=99 is refused naming the field",
+          "future" not in r.extensions and errs.get("future", {}).get("field") == "nuhut",
+          json.dumps(r.errors)[:400])
+    check("schema 2 is refused with 'upgrade Nuhut'",
+          "schema-two" not in r.extensions
+          and "upgrade Nuhut" in errs.get("schema-two", {}).get("message", ""))
+    check("an unknown provides key warns and still loads",
+          "widgets" in r.extensions
+          and any(w["field"] == "provides.widgets" for w in r.warnings))
+    check("a project extension cannot claim \"builtin\"",
+          "fake-builtin" not in r.extensions and "fake-builtin" in errs)
+    check("built-in extensions still load beside refused ones",
+          r.extensions.get("codex", {}).get("source") == "built-in")
+    found = ext_findings()
+    check("doctor fails an out-of-range project extension",
+          any(f["level"] == "fail" and "future" in f["where"] for f in found),
+          json.dumps(found)[:400])
+    shutil.rmtree(local)
+
+    write(d, codex_rel, "{ this is not json")
+    _, o, e = sdlc("doctor", "--json")
+    found = ext_findings()
+    check("a corrupt built-in manifest is a doctor fail naming the path",
+          any(f["level"] == "fail" and codex_rel in f["where"] for f in found),
+          json.dumps(found)[:400])
+    check("a corrupt manifest prints a stderr warning naming the file", codex_rel in e, e[-400:])
+    roles = sorted(n[:-3] for n in os.listdir(os.path.join(d, "docs", "roles"))
+                   if n.endswith(".md"))
+    rc, o, e = sdlc("review", "EXT-001", "--role", roles[0], "--by", "codex")
+    check("review --by codex with a corrupt manifest is a clear error, not a traceback",
+          rc != 0 and "Traceback" not in o + e and codex_rel in o + e, (o + e)[-600:])
+
+    shutil.rmtree(os.path.join(d, ".ai-sdlc", "extensions"))
+    found = ext_findings()
+    check("a missing registry directory makes doctor warn",
+          any(f["level"] == "warn" and "registry missing, using v5 tables" in f["message"]
+              for f in found), json.dumps(found)[:400])
+    p = subprocess.run([sys.executable, "-c",
+                        "import sys; sys.path.insert(0, sys.argv[1]); import sdlc, dispatch; "
+                        "p = sdlc.Project(sys.argv[2]); "
+                        "print(sdlc.agent_table(p, 'review') == sdlc.REVIEW_HARNESSES and "
+                        "sdlc.agent_table(p, 'build') == dispatch.BUILD_HARNESSES)",
+                        os.path.join(d, ".ai-sdlc", "bin"), d],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("a missing registry directory uses the v5 tables", p.stdout.strip() == "True",
+          p.stdout[-400:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -4600,7 +4781,8 @@ def main():
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
                  test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
                  test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
-                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes):
+                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
+                 test_extension_registry):
         test()
     print("")
     if failures:

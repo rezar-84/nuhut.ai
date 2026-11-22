@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "id": "codex",
+  "version": "1.0.0",
+  "nuhut": "builtin",
+  "description": "OpenAI Codex support",
+  "overrides": null,
+  "provides": {
+    "harnesses": [
+      {
+        "id": "codex",
+        "order": 10,
+        "title": "OpenAI Codex",
+        "native": true,
+        "pointer": null,
+        "markers": [],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [],
+          "mcp": []
+        }
+      }
+    ],
+    "agents": [
+      {
+        "id": "codex",
+        "family": "openai",
+        "review": [
+          "codex",
+          "exec",
+          "{prompt}"
+        ],
+        "build": [
+          "codex",
+          "exec",
+          "--full-auto",
+          "{prompt}"
+        ],
+        "model_flag": "--model"
+      }
+    ],
+    "checks": [],
+    "presets": []
+  }
+}

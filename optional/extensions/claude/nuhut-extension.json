@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "id": "claude",
+  "version": "1.0.0",
+  "nuhut": "builtin",
+  "description": "Claude Code support",
+  "overrides": null,
+  "provides": {
+    "harnesses": [
+      {
+        "id": "claude",
+        "order": 1,
+        "title": "Claude Code",
+        "native": false,
+        "pointer": [
+          {
+            "path": "CLAUDE.md",
+            "header": "# Project instructions\n\n"
+          }
+        ],
+        "markers": [
+          "CLAUDE.md",
+          ".claude"
+        ],
+        "skills_dir": ".claude/skills",
+        "hooks": {
+          "dialect": "claude",
+          "settings": ".claude/settings.json",
+          "events": {
+            "pre_tool": "PreToolUse",
+            "session_start": "SessionStart",
+            "stop": "Stop"
+          }
+        },
+        "lens": {
+          "dirs": [
+            ".claude"
+          ],
+          "mcp": [
+            ".mcp.json",
+            ".claude/settings.json",
+            ".claude/settings.local.json"
+          ]
+        }
+      }
+    ],
+    "agents": [
+      {
+        "id": "claude",
+        "family": "claude",
+        "review": [
+          "claude",
+          "-p",
+          "{prompt}",
+          "--output-format",
+          "text"
+        ],
+        "build": [
+          "claude",
+          "-p",
+          "{prompt}",
+          "--permission-mode",
+          "acceptEdits",
+          "--output-format",
+          "text"
+        ],
+        "model_flag": "--model"
+      }
+    ],
+    "checks": [],
+    "presets": []
+  }
+}
