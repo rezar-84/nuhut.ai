@@ -305,6 +305,30 @@ def cmd_add(rt, reg_mod, project, opts):
     return 0
 
 
+def code_files(reg_mod, manifest):
+    """The files of <manifest> that run: its code entry points, and the manifest itself
+    when it declares argv or commands."""
+    provides = manifest.get("provides") or {}
+    files = set()
+    for kind in reg_mod.CODE_KINDS:
+        for rec in provides.get(kind) or []:
+            if isinstance(rec, dict) and rec.get("file"):
+                files.add(str(rec["file"]))
+    lifecycle = provides.get("lifecycle")
+    if isinstance(lifecycle, dict):
+        files.update(str(v) for v in lifecycle.values() if v)
+    if reg_mod.executable_entries(manifest):
+        files.add(reg_mod.MANIFEST)
+    return files
+
+
+def _isatty():
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def cmd_update(rt, reg_mod, project, opts):
     data = read_manifest(project.root) or {}
     pins = data.get("extensions") if isinstance(data.get("extensions"), dict) else {}
@@ -327,16 +351,34 @@ def cmd_update(rt, reg_mod, project, opts):
     print("%s: commit %s -> %s, version %s -> %s" % (
         ext_id, (rec.get("commit") or "none")[:12], (commit or "none")[:12],
         rec.get("version"), manifest.get("version")))
+    code = code_files(reg_mod, manifest)
     for rel in changed:
-        print("  %-8s %s" % ("added" if rel not in old else "removed" if rel not in new
-                             else "changed", rel))
+        print("  %-8s %s%s" % ("added" if rel not in old else "removed" if rel not in new
+                               else "changed", rel, " (executable)" if rel in code else ""))
     if not changed and not edited:
         print("already up to date")
         return 0
-    print("\n".join(summary(reg_mod, manifest, rt.allowed_extensions(project))))
+    allowed = rt.allowed_extensions(project)
+    print("\n".join(summary(reg_mod, manifest, allowed)))
     if opts.dry_run:
         print("dry run: nothing written")
         return 0
+    live = [rel for rel in changed if rel in code and rel in new]
+    if live and ext_id in allowed and not getattr(opts, "yes", False):
+        # Re-pinning is the only gate an allowed extension's new code passes: once the
+        # hashes match, it runs on the next hook or doctor call.
+        what = ", ".join(live)
+        if not _isatty():
+            return _fail("ext update: %s changed executable code (%s) and Extensions allowed "
+                         "lists it, so it would run on the next call. Review it with `ext "
+                         "update %s --dry-run`, then rerun with --yes" % (ext_id, what, ext_id))
+        try:
+            answer = input("%s: re-pin and run the changed code (%s)? [y/N] " % (ext_id, what))
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            print("not updated: nothing written")
+            return 1
     backup = back_up(project.root, ext_id, edited)
     if backup:
         print("backup   %s (%d file(s) edited here: %s)" % (backup, len(edited), ", ".join(edited)))
@@ -487,7 +529,13 @@ def cmd_search(rt, reg_mod, project, opts):
     try:
         entries = load_catalog(source)
     except (ValueError, IOError, OSError) as exc:
-        return _fail("ext search: %s" % exc)
+        return _fail("ext search: %s. Set NUHUT_CATALOG_URL to a catalog you trust (an https "
+                     "URL or a file), or install directly with `sdlc.py ext add <git-url|path>`"
+                     % exc)
+    if not entries:
+        print("the catalog (%s) lists no extensions yet: install one directly with "
+              "`sdlc.py ext add <git-url|path>`" % source)
+        return 0
     term = (opts.target or "").lower()
     version = (project.manifest or {}).get("kit_version")
     shown = 0

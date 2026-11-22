@@ -61,8 +61,10 @@ python3 .ai-sdlc/bin/sdlc.py config --allow-extension lint-pack
 ```
 
 The row is read from the default branch, so the change takes effect once it is merged.
-Code also loads only while each file's sha256 matches the hash `ext add` pinned. A file
-edited by hand is refused, with a message that names it and `sdlc.py ext update <id>`.
+Code also loads only while each file's sha256 matches the hash `ext add` pinned, both in
+the working tree's `.ai-sdlc/manifest.json` and in that file on the default branch: a
+branch that changes the code and its pin together runs nothing new until it merges. A
+file edited by hand is refused, with a message that names it and `sdlc.py ext update <id>`.
 
 `ext list` shows a STATUS for each extension:
 
@@ -94,12 +96,15 @@ run `ext remove <id>`.
 
 ```sh
 python3 .ai-sdlc/bin/sdlc.py ext update lint-pack --dry-run   # what would change
-python3 .ai-sdlc/bin/sdlc.py ext update lint-pack
+python3 .ai-sdlc/bin/sdlc.py ext update lint-pack             # asks before new code runs
 python3 .ai-sdlc/bin/sdlc.py ext remove lint-pack
 ```
 
 `ext update` fetches the recorded source and ref again. It prints the old and new commit
-and every added, changed or removed file before it writes. Files edited here are copied
+and every added, changed or removed file before it writes, marking the files that run
+`(executable)`. When one of those changed and **Extensions allowed** lists the id, the
+new code would run on the next call, so it asks first in a terminal and, without one,
+refuses unless you pass `--yes`. Files edited here are copied
 to `.ai-sdlc/backups/extensions/<id>-<time>/` first. It is the only command that re-pins
 the hashes. `ext remove` backs up edited files the same way, then deletes the directory
 and its record.
@@ -181,8 +186,10 @@ It exits 1 with one message per field, such as
 ## The catalog
 
 `ext search [term]` reads a catalog: a JSON list of `{id, url, ref, description}`, with
-an optional `nuhut` range. The default is `catalog.json` in the kit repository. Set
-`NUHUT_CATALOG_URL` to an `https://` URL or a file path for a private one. Nothing is
+an optional `nuhut` range. The default is `catalog.json` in the kit repository, which
+lists no extensions yet: `ext search` says so, and `ext add <git-url|path>` installs one
+directly. Set `NUHUT_CATALOG_URL` to an `https://` URL or a file path for a private one;
+a catalog that cannot be read gives an error that names both. Nothing is
 fetched until you run `ext search`, and nothing is installed until you run `ext add`.
 
 The catalog is fetched through `.ai-sdlc/bin/net.py`:

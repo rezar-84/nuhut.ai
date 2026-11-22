@@ -6390,6 +6390,11 @@ def test_extension_cli():
     subprocess.call(git + ["commit", "-qam", "v2"], cwd=src)
     head2 = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=src).decode().strip()
     rc, o, e = sdlc("ext", "update", "lint-pack")
+    check("ext update of an allowed extension's changed code needs --yes without a terminal",
+          rc != 0 and "--yes" in o + e and "rules/no_curl.py (executable)" in o
+          and json.loads(read(d, ".ai-sdlc/manifest.json"))["extensions"]["lint-pack"]["commit"] == head,
+          (o + e)[-600:])
+    rc, o, e = sdlc("ext", "update", "lint-pack", "--yes")
     check("ext update prints the old and new sha and the changed files",
           rc == 0 and head[:12] in o and head2[:12] in o and "rules/no_curl.py" in o,
           (o + e)[-600:])
@@ -6463,6 +6468,14 @@ def test_extension_cli():
     rc, o, e = sdlc("ext", "search", NUHUT_CATALOG_URL=catalog)
     check("ext search marks a catalog entry that fails the URL rules",
           "bad-pack" in o and "refused" in o, o + e)
+    with open(catalog, "w") as fh:
+        fh.write("[]")
+    rc, o, e = sdlc("ext", "search", "lint", NUHUT_CATALOG_URL=catalog)
+    check("ext search says when the catalog lists nothing, and how to install anyway",
+          rc == 0 and "lists no extensions" in o and "ext add" in o, o + e)
+    rc, o, e = sdlc("ext", "search", NUHUT_CATALOG_URL=os.path.join(cat_dir, "missing.json"))
+    check("an unreadable catalog names NUHUT_CATALOG_URL and ext add",
+          rc != 0 and "NUHUT_CATALOG_URL" in o + e and "ext add" in o + e, o + e)
     for bad in ("http://example.com/c.json", "file:///etc/passwd"):
         try:
             _net.fetch(bad)

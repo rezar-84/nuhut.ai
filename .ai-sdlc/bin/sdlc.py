@@ -4752,10 +4752,14 @@ Setup
   config              see or change the charter's constraints                          config --specs on
   notify              the Notify webhook: its setup; --test sends a test event         notify --test
   fix                 repair setup drift; preview record repairs (--apply writes)      fix rotate-worklog
-
-Options: --root <dir> runs against another project; --selftest checks the runtime itself.
-Guides: docs/cli.md, docs/viewer.md, docs/multi-agent.md and docs/specs.md in the kit repository.
+  ext                 extensions: list, add, update, remove, search, validate, package ext search lint
 """
+MAIN_HELP_FOOTER = """
+Options: --root <dir> runs against another project; --selftest checks the runtime itself.
+Guides: docs/cli.md, docs/viewer.md, docs/multi-agent.md, docs/specs.md and docs/extensions.md
+in the kit repository.
+"""
+
 
 EXAMPLES = {
     "status": ["status                   # what to do next on this branch", "status --json"],
@@ -4838,8 +4842,9 @@ class _Main(argparse.ArgumentParser):
     def format_help(self):
         extra = ["  %-19s %s" % (c.name, c.help) for c in COMMANDS.values() if not c.core]
         if not extra:
-            return MAIN_HELP
-        return MAIN_HELP + "\nExtension commands\n" + "\n".join(extra) + "\n"
+            return MAIN_HELP + MAIN_HELP_FOOTER
+        # Extension commands are commands like the rest: listed before the footer.
+        return MAIN_HELP + "\nExtension commands\n" + "\n".join(extra) + "\n" + MAIN_HELP_FOOTER
 
 
 
@@ -6136,6 +6141,8 @@ def build_parser():
                     "dist/extensions/<id>/<tool>/)")
     ex.add_argument("--ref", help="add or update: the branch, tag or commit to install")
     ex.add_argument("--dry-run", action="store_true", help="update: print what would change")
+    ex.add_argument("--yes", action="store_true", help="update: re-pin changed executable code "
+                    "of an allowed extension without asking (needed without a terminal)")
     ex.add_argument("--json", action="store_true", help="list: print JSON")
     fx = sub.add_parser("fix", help="run safe mechanical repairs on kit setup")
     fx.add_argument("action", nargs="?", default="all",
