@@ -6073,8 +6073,9 @@ def build_parser():
                         "harness and save it")
     rv.add_argument("item", help="work item ID")
     rv.add_argument("--role", required=True, help="role playbook, e.g. security")
-    rv.add_argument("--by", required=True, help="claude, codex, gemini, or cmd:<command> "
-                    "(reads the prompt on stdin, prints the review)")
+    rv.add_argument("--by", required=True, help="an agent record in the registry (claude, "
+                    "codex, gemini, opencode, kiro, ...) or cmd:<command> (reads the prompt on "
+                    "stdin, prints the review)")
     rv.add_argument("--model", help="model to ask the harness for; recorded")
     rv.add_argument("--stage", default="ship", choices=("design", "ship", "retro"),
                     help="design, ship, or retro (the retroactive review a hotfix owes)")
@@ -6275,7 +6276,8 @@ def build_parser():
     hf_p.add_argument("--json", action="store_true", help="print the item as JSON")
     dsp = sub.add_parser("dispatch", help="execute conflict-free waves of Ready items across isolated worker worktrees")
     dsp.add_argument("--workers", type=int, default=1, help="max parallel workers per wave (default: 1)")
-    dsp.add_argument("--by", help="builder CLI: claude, codex, gemini, or cmd:<command>")
+    dsp.add_argument("--by", help="builder CLI: an agent record with build argv (claude, "
+                     "codex, gemini, opencode, kiro, ...) or cmd:<command>")
     dsp.add_argument("--model", help="model override passed to the builder CLI and trailers")
     dsp.add_argument("--reviewer", help="optional independent reviewer CLI: claude, codex, gemini, or cmd:<command>")
     dsp.add_argument("--reviewer-model", dest="reviewer_model", help="model override for reviewer CLI")
