@@ -256,7 +256,74 @@ def append_ledger(project, line):
         os.close(fd)
 
 
-def record(project, rt, version, env, from_ref=None, to_ref="HEAD", by=None, dry_run=False):
+# The severity ladder (CARD.md): S0 and S1 block a release outright; S2 blocks unless a named
+# approver accepts it in writing (NUHT-041).
+HARD_BLOCKERS = ("S0", "S1")
+ACCEPTABLE = ("S2",)
+
+
+def fix_shipped(project, item_id, to_sha):
+    """True when the history of to_sha has a commit whose Work-Item trailer is item_id: the
+    deployed code carries its fix, in this range or an earlier one."""
+    if not to_sha or not SHA_RE.match(to_sha):
+        return False
+    pattern = "^Work-Item:[[:space:]]*%s[[:space:]]*$" % re.escape(item_id)
+    return bool(project.git("log", "-1", "--format=%H", "--extended-regexp",
+                            "--grep=" + pattern, to_sha).strip())
+
+
+def release_blockers(project, shipped, to_sha=None):
+    """Open S0-S2 defects the deployed code carries no fix for. A defect whose ID is a
+    Work-Item trailer in the range, or anywhere in to_sha's history, does not block."""
+    items = shards.merged_items(project)
+    return [it for it in shards.open_defects(items, HARD_BLOCKERS + ACCEPTABLE)
+            if it["id"] not in shipped and not fix_shipped(project, it["id"], to_sha)]
+
+
+def check_defects(project, rt, shipped, accept, by, reason, to_sha=None):
+    """[{id, severity, by, reason}] for the accepted S2 defects; raises DeployError when an
+    open defect blocks this release."""
+    blockers = release_blockers(project, set(shipped or ()), to_sha)
+    by_id = dict((b["id"], b) for b in blockers)
+    accept = [a for a in (accept or []) if a]
+    for a in accept:
+        if a in by_id and by_id[a]["severity"] in HARD_BLOCKERS:
+            raise DeployError("%s is an open %s defect, which cannot be accepted: fix it in this "
+                              "deploy (a Work-Item: %s commit), or change its severity or status "
+                              "with `item set`, which the item's history keeps" % (
+                                  a, by_id[a]["severity"], a))
+        if a not in by_id:
+            raise DeployError("--accept-defects %s: not an open S2 defect this deploy leaves "
+                              "unfixed" % a)
+    hard = [b for b in blockers if b["severity"] in HARD_BLOCKERS]
+    soft = [b for b in blockers if b["severity"] in ACCEPTABLE and b["id"] not in accept]
+    if hard or soft:
+        lines = ["%s %s: %s" % (b["severity"], b["id"], b.get("title", "")) for b in hard + soft]
+        how = []
+        if hard:
+            how.append("S0 and S1 block a release until fixed: ship a commit with their "
+                       "Work-Item: trailer, or change the item with `item set`")
+        if soft:
+            how.append("an approver may accept an S2: --accept-defects <ID> --by <approver> "
+                       "--reason \"...\"")
+        raise DeployError("open defects block this release (CARD.md severity ladder):\n  %s\n%s"
+                          % ("\n  ".join(lines), "; ".join(how)))
+    if not accept:
+        return []
+    if not by or not (reason or "").strip():
+        raise DeployError("--accept-defects needs --by <approver> and --reason \"...\"")
+    finish_mod = rt.runtime_module("finish")
+    approvers, source, registry = finish_mod.waiver_approvers(rt, project)
+    refused = finish_mod.check_waiver(rt, project, by, approvers, source, registry,
+                                      finish_mod._interactive())
+    if refused:
+        raise DeployError("the acceptance is refused: %s" % refused)
+    return [{"id": a, "severity": by_id[a]["severity"], "by": by, "reason": reason.strip()}
+            for a in accept]
+
+
+def record(project, rt, version, env, from_ref=None, to_ref="HEAD", by=None, dry_run=False,
+           accept=None, reason=None):
     """Record that <version> runs in <env>. Returns {"action", "record", "ledger",
     "path", "dry_run"}; raises DeployError on a refusal, with nothing written."""
     path = record_path(project, version)
@@ -297,6 +364,11 @@ def record(project, rt, version, env, from_ref=None, to_ref="HEAD", by=None, dry
                "from": from_sha, "to": to_sha, "commits": found["commits"],
                "items": found["items"], "date": date, "by": who, "agent": agent}
         from_used = from_sha
+    accepted = check_defects(project, rt, rec.get("items") or [], accept, by, reason, to_sha)
+    if accepted:
+        kept = [a for a in rec.get("accepted_defects") or []
+                if a.get("id") not in set(x["id"] for x in accepted)]
+        rec["accepted_defects"] = kept + accepted
     line = {"schema": SCHEMA, "version": version, "env": env, "from": from_used,
             "to": to_sha, "date": date, "by": who, "agent": agent}
     result = {"action": action, "record": rec, "ledger": line,

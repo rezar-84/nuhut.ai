@@ -8523,6 +8523,73 @@ def test_defect_awareness():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_release_defect_gate():
+    print("deploy record refuses over an open S0/S1 defect, and an S2 unless an approver accepts it (NUHT-041)")
+    d = tempfile.mkdtemp(prefix="sdlc-relgate-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    subprocess.call(["git", "init", "-q", "-b", "main", repo])
+    for key, value in (("user.name", "Sam"), ("user.email", "sam@example.invalid"),
+                       ("commit.gpgsign", "false")):
+        subprocess.call(["git", "config", key, value], cwd=repo)
+    code, out = run([repo, "RG", "-y"])
+    check("installs", code == 0, out[-300:])
+    charter = read(repo, "docs/project/charter.md")
+    write(repo, "docs/project/charter.md",
+          re.sub(r"(?m)^\| \*\*Approvers\*\* \|[^\n]*$", "| **Approvers** | Sam |", charter))
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args, **env):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, timeout=120,
+                           env=person_env(**env))
+        return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
+
+    def commit(item, name):
+        write(repo, "src/%s.txt" % name, name + "\n")
+        subprocess.call(["git", "add", "-A"], cwd=repo)
+        msg = "%s\n" % name + ("\nWork-Item: %s\nAgent: human\n" % item if item else "")
+        subprocess.call(["git", "commit", "-qm", msg], cwd=repo)
+
+    commit("", "kit")
+    code, out, err = sdlc("bug", "Checkout loses the basket", "--severity", "S1", "--status", "Ready")
+    check("an S1 defect", code == 0 and "RG-001" in out, out + err)
+    commit("", "records")
+    code, out, err = sdlc("deploy", "record", "--version", "1.0.0", "--env", "prod", "--dry-run")
+    check("a dry run refuses over the open S1 and names it",
+          code == 1 and "RG-001" in err and "S1" in err, out + err)
+    code, out, err = sdlc("deploy", "record", "--version", "1.0.0", "--env", "prod")
+    check("deploy record refuses over the open S1 and writes nothing",
+          code == 1 and not os.path.exists(os.path.join(repo, "docs/project/releases/1.0.0.json")), out + err)
+    code, out, err = sdlc("deploy", "record", "--version", "1.0.0", "--env", "prod",
+                          "--accept-defects", "RG-001", "--by", "Sam", "--reason", "ship anyway", NUHUT_USER="Sam")
+    check("an S1 cannot be accepted", code == 1 and "cannot be accepted" in err, out + err)
+    commit("RG-001", "fix-basket")
+    code, out, err = sdlc("deploy", "record", "--version", "1.0.0", "--env", "prod")
+    check("a deploy that carries the S1's fix passes", code == 0, out + err)
+
+    code, out, err = sdlc("bug", "Slow search", "--severity", "S2", "--status", "Ready")
+    commit("", "more-records")
+    code, out, err = sdlc("deploy", "record", "--version", "1.1.0", "--env", "prod")
+    check("an open S2 refuses without an acceptance", code == 1 and "RG-002" in err, out + err)
+    code, out, err = sdlc("deploy", "record", "--version", "1.1.0", "--env", "prod",
+                          "--accept-defects", "RG-002", "--by", "Alex", "--reason", "known", NUHUT_USER="Alex")
+    check("an acceptance by someone not in Approvers is refused", code == 1 and "Approvers" in err, out + err)
+    code, out, err = sdlc("deploy", "record", "--version", "1.1.0", "--env", "prod",
+                          "--accept-defects", "RG-002", "--by", "Sam", "--reason", "workaround documented",
+                          NUHUT_USER="Sam")
+    rec = json.loads(read(repo, "docs/project/releases/1.1.0.json") or "{}")
+    check("an approver's acceptance passes and is kept in the release record",
+          code == 0 and rec.get("accepted_defects") == [
+              {"id": "RG-002", "severity": "S2", "by": "Sam", "reason": "workaround documented"}],
+          out + err + json.dumps(rec))
+    code, out, err = sdlc("item", "set", "RG-002", "--status", "Done")
+    commit("", "close")
+    code, out, err = sdlc("deploy", "record", "--version", "1.2.0", "--env", "prod")
+    check("a Done defect no longer blocks", code == 0, out + err)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -8551,7 +8618,7 @@ def main():
                  test_people_registry,
                  test_shard_merge_driver,
                  test_trusted_records_review, test_install_review_fixes,
-                 test_status_review_fixes, test_defect_awareness,
+                 test_status_review_fixes, test_defect_awareness, test_release_defect_gate,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

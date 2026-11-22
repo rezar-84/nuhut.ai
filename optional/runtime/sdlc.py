@@ -5459,8 +5459,10 @@ def _cmd_deploy(project, opts, parser):
               else releases_mod.format_list(state))
         return 0
     try:
+        accept = [a.strip() for a in (opts.accept_defects or "").split(",") if a.strip()]
         result = releases_mod.record(project, sys.modules[__name__], opts.version, opts.env,
-                                     opts.from_ref, opts.to_ref, opts.by, opts.dry_run)
+                                     opts.from_ref, opts.to_ref, opts.by, opts.dry_run,
+                                     accept=accept, reason=opts.reason)
     except (releases_mod.DeployError, OSError) as exc:
         sys.stderr.write("deploy record: %s\n" % exc)
         return 1
@@ -6327,6 +6329,10 @@ def build_parser():
     drec.add_argument("--to", dest="to_ref", default="HEAD", help="the commit deployed "
                       "(default: HEAD)")
     drec.add_argument("--by", help="who deployed (default: git user.name); never an email")
+    drec.add_argument("--accept-defects", dest="accept_defects", help="comma-separated open S2 "
+                      "defect IDs an approver accepts for this release (S0 and S1 cannot be "
+                      "accepted); needs --by <approver> and --reason")
+    drec.add_argument("--reason", help="why the accepted defects may ship")
     drec.add_argument("--dry-run", action="store_true", help="say what it would write; write nothing")
     drec.add_argument("--json", action="store_true")
     dlist = dverbs.add_parser("list", help="which version runs in each environment")

@@ -5,13 +5,15 @@
   "tier": "1",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Proposed",
-  "depends": [],
+  "status": "Ready",
+  "depends": [
+    "NUHT-040"
+  ],
   "touch": [],
   "created": "2026-11-22",
   "updated": "2026-11-22",
   "completed": "",
-  "summary": "Tier 1 gate change: needs human approval.",
+  "summary": "Owner (rezar-84) approved building this on 2026-11-22 in session ('i approve do the plan'). Tier 1: merge stays a human approval.",
   "approvers": [],
   "waiting_on": "",
   "park_reason": "",
