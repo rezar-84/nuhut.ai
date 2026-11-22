@@ -5,14 +5,14 @@
   "tier": "3",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Ready",
+  "status": "Done",
   "depends": [],
   "touch": [
     "docs/landscape.md"
   ],
   "created": "2026-11-22",
   "updated": "2026-11-22",
-  "completed": "",
+  "completed": "2026-11-22",
   "summary": "",
   "approvers": [],
   "waiting_on": "",

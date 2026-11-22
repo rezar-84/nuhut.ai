@@ -5,7 +5,7 @@
   "tier": "2",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Ready",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/view.py",
@@ -13,7 +13,7 @@
   ],
   "created": "2026-11-22",
   "updated": "2026-11-22",
-  "completed": "",
+  "completed": "2026-11-22",
   "summary": "Owner asked 2026-11-22 for remote viewing (Tailscale). Strict Tier 2: independent security review.",
   "approvers": [],
   "waiting_on": "",
