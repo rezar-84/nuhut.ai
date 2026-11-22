@@ -1,9 +1,12 @@
 name: Version
 
-# Semantic versioning on every push. A push or merge to main is released: the version is
-# bumped from the Conventional Commit subjects since VERSION last changed, VERSION,
-# plugin.json and CHANGELOG.md are updated in a `chore(release)` commit, which is tagged
-# and published. A push to any other branch only reports the prerelease it would become.
+# Semantic versioning on every push. tools/semver.py reads the Conventional Commit subjects
+# since VERSION last changed. Only feat, fix, perf, refactor and revert (or a breaking
+# change) release; a push of docs, chore, test or ci commits alone releases nothing and the
+# release job is skipped. A push or merge to main that does release is validated, then
+# VERSION, plugin.json and CHANGELOG.md are updated in a `chore(release)` commit, which is
+# tagged and published here. A push to any other branch only reports the prerelease it
+# would become.
 
 on:
   push:
@@ -12,15 +15,14 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: version-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  version:
+  plan:
     runs-on: ubuntu-latest
-    # The release commit itself must not start another release.
-    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
+    # The bot's own release commit must not start another release. A person who writes the
+    # same subject does not skip the workflow: the actor must be the bot as well.
+    if: "!(startsWith(github.event.head_commit.message, 'chore(release):') && github.actor == 'github-actions[bot]')"
+    outputs:
+      level: ${{ steps.level.outputs.level }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,35 +31,94 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Work out the release level
+        id: level
+        run: |
+          python3 tools/semver.py next --json | tee "$RUNNER_TEMP/next.json"
+          level=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['level'])" "$RUNNER_TEMP/next.json")
+          echo "level=$level" >> "$GITHUB_OUTPUT"
+
       - name: Report the prerelease version (branches)
         if: github.ref != 'refs/heads/main'
         run: |
           v=$(python3 tools/semver.py next --prerelease)
-          python3 tools/semver.py next --json
           echo "### Next kit version: \`$v\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "Merging this branch to main releases \`$(python3 tools/semver.py next)\`." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.level.outputs.level }}" = "none" ]; then
+            echo "Merging this branch to main releases nothing: no feat, fix, perf, refactor or revert commits." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Merging this branch to main releases \`$(python3 tools/semver.py next)\`." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
-      - name: Validate before releasing (main)
-        if: github.ref == 'refs/heads/main'
+      - name: Nothing to release (main)
+        if: github.ref == 'refs/heads/main' && steps.level.outputs.level == 'none'
         run: |
+          echo "Nothing to release: only docs, chore, test, ci or non-conventional commits since the last release." | tee -a "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.level != 'none'
+    runs-on: ubuntu-latest
+    # One release at a time across all runs. A queued run waits for the running one rather
+    # than cancelling it, so a release is never cut off between its push and its tag.
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Stop if a newer push to main supersedes this one
+        id: current
+        run: |
+          git fetch origin main --tags
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "superseded by a newer push; that run releases"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "current=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        if: steps.current.outputs.current == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Validate before releasing
+        if: steps.current.outputs.current == 'true'
+        run: |
+          python3 -m py_compile install.py install_ui.py validate.py tests/smoke.py optional/runtime/*.py tools/semver.py
           python3 validate.py
           python3 tests/smoke.py
 
-      - name: Bump, tag and publish (main)
-        if: github.ref == 'refs/heads/main'
+      - name: Bump, tag and publish
+        if: steps.current.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Validation takes minutes; check again that main has not moved, and recompute
+          # the version from what is on main now. Never rebase: the newer run releases.
+          git fetch origin main --tags
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "superseded by a newer push; that run releases"
+            exit 0
+          fi
           level=$(python3 -c "import json,subprocess;print(json.loads(subprocess.check_output(['python3','tools/semver.py','next','--json']))['level'])")
           if [ "$level" = "none" ]; then echo "Nothing to release."; exit 0; fi
-          v=$(python3 tools/semver.py bump)
+          v=$(python3 tools/semver.py next)
+          if git rev-parse -q --verify "refs/tags/v$v" >/dev/null || git ls-remote --exit-code --tags origin "refs/tags/v$v" >/dev/null; then
+            echo "::error::tag v$v already exists, so VERSION and the tags disagree. Nothing was committed or pushed."
+            exit 1
+          fi
+          test "$(python3 tools/semver.py bump)" = "$v"
           python3 validate.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add VERSION CHANGELOG.md .claude-plugin/plugin.json AGENTS.md .ai-sdlc/manifest.json .ai-sdlc/profile.json
           git commit -m "chore(release): v$v [skip ci]"
           git tag -a "v$v" -m "v$v"
-          git push origin HEAD:main "v$v"
-          # A tag pushed with GITHUB_TOKEN does not start release.yml, so publish here.
+          # Atomic: the release commit and its tag land together or not at all. A push that
+          # lost a race with a newer commit on main fails here instead of overwriting it.
+          git push --atomic origin HEAD:main "refs/tags/v$v"
           gh release create "v$v" --verify-tag --generate-notes
           echo "### Released \`v$v\` ($level)" >> "$GITHUB_STEP_SUMMARY"

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """The kit's next semantic version, worked out from the commits since VERSION last changed.
 
-Commit subjects follow Conventional Commits, as the kit's history already does:
-`feat(...)` is a minor bump, a `!` after the type or a `BREAKING CHANGE:` footer is a
-major one, and anything else (fix, docs, chore, refactor, ...) is a patch. A subject may
-carry several types (`docs,feat(kit): ...`); the largest wins. The release commit this
-script writes (`chore(release): vX.Y.Z`) is never counted.
+Commit subjects follow Conventional Commits, as the kit's history already does. Only the
+types in RELEASE_TYPES release: `feat` is a minor bump; `fix`, `perf`, `refactor` and
+`revert` are a patch. A `!` after any type, or a `BREAKING CHANGE:` line in the footer
+(the body's last paragraph), is a major one. Every other type (docs, chore, test, ci,
+style, build, ...) and any subject that is not a Conventional Commit releases nothing. A
+subject may carry several types (`docs,feat(kit): ...`); the largest wins. The release
+commit this script writes (`chore(release): vX.Y.Z`) is never counted.
 
     python3 tools/semver.py next [--json]          the version a merge to main would get
     python3 tools/semver.py next --prerelease      X.Y.Z-dev.N+sha, for a branch build
@@ -26,6 +28,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEVELS = ("none", "patch", "minor", "major")
+# The one list of commit types that cut a release. Anything not here is level "none".
+RELEASE_TYPES = {"feat": "minor", "fix": "patch", "perf": "patch", "refactor": "patch", "revert": "patch"}
+BREAKING_FOOTER = re.compile(r"^BREAKING[ -]CHANGE:")
 HEADER = re.compile(r"^(?P<types>[a-z]+(?:\s*,\s*[a-z]+)*)(?:\([^)]*\))?(?P<bang>!)?:\s*(?P<desc>.+)$")
 RELEASE_SUBJECT = re.compile(r"^chore\(release\):\s*v?[0-9]+\.[0-9]+\.[0-9]+")
 VERSION_RE = re.compile(r"^([0-9]+)\.([0-9]+)\.([0-9]+)$")
@@ -66,16 +71,24 @@ def commits_since(root, base):
     return out
 
 
+def footer(body):
+    """The body's last paragraph, where Conventional Commit footers and git trailers live."""
+    paragraphs = [p for p in re.split(r"\n[ \t]*\n", (body or "").strip()) if p.strip()]
+    return paragraphs[-1] if paragraphs else ""
+
+
 def level_of(subject, body):
-    if re.search(r"^BREAKING[ -]CHANGE:", body or "", re.M):
+    # Only a footer line that starts with the token counts; quoted or inline mentions
+    # (`> BREAKING CHANGE:`, "says BREAKING CHANGE: ...") and body paragraphs do not.
+    if any(BREAKING_FOOTER.match(line) for line in footer(body).splitlines()):
         return "major"
     m = HEADER.match(subject)
     if not m:
-        return "patch"
+        return "none"
     if m.group("bang"):
         return "major"
     types = [t.strip() for t in m.group("types").split(",")]
-    return "minor" if "feat" in types else "patch"
+    return max((RELEASE_TYPES.get(t, "none") for t in types), key=LEVELS.index)
 
 
 def bump(version, level):
@@ -209,7 +222,8 @@ def main(argv=None):
             print(info.get("prerelease") or info["next"])
         return 0
     if info["level"] == "none":
-        print("nothing to release: no commits since VERSION last changed (%s)" % info["current"])
+        print("nothing to release: no feat, fix, perf, refactor or revert commits since VERSION "
+              "last changed (%s)" % info["current"])
         return 0
     if args.dry_run:
         print("would bump %s -> %s (%s, %d commits)" % (info["current"], info["next"], info["level"], info["commits"]))

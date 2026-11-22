@@ -9,6 +9,7 @@ exercise the same prompt loop a person sees rather than a private API.
 """
 
 import hashlib
+import importlib.util
 import json
 import os
 import pty
@@ -3961,6 +3962,41 @@ def test_semver():
     check("the release commit itself starts no new release", nxt() == "5.0.0", nxt())
     check("after the release the installer names the new VERSION alone",
           installer.display_version(Path(d)) == "5.0.0", installer.display_version(Path(d)))
+    for msg, name in (("docs(x): words", "n1.txt"), ("chore: tidy", "n2.txt"), ("test(x): more", "n3.txt"),
+                      ("ci: cache", "n4.txt"), ("Update the readme", "n5.txt")):
+        commit(msg, name)
+    check("docs, chore, test, ci and non-conventional subjects release nothing", nxt() == "5.0.0", nxt())
+    out = subprocess.run([sys.executable, tool, "bump", "--root", d], stdout=subprocess.PIPE,
+                         universal_newlines=True).stdout
+    check("bump with only non-release commits writes nothing",
+          "nothing to release" in out and read(d, "VERSION").strip() == "5.0.0", out)
+    check("the installer names a checkout with only non-release commits by VERSION alone",
+          installer.display_version(Path(d)) == "5.0.0", installer.display_version(Path(d)))
+    spec = importlib.util.spec_from_file_location("semver_under_test", tool)
+    sv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sv)
+    check("one release type list: feat minor; fix, perf, refactor, revert patch",
+          getattr(sv, "RELEASE_TYPES", None) == {"feat": "minor", "fix": "patch", "perf": "patch",
+                                                  "refactor": "patch", "revert": "patch"},
+          str(getattr(sv, "RELEASE_TYPES", None)))
+    cases = (
+        ("revert(view): undo the typo fix", "", "patch"),
+        ("perf(view): faster", "", "patch"),
+        ("refactor(api): split", "", "patch"),
+        ("feat(x): new", "", "minor"),
+        ("docs(x)!: rewrite the contract", "", "major"),
+        ("docs: words", "", "none"),
+        ("style: spaces", "", "none"),
+        ("Merge the thing", "", "none"),
+        ("docs: quote", "The spec says:\n> BREAKING CHANGE: means major\n\nWork-Item: X-1", "none"),
+        ("docs: mention", "A line that says BREAKING CHANGE: inline\n\nWork-Item: X-1", "none"),
+        ("chore: body", "BREAKING CHANGE: in the body paragraph\nstill body\n\nWork-Item: X-1", "none"),
+        ("chore: real", "Why.\n\nBREAKING CHANGE: drops the flag\nWork-Item: X-1\n", "major"),
+        ("fix: real", "Why.\n\nWork-Item: X-1\nBREAKING-CHANGE: renames it", "major"),
+    )
+    for subject, body, want in cases:
+        got = sv.level_of(subject, body)
+        check("level of %r is %s" % (subject + (" + body" if body else ""), want), got == want, got)
     commit("feat(x): after the release", "e.txt")
     commit("fix(x): another", "f.txt")
     shallow = tempfile.mkdtemp()
@@ -3976,6 +4012,34 @@ def test_semver():
           installer.display_version(Path(plain)) == "5.0.0", installer.display_version(Path(plain)))
     shutil.rmtree(plain, ignore_errors=True)
     shutil.rmtree(d, ignore_errors=True)
+
+
+def test_release_workflow():
+    print("release workflow: one serial release job that skips non-release pushes")
+    wf_dir = os.path.join(ROOT, ".github", "workflows")
+    check("release.yml is gone; version.yml releases", not os.path.exists(os.path.join(wf_dir, "release.yml")))
+    text = read(wf_dir, "version.yml")
+    check("the release job runs in concurrency group release without cancelling",
+          re.search(r"concurrency:\s*\n\s+group:\s*release\s*\n\s+cancel-in-progress:\s*false", text) is not None)
+    check("the release job never rebases", "git rebase" not in text)
+    check("the release job fetches main and tags", "git fetch origin main --tags" in text)
+    check("the release job compares GITHUB_SHA with origin/main",
+          "git rev-parse origin/main" in text and "GITHUB_SHA" in text
+          and "superseded by a newer push; that run releases" in text)
+    guard = [l for l in text.splitlines() if "chore(release):" in l and "startsWith" in l]
+    check("the release-commit guard also requires the bot actor",
+          bool(guard) and all("github.actor == 'github-actions[bot]'" in l for l in guard), str(guard))
+    check("the release job is skipped when the level is none",
+          re.search(r"needs\.plan\.outputs\.level\s*!=\s*'none'", text) is not None)
+    check("an existing tag fails the release cleanly", "already exists" in text)
+    refs = []
+    for base, dirs, files in os.walk(ROOT):
+        dirs[:] = [x for x in dirs if x not in (".git", ".claude", "node_modules", "worklog", "plans")]
+        for f in files:
+            if f.endswith((".md", ".yml", ".py", ".txt")) and f not in ("worklog.md", "CHANGELOG.md", "smoke.py"):
+                if "workflows/release.yml" in read(base, f):
+                    refs.append(os.path.relpath(os.path.join(base, f), ROOT))
+    check("no live doc names the deleted release.yml", not refs, ", ".join(refs))
 
 
 def test_lifecycle_gaps():
@@ -4948,7 +5012,7 @@ def main():
                  test_quit_writes_nothing,
                  test_multilingual, test_architecture,
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
-                 test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
+                 test_epics, test_decision_and_stack, test_semver, test_release_workflow, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
                  test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
                  test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes):
         test()

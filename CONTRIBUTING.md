@@ -57,12 +57,18 @@ violation failing.
 The kit is versioned automatically, with semantic versioning, from Conventional Commit
 subjects (`tools/semver.py`, run by `.github/workflows/version.yml` on every push):
 
-- `feat(...)` → minor, a `!` after the type or a `BREAKING CHANGE:` footer → major,
-  anything else (fix, docs, chore, refactor) → patch. A subject with several types
+- `feat(...)` → minor; `fix`, `perf`, `refactor` and `revert` → patch; a `!` after any
+  type, or a `BREAKING CHANGE:` line in the footer (the message's last paragraph), → major.
+  Every other type (docs, chore, test, ci, style, build) and any subject that is not a
+  Conventional Commit releases nothing. A subject with several types
   (`docs,feat(kit): ...`) takes the largest.
-- **Push or merge to `main`:** after `validate.py` and the smoke tests pass, the workflow
-  bumps `VERSION`, `.claude-plugin/plugin.json` and `CHANGELOG.md` (the Unreleased section
-  becomes the release), commits `chore(release): vX.Y.Z`, tags it and publishes a release.
+- **Push or merge to `main`:** when something releases, the release job runs one at a
+  time (concurrency group `release`). It stops with "superseded by a newer push" when
+  `main` has moved past the pushed commit, since the newer run releases. Otherwise, after
+  `validate.py` and the smoke tests pass, it bumps `VERSION`, `.claude-plugin/plugin.json`
+  and `CHANGELOG.md` (the Unreleased section becomes the release), commits
+  `chore(release): vX.Y.Z`, tags it and publishes a release. It fails without pushing if
+  the tag already exists. A push of docs, chore, test or ci commits alone skips the job.
 - **Push to any other branch:** the job summary shows the prerelease it would become
   (`4.1.0-dev.7+abc1234`); nothing is committed.
 
