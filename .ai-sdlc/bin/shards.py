@@ -966,3 +966,225 @@ def migrate_shards(rt, project, apply=False):
         )
     )
     return report
+
+
+# ---------------------------------------------------------------------------
+# Field-level 3-way merge of items/<ID>.json, run by git as the "nuhut-shard" merge driver:
+#   git config merge.nuhut-shard.driver "<python> <sdlc.py> merge-shard %O %A %B"
+# The result is written to %A. Exit 0 = merged cleanly, 1 = conflict markers written,
+# 2 = a file could not be read or parsed (then %A is left exactly as it was).
+
+MERGE_DRIVER_NAME = "nuhut-shard"
+# A governance field both sides changed differently is a human decision, never a merge.
+MERGE_CONFLICT_FIELDS = ("approvers", "waivers", "status", "hotfix", "owner")
+# Append-only history: the union keeps every entry either side recorded.
+MERGE_HISTORY_FIELDS = ("history",)
+# An 'updated' stamp further ahead of this machine's clock than this is ignored.
+MERGE_FUTURE_SLACK = datetime.timedelta(minutes=5)
+MERGE_MAX_BYTES = 4 * 1024 * 1024
+_ABSENT = object()
+
+
+class ShardMergeError(Exception):
+    pass
+
+
+def _merge_load(path, allow_empty=False):
+    try:
+        if os.path.getsize(path) > MERGE_MAX_BYTES:
+            raise ShardMergeError("%s is larger than %d bytes" % (path, MERGE_MAX_BYTES))
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        text = raw.decode("utf-8")
+    except (IOError, OSError, UnicodeDecodeError) as exc:
+        raise ShardMergeError("cannot read %s: %s" % (path, exc))
+    if allow_empty and not text.strip():
+        return {}
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ShardMergeError("%s is not valid JSON: %s" % (path, exc))
+    if not isinstance(data, dict):
+        raise ShardMergeError("%s is not a JSON object" % path)
+    return data
+
+
+def _merge_when(value, now):
+    """Parse an 'updated' stamp to a naive local datetime; None when absent, unparseable,
+    or more than MERGE_FUTURE_SLACK ahead of now (a skewed or forged clock never wins)."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    when = None
+    try:
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+            when = datetime.datetime.strptime(raw, "%Y-%m-%d")
+        else:
+            iso = raw[:-1] + "+00:00" if raw.endswith(("Z", "z")) else raw
+            when = datetime.datetime.fromisoformat(iso.replace(" ", "T", 1))
+            if when.tzinfo is not None:
+                when = when.astimezone().replace(tzinfo=None)
+    except (ValueError, OverflowError):
+        return None
+    if when > now + MERGE_FUTURE_SLACK:
+        return None
+    return when
+
+
+def _merge_key(value):
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def _merge_union(base, ours, theirs):
+    out, seen = [], set()
+    for seq in (base, ours, theirs):
+        for entry in seq:
+            k = _merge_key(entry)
+            if k not in seen:
+                seen.add(k)
+                out.append(entry)
+    return out
+
+
+def _merge_set(base, ours, theirs):
+    """3-way set merge: an entry stays unless a side removed it; additions from both sides
+    are kept. Order follows base, then ours, then theirs."""
+    bk = set(_merge_key(x) for x in base)
+    ok_ = set(_merge_key(x) for x in ours)
+    tk = set(_merge_key(x) for x in theirs)
+    out, seen = [], set()
+    for seq in (base, ours, theirs):
+        for entry in seq:
+            k = _merge_key(entry)
+            if k in seen:
+                continue
+            seen.add(k)
+            if k in bk and (k not in ok_ or k not in tk):
+                continue
+            out.append(entry)
+    return out
+
+
+def _merge_tier(ours, theirs):
+    """Tier 1 is the strictest. None when either value is not a readable tier."""
+    found = []
+    for value in (ours, theirs):
+        m = re.search(r"[123]", str(value)) if isinstance(value, (str, int)) else None
+        if not m:
+            return None
+        found.append((int(m.group(0)), value))
+    return min(found, key=lambda pair: pair[0])[1]
+
+
+def merge_item_dicts(base, ours, theirs, now=None):
+    """Return (merged_dict, conflicts) where conflicts is [(key, ours_value, theirs_value)];
+    a value is _ABSENT when that side has no such key."""
+    now = now or datetime.datetime.now()
+    keys = []
+    for src in (ours, theirs, base):
+        for k in src:
+            if k not in keys:
+                keys.append(k)
+    t_ours = _merge_when(ours.get("updated"), now)
+    t_theirs = _merge_when(theirs.get("updated"), now)
+    merged, conflicts = {}, []
+    for key in keys:
+        o = base.get(key, _ABSENT)
+        a = ours.get(key, _ABSENT)
+        b = theirs.get(key, _ABSENT)
+        if _merge_key_or_absent(a) == _merge_key_or_absent(b):
+            value = a
+        elif _merge_key_or_absent(a) == _merge_key_or_absent(o):
+            value = b
+        elif _merge_key_or_absent(b) == _merge_key_or_absent(o):
+            value = a
+        elif key == "updated":
+            stamps = [(t, v) for t, v in ((t_ours, a), (t_theirs, b)) if t is not None]
+            value = max(stamps, key=lambda pair: pair[0])[1] if stamps else (o if o is not _ABSENT else a)
+        elif key == "id":
+            raise ShardMergeError("the two sides disagree on the item ID")
+        elif key in MERGE_HISTORY_FIELDS and all(isinstance(v, list) for v in (a, b)):
+            value = _merge_union(o if isinstance(o, list) else [], a, b)
+        elif key == "tier" and _merge_tier(a, b) is not None:
+            value = _merge_tier(a, b)
+        elif key in MERGE_CONFLICT_FIELDS or key == "tier":
+            conflicts.append((key, a, b))
+            value = a
+        elif isinstance(a, list) and isinstance(b, list):
+            value = _merge_set(o if isinstance(o, list) else [], a, b)
+        elif t_ours is not None and (t_theirs is None or t_ours > t_theirs):
+            value = a
+        elif t_theirs is not None and (t_ours is None or t_theirs > t_ours):
+            value = b
+        else:
+            conflicts.append((key, a, b))
+            value = a
+        if value is not _ABSENT:
+            merged[key] = value
+    return merged, conflicts
+
+
+def _merge_key_or_absent(value):
+    return "\0absent" if value is _ABSENT else _merge_key(value)
+
+
+def _merge_field_line(key, value, indent_rest=True):
+    body = json.dumps(value, indent=2, ensure_ascii=False) if indent_rest else \
+        json.dumps(value, ensure_ascii=False)
+    return "  %s: %s" % (json.dumps(key, ensure_ascii=False), body.replace("\n", "\n  "))
+
+
+def render_merge_conflict(merged, conflicts, marker_size=7):
+    """JSON-shaped text with git-style markers around each truly conflicting field."""
+    by_key = dict((k, (a, b)) for k, a, b in conflicts)
+    keys = list(merged.keys())
+    for k in by_key:
+        if k not in keys:
+            keys.append(k)
+    lines = ["{"]
+    for i, key in enumerate(keys):
+        comma = "," if i < len(keys) - 1 else ""
+        if key in by_key:
+            a, b = by_key[key]
+            lines.append("<" * marker_size + " ours")
+            if a is not _ABSENT:
+                lines.append(_merge_field_line(key, a, indent_rest=False) + comma)
+            lines.append("=" * marker_size)
+            if b is not _ABSENT:
+                lines.append(_merge_field_line(key, b, indent_rest=False) + comma)
+            lines.append(">" * marker_size + " theirs")
+        else:
+            lines.append(_merge_field_line(key, merged[key]) + comma)
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def merge_shard_files(base_path, ours_path, theirs_path, now=None, marker_size=7):
+    """Merge three versions of an item shard into ours_path. Returns (exit_code, message)."""
+    # git passes %A relative to the worktree root (".merge_file_XXXX").
+    base_path, ours_path, theirs_path = [os.path.abspath(p) for p in (base_path, ours_path, theirs_path)]
+    try:
+        base = _merge_load(base_path, allow_empty=True)
+        ours = _merge_load(ours_path)
+        theirs = _merge_load(theirs_path)
+        ids = set(str(d.get("id") or "") for d in (base, ours, theirs) if d)
+        if len(ids) != 1 or not list(ids)[0]:
+            raise ShardMergeError("the three versions do not name one item ID (%s)"
+                                  % ", ".join(sorted(repr(i) for i in ids)))
+        merged, conflicts = merge_item_dicts(base, ours, theirs, now=now)
+        if conflicts:
+            text = render_merge_conflict(merged, conflicts, marker_size)
+        else:
+            text = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
+        mode = os.stat(ours_path).st_mode & 0o777
+        _atomic_write_text(ours_path, text)
+        os.chmod(ours_path, mode)
+    except ShardMergeError as exc:
+        return 2, "merge-shard: %s; left the file unchanged" % exc
+    except (IOError, OSError) as exc:
+        return 2, "merge-shard: cannot write the result: %s; left the file unchanged" % exc
+    item_id = list(ids)[0]
+    if conflicts:
+        return 1, "merge-shard: %s conflicts on %s; resolve the markers, then git add the file" % (
+            item_id, ", ".join(k for k, _, _ in conflicts))
+    return 0, "merge-shard: %s merged" % item_id

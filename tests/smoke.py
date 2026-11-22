@@ -6240,6 +6240,172 @@ def test_people_registry():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_shard_merge_driver():
+    print("merge-shard: field-level 3-way merge of item shards, the git driver and its setup")
+    d = tempfile.mkdtemp(prefix="sdlc-mergeshard-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", repo])
+    write(repo, ".gitattributes", "*.png binary\ndocs/project/deploys.jsonl merge=union\n")
+    code, out = run([repo, "MRG", "-y"])
+    check("merge-shard repo installs", code == 0, out[-300:])
+    attrs = read(repo, ".gitattributes")
+    check("install writes the nuhut-shard .gitattributes line",
+          "docs/project/items/*.json merge=nuhut-shard" in attrs, attrs)
+    check("install keeps the deploys.jsonl merge=union line and the user's lines",
+          "docs/project/deploys.jsonl merge=union" in attrs and "*.png binary" in attrs, attrs)
+    check("install prints the git config command for the driver",
+          "git config merge.nuhut-shard.driver" in out, out[-600:])
+    code2, _ = run([repo, "--upgrade", "-y"])
+    attrs2 = read(repo, ".gitattributes")
+    check("upgrade does not duplicate the .gitattributes line",
+          code2 == 0 and attrs2.count("merge=nuhut-shard") == 1, attrs2)
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    base_item = {"id": "MRG-001", "title": "Base", "type": "feat", "tier": "2", "owner": "qa",
+                 "status": "Ready", "depends": [], "touch": ["src/a.py"],
+                 "created": "2026-01-01", "updated": "2026-01-01", "summary": "base",
+                 "approvers": ["alice"], "history": [{"at": "2026-01-01", "event": "created"}]}
+
+    def merge(o, a, b, raw_b=None):
+        tmp = tempfile.mkdtemp(prefix="mrg-", dir=d)
+        paths = []
+        for name, data in (("O", o), ("A", a), ("B", b)):
+            pth = os.path.join(tmp, name)
+            with open(pth, "w") as fh:
+                fh.write(data if isinstance(data, str) else json.dumps(data, indent=2) + "\n")
+            paths.append(pth)
+        if raw_b is not None:
+            with open(paths[2], "w") as fh:
+                fh.write(raw_b)
+        before = read(tmp, "A")
+        rc, text = sdlc("merge-shard", paths[0], paths[1], paths[2])
+        after = read(tmp, "A")
+        try:
+            parsed = json.loads(after)
+        except ValueError:
+            parsed = None
+        return rc, text, before, after, parsed
+
+    # A revoked approver stays revoked: ours revoked, theirs only edited the title later.
+    ours = dict(base_item, approvers=[], updated="2026-01-02")
+    theirs = dict(base_item, title="Retitled", updated="2026-01-05")
+    rc, text, _, after, merged = merge(base_item, ours, theirs)
+    check("merge-shard: a revoked approver stays revoked after a merge",
+          rc == 0 and merged is not None and merged["approvers"] == []
+          and merged["title"] == "Retitled", "%s %s" % (text, after))
+
+    # A future-dated 'updated' does not win a scalar both sides changed.
+    ours = dict(base_item, summary="ours", updated="2026-01-03")
+    theirs = dict(base_item, summary="theirs", updated="2999-01-01")
+    rc, text, _, after, merged = merge(base_item, ours, theirs)
+    check("merge-shard: a future-dated 'updated' does not win",
+          rc == 0 and merged is not None and merged["summary"] == "ours"
+          and merged["updated"] == "2026-01-03", "%s %s" % (text, after))
+    ours = dict(base_item, summary="ours", updated="2026-01-03")
+    theirs = dict(base_item, summary="theirs", updated="2026-01-04")
+    rc, _, _, _, merged = merge(base_item, ours, theirs)
+    check("merge-shard: the newest real 'updated' wins a plain field",
+          rc == 0 and merged is not None and merged["summary"] == "theirs")
+
+    # Conflict fields changed differently on both sides are never merged automatically.
+    for field, va, vb in (("approvers", ["bob"], ["carol"]), ("owner", "qa-lead", "security"),
+                          ("status", "In progress", "Done"), ("hotfix", True, False),
+                          ("waivers", ["w1"], ["w2"])):
+        ours = dict(base_item, updated="2026-01-02")
+        ours[field] = va
+        theirs = dict(base_item, updated="2026-01-09")
+        theirs[field] = vb
+        rc, text, _, after, merged = merge(base_item, ours, theirs)
+        check("merge-shard: %s changed on both sides is a conflict" % field,
+              rc != 0 and "<<<<<<<" in after and ">>>>>>>" in after
+              and json.dumps(va) in after and json.dumps(vb) in after, "%s %s" % (text, after))
+
+    # Tier takes the stricter value; history lists are unioned; other lists merge as sets.
+    ours = dict(base_item, tier="3", touch=["src/a.py", "src/b.py"],
+                history=base_item["history"] + [{"at": "2026-01-02", "event": "ours"}])
+    theirs = dict(base_item, tier="1", touch=["src/c.py"],
+                  history=base_item["history"] + [{"at": "2026-01-03", "event": "theirs"}])
+    rc, text, _, after, merged = merge(base_item, ours, theirs)
+    check("merge-shard: tier takes the stricter value",
+          rc == 0 and merged is not None and merged["tier"] == "1", "%s %s" % (text, after))
+    check("merge-shard: history lists are unioned",
+          merged is not None and [h["event"] for h in merged.get("history", [])]
+          == ["created", "ours", "theirs"], after)
+    check("merge-shard: touch merges as a 3-way set (removal kept, additions kept)",
+          merged is not None and merged.get("touch") == ["src/b.py", "src/c.py"], after)
+
+    # Parse errors exit non-zero and leave %A byte-identical.
+    rc, text, before, after, _ = merge(base_item, dict(base_item, title="Mine"), base_item,
+                                       raw_b="{not json")
+    check("merge-shard: a parse error exits non-zero and leaves %A unchanged",
+          rc != 0 and before == after, text)
+    rc, text, before, after, _ = merge(base_item, dict(base_item, title="Mine"),
+                                       dict(base_item, id="MRG-999"))
+    check("merge-shard: different item IDs are refused and %A is unchanged",
+          rc != 0 and before == after, text)
+
+    # fix merge-driver prints the git config line, then sets absolute paths locally.
+    rc, text = sdlc("fix", "merge-driver")
+    p = subprocess.run(["git", "config", "--get", "merge.nuhut-shard.driver"], cwd=repo,
+                       stdout=subprocess.PIPE, universal_newlines=True)
+    driver = p.stdout.strip()
+    check("fix merge-driver prints the git config line before setting it",
+          rc == 0 and "git config merge.nuhut-shard.driver" in text, text)
+    check("fix merge-driver writes the absolute interpreter and script paths",
+          os.path.isabs(sys.executable) and sys.executable in driver
+          and os.path.realpath(script) in driver and "merge-shard %O %A %B" in driver, driver)
+
+    # A real git merge of two branches that edit different fields of the same shard.
+    sdlc("item", "add", "--title", "Shared item", "--tier", "2", "--touch", "src/x.py")
+    rel = os.path.join("docs", "project", "items", "MRG-001.json")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore(MRG-001): base"], cwd=repo)
+    subprocess.call(["git", "checkout", "-qb", "side"], cwd=repo)
+    data = json.loads(read(repo, rel))
+    data["title"] = "Side title"
+    data["updated"] = "2026-02-02"
+    write(repo, rel, json.dumps(data, indent=2) + "\n")
+    subprocess.call(git + ["commit", "-qam", "chore(MRG-001): side"], cwd=repo)
+    subprocess.call(["git", "checkout", "-q", "main"], cwd=repo)
+    data = json.loads(read(repo, rel))
+    data["summary"] = "Main summary"
+    data["updated"] = "2026-02-01"
+    write(repo, rel, json.dumps(data, indent=2) + "\n")
+    subprocess.call(git + ["commit", "-qam", "chore(MRG-001): main"], cwd=repo)
+    p = subprocess.run(git + ["merge", "--no-edit", "side"], cwd=repo,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    try:
+        final = json.loads(read(repo, rel))
+    except ValueError:
+        final = {}
+    check("git merge through the nuhut-shard driver keeps both sides' fields",
+          p.returncode == 0 and final.get("title") == "Side title"
+          and final.get("summary") == "Main summary"
+          and final.get("updated") == "2026-02-02", p.stdout + read(repo, rel))
+
+    # Rendered views may be gitignored and rendered in CI: doctor must not fail without them.
+    for name in ("backlog.md", "worklog.md"):
+        pth = os.path.join(repo, "docs", "project", name)
+        if os.path.exists(pth):
+            os.remove(pth)
+    rc, text = sdlc("doctor", "--strict", "--no-cache", "--json")
+    try:
+        findings = json.loads(text)
+    except ValueError:
+        findings = None
+    check("doctor does not fail when backlog.md and worklog.md are absent but shards exist",
+          rc == 0 and findings is not None
+          and not [f for f in findings if f.get("level") == "fail"], text[-600:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -6263,7 +6429,8 @@ def main():
                  test_extension_registry,
                  test_tool_support_in_extensions, test_extension_cli,
                  test_hotfix_fast_path,
-                 test_people_registry):
+                 test_people_registry,
+                 test_shard_merge_driver):
         test()
     print("")
     if failures:

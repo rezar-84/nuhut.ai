@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -1279,6 +1280,53 @@ def write_baseline(project, items, today=None):
                   handle, indent=2, sort_keys=True)
         handle.write("\n")
     return sum(accepted.values()), dropped, refused
+
+
+def merge_driver_command():
+    """The driver line for this checkout: absolute interpreter and script, so a merge run
+    from any shell or GUI client finds the same Python and the same runtime."""
+    py = os.path.abspath(sys.executable or "python3")
+    script = os.path.realpath(os.path.abspath(__file__))
+    return "%s %s merge-shard %%O %%A %%B --marker-size %%L" % (shlex.quote(py), shlex.quote(script))
+
+
+def fix_merge_driver(project, as_json=False):
+    """Set merge.nuhut-shard.driver in this clone's local git config. The line is printed
+    before it is written, so the person sees exactly what git will run on a merge."""
+    driver = merge_driver_command()
+    name = _shards_mod.MERGE_DRIVER_NAME
+    label = "Nuhut item shard merge"
+    shown = ["git config merge.%s.name %s" % (name, shlex.quote(label)),
+             "git config merge.%s.driver %s" % (name, shlex.quote(driver))]
+    if not as_json:
+        print("fix merge-driver: setting the local git config in %s" % project.root)
+        for line in shown:
+            print("  " + line)
+        sys.stdout.flush()
+    failed = []
+    for key, value in (("merge.%s.name" % name, label), ("merge.%s.driver" % name, driver)):
+        try:
+            proc = subprocess.run(["git", "config", "--local", key, value], cwd=project.root,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  universal_newlines=True)
+            if proc.returncode != 0:
+                failed.append("%s: %s" % (key, proc.stderr.strip() or "git config failed"))
+        except OSError as exc:
+            failed.append("%s: %s" % (key, exc))
+    attrs = read(project.path(".gitattributes"))
+    pattern = "%s/project/items/*.json merge=%s" % (project.docs, name)
+    if as_json:
+        print(json.dumps({"action": "merge-driver", "commands": shown, "driver": driver,
+                          "errors": failed, "gitattributes": pattern in attrs}, indent=2))
+    elif failed:
+        for line in failed:
+            sys.stderr.write("fix merge-driver: %s\n" % line)
+    else:
+        print("fixed: merge.%s.driver set in .git/config (this clone only)" % name)
+        if pattern not in attrs:
+            print("note: .gitattributes has no '%s' line; add it (install.py --upgrade "
+                  "writes it) or git never calls the driver" % pattern)
+    return 1 if failed else 0
 
 
 def runtime_module(name):
@@ -4535,6 +4583,7 @@ Work items and agents
   hotfix <ID>         mark an item a hotfix (same as item set <ID> --hotfix)          hotfix ACME-12
   next-id             allocate the next work item or ADR ID (--sync-refs for CAS)     next-id --sync-refs
   render              materialize backlog.md and worklog.md from shards (--check)     render --check
+  merge-shard         git merge driver for items/*.json (fix merge-driver sets it)    fix merge-driver
   claim <ID>          take an item: atomic claim, its branch and its own worktree     claim ACME-12
   release <ID>        free it (--remove-worktree to clean up)                         release ACME-12
   claims / parallel   who holds what / which Ready items can run side by side        parallel
@@ -4599,6 +4648,7 @@ EXAMPLES = {
                "review ACME-012 --role qa --by codex --stage retro  # the retroactive review"],
     "next-id": ["next-id", "next-id --sync-refs --json", "next-id --kind adr"],
     "render": ["render", "render --check"],
+    "merge-shard": ["merge-shard BASE OURS THEIRS   # what git runs; set it up with: fix merge-driver"],
     "lens": ["lens", "lens --area build", "lens --user --json"],
     "audit": ["audit", "audit --strict           # exit 1 on a critical or high vulnerability"],
     "sync": ["sync                     # as of the last fetch", "sync --fetch             # fetch first",
@@ -4798,7 +4848,7 @@ def main(argv):
     fx.add_argument("action", nargs="?", default="all",
                     choices=("all", "sync-profile", "wire-pointer", "shared-skills", "restore-bite",
                              "unlock-tests", "rotate-worklog", "normalise-status", "link-evidence",
-                             "migrate-shards"),
+                             "migrate-shards", "merge-driver"),
                     help="repair action to run (default: all, the setup repairs). The record "
                     "repairs preview unless --apply")
     fx.add_argument("--apply", action="store_true", help="record repairs: write the change")
@@ -4925,6 +4975,13 @@ def main(argv):
     rnd_p.add_argument("--check", action="store_true",
                        help="exit 1 if backlog.md or worklog.md differs from rendered shards")
     rnd_p.add_argument("--json", action="store_true", help="print render report as JSON")
+    ms_p = sub.add_parser("merge-shard", help="git merge driver: field-level 3-way merge of one "
+                                              "items/<ID>.json shard (writes the result to OURS)")
+    ms_p.add_argument("base", help="the common ancestor (%%O); an empty file means none")
+    ms_p.add_argument("ours", help="our version (%%A); the merge result is written here")
+    ms_p.add_argument("theirs", help="their version (%%B)")
+    ms_p.add_argument("--marker-size", dest="marker_size", type=int, default=7,
+                      help="length of the conflict markers (git's %%L)")
     au = sub.add_parser("audit", help="run the charter's dependency scanner in JSON mode and keep "
                                       "the vulnerable packages it reports")
     au.add_argument("--timeout", type=int, default=600, help="seconds before the scanner is stopped")
@@ -4938,6 +4995,11 @@ def main(argv):
     if not opts.command:
         parser.print_help()
         return 2
+    if opts.command == "merge-shard":
+        code, message = _shards_mod.merge_shard_files(
+            opts.base, opts.ours, opts.theirs, marker_size=max(3, min(opts.marker_size, 64)))
+        sys.stderr.write(message + "\n")
+        return code
     project = Project(opts.root or default_root())
     if opts.command == "status":
         status_mod = runtime_module("status")
@@ -5654,6 +5716,8 @@ def main(argv):
             if not opts.apply and not report[0].startswith(("worklog.md is", "every")):
                 print("(preview: add --apply to write it)")
         return 0
+    if opts.command == "fix" and opts.action == "merge-driver":
+        return fix_merge_driver(project, opts.json)
     if opts.command == "fix":
         if (opts.action == "unlock-tests" or opts.unlock_tests) and not os.environ.get("AI_SDLC_APPROVAL"):
             if any(os.environ.get(k) for k in AGENT_SESSION_ENVS):
