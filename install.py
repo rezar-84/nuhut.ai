@@ -3847,6 +3847,41 @@ class Installer(object):
             elif not self.o.dry_run:
                 sys.stderr.write("warning: --git-exclude requested but %s is not a git repository\n" % self.target)
 
+    MERGE_DRIVER = "nuhut-shard"
+
+    def apply_git_attributes(self):
+        """Route item shards through the nuhut-shard merge driver. Only missing lines are
+        appended: every line already in .gitattributes (the deploys.jsonl merge=union line
+        among them) is kept as it is. Git config is per clone and is never written here."""
+        pattern = "%s/project/items/*.json merge=%s" % (self.docs, self.MERGE_DRIVER)
+        ga_path = ensure_inside(self.target, self.target / ".gitattributes")
+        content = ""
+        if ga_path.exists():
+            try:
+                content = ga_path.read_text(encoding="utf-8")
+            except (IOError, OSError, UnicodeDecodeError):
+                print("  skip           .gitattributes is unreadable -- add '%s' by hand" % pattern)
+                return
+        present = any(line.split() == pattern.split() for line in content.splitlines())
+        if present:
+            self.skipped += 1
+            print("  skip (exists)  %s in .gitattributes" % pattern)
+        elif self.o.dry_run:
+            self.added += 1
+            print("  would add      %s to .gitattributes" % pattern)
+        else:
+            entry = ("\n" if content and not content.endswith("\n") else "") + \
+                "# Nuhut: field-level merge of work item shards (sdlc.py merge-shard)\n" + pattern + "\n"
+            atomic_write_text(ga_path, content + entry)
+            self.added += 1
+            print("  gitattributes  %s (added to .gitattributes)" % pattern)
+        if not self.o.dry_run:
+            print("  next           enable the shard merge driver in each clone: "
+                  "python3 .ai-sdlc/bin/sdlc.py fix merge-driver")
+            print("                 (or by hand: git config merge.%s.driver "
+                  "\"python3 .ai-sdlc/bin/sdlc.py merge-shard %%O %%A %%B --marker-size %%L\")"
+                  % self.MERGE_DRIVER)
+
     def note_profile(self):
         """A reader must be able to tell a deliberate absence from a broken install."""
         if self.o.profile != "compact" or self.o.dry_run:
@@ -4811,6 +4846,7 @@ def upgrade(target, o):
             print("  update         .claude/settings.json (%d hook command%s anchored on "
                   "$CLAUDE_PROJECT_DIR)" % (repaired, "" if repaired == 1 else "s"))
         inst.apply_git_ignores()
+        inst.apply_git_attributes()
     except Exception as exc:
         for rel, data in originals.items():
             path = target / rel
@@ -5374,6 +5410,7 @@ def main(argv):
             inst.install_hooks()
             inst.install_git_hooks()
             inst.apply_git_ignores()
+            inst.apply_git_attributes()
             inst.record_manifest()
             inst.write_profile()
     except (IOError, OSError, RuntimeError) as exc:

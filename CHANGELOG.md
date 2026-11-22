@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Item shards merge field by field (`sdlc.py merge-shard`, the `nuhut-shard` git merge driver).** Two branches that edit the same `items/<ID>.json` no longer conflict line by line. The driver keeps each side's change to a different field, unions `history`, merges `touch`/`depends` as sets, and takes the stricter `tier`. `approvers`, `waivers`, `status`, `hotfix` and `owner` changed differently on both sides become conflict markers, so a revoked approver stays revoked. Other fields go to the newer `updated`, ignoring stamps more than 5 minutes in the future. A file it cannot parse exits non-zero with the file untouched. The installer appends the `.gitattributes` line, keeping every existing line, and prints the `git config` command; `sdlc.py fix merge-driver` prints and sets it in the clone with absolute paths. `docs/multi-agent.md` documents gitignoring `backlog.md`/`worklog.md` and rendering them in CI; `doctor` already passes without them when shards exist, and a test now holds it to that.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.

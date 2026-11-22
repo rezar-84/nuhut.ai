@@ -39,6 +39,21 @@ python3 .ai-sdlc/bin/sdlc.py release ACME-12 --remove-worktree
   never touch the same line of `backlog.md`, `worklog.md`, or `evidence-ledger.jsonl`.
   Run `sdlc.py render` on the main branch when you want fresh Markdown summaries, and
   `sdlc.py fix migrate-shards --apply` to migrate an existing 4.x repository.
+- **Two branches that edit the same item merge field by field.** The installer adds
+  `docs/project/items/*.json merge=nuhut-shard` to `.gitattributes`. Run
+  `python3 .ai-sdlc/bin/sdlc.py fix merge-driver` once in each clone; it prints the
+  `git config` line and then sets it with absolute paths. From then on git hands item
+  shards to `sdlc.py merge-shard`, which keeps both sides' changes to different fields,
+  keeps every `history` entry, and takes the stricter tier. It writes conflict markers when
+  both sides changed `approvers`, `waivers`, `status`, `hotfix` or `owner` differently, so a
+  revoked approval or a status change is a person's decision. Other fields go to the newer
+  `updated`, ignoring a stamp more than 5 minutes in the future. A file it cannot parse is
+  left untouched and the merge stops.
+- **Optional: keep the rendered views out of git.** `backlog.md` and `worklog.md` are views
+  of the shards. A team that never reads them in a diff can add both to `.gitignore` and run
+  `python3 .ai-sdlc/bin/sdlc.py render` in CI (or before publishing docs) instead. `doctor`
+  reads the shards and does not fail when the two files are absent. Keep them committed if
+  people read the backlog on the hosting site without running anything.
 - **It refuses the obvious mistakes:** an item already claimed, one whose dependencies are
   unfinished, one that is Done or Dropped, or releasing a claim owned by another agent
   without `--force`. `release --remove-worktree` refuses a worktree with uncommitted changes.
