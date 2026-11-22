@@ -37,7 +37,13 @@ ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 VERSION_RE = re.compile(r"^[0-9]+(\.[0-9]+){0,2}$")
 SEMVER_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$")
 CLAUSE_RE = re.compile(r"^(>=|<|==)\s*([0-9]+(?:\.[0-9]+){0,2})$")
-TOP_KEYS = ("schema", "id", "version", "nuhut", "description", "overrides", "provides")
+TOP_KEYS = ("schema", "id", "version", "nuhut", "description", "overrides", "package",
+            "provides")
+# `sdlc.py ext package --for <tool>` (NUHT-019): the plugin wrappers each tool expects.
+PACKAGE_TOOLS = ("claude", "gemini", "codex", "kiro")
+PACKAGE_TEXT = ("title", "description", "license")
+PACKAGE_PATHS = ("commands", "context_file")
+URL_RE = re.compile(r"^https?://[^\s]+$")
 LIST_PROVIDES = ("harnesses", "agents", "checks", "presets", "hook_rules", "doctor",
                  "overlays", "commands")
 DIR_PROVIDES = ("skills", "roles", "templates")
@@ -234,6 +240,45 @@ def _check_overlay(errors, field, rec):
         errors.append((field + ".file", "expected a relative path with no '..'"))
 
 
+def _check_package(errors, warnings, pkg):
+    """The optional top-level `package` block: metadata for the plugin wrappers."""
+    if not isinstance(pkg, dict):
+        errors.append(("package", "expected an object"))
+        return
+    for key in sorted(pkg):
+        value, field = pkg[key], "package." + key
+        if key == "name":
+            _check_id(errors, field, value)
+        elif key == "version":
+            if value != "kit" and not (isinstance(value, str) and SEMVER_RE.match(value)):
+                errors.append((field, "expected \"kit\" or a version such as \"1.0.0\""))
+        elif key in PACKAGE_TEXT:
+            if not isinstance(value, str):
+                errors.append((field, "expected a string"))
+        elif key == "homepage":
+            if not isinstance(value, str) or not URL_RE.match(value):
+                errors.append((field, "expected an http:// or https:// URL"))
+        elif key == "keywords":
+            if not _is_str_list(value):
+                errors.append((field, "expected list of strings"))
+        elif key == "author":
+            if not isinstance(value, dict) or not isinstance(value.get("name"), str):
+                errors.append((field, "expected an object with a string name"))
+            else:
+                for sub in sorted(value):
+                    if sub not in ("name", "url", "email"):
+                        warnings.append(("%s.%s" % (field, sub), "unknown key, ignored"))
+                    elif not isinstance(value[sub], str) or (
+                            sub == "url" and not URL_RE.match(value[sub])):
+                        errors.append(("%s.%s" % (field, sub), "expected a string" if
+                                       sub != "url" else "expected an http(s) URL"))
+        elif key in PACKAGE_PATHS:
+            if not _safe_rel(value):
+                errors.append((field, "expected a relative path with no '..'"))
+        else:
+            warnings.append((field, "unknown key, ignored"))
+
+
 RECORD_CHECKS = {"harnesses": _check_harness, "agents": _check_agent,
                  "presets": _check_preset, "checks": _check_check,
                  "hook_rules": _check_code, "doctor": _check_code, "commands": _check_code}
@@ -272,6 +317,8 @@ def validate(manifest):
     for key in sorted(manifest):
         if key not in TOP_KEYS:
             warnings.append((key, "unknown key, ignored"))
+    if "package" in manifest:
+        _check_package(errors, warnings, manifest["package"])
     provides = manifest.get("provides", {})
     if not isinstance(provides, dict):
         errors.append(("provides", "expected an object"))
@@ -665,7 +712,82 @@ def referenced_paths(manifest):
     for key in DIR_PROVIDES:
         if isinstance(provides.get(key), str):
             out.append(("provides." + key, provides[key], True))
+    pkg = manifest.get("package")
+    if isinstance(pkg, dict):
+        for key in PACKAGE_PATHS:
+            if isinstance(pkg.get(key), str):
+                out.append(("package." + key, pkg[key], key == "commands"))
     return out
+
+
+def _json_text(obj):
+    return json.dumps(obj, indent=2, ensure_ascii=False) + "\n"
+
+
+def package_meta(manifest, version):
+    """The wrapper metadata of <manifest>: its `package` block with defaults filled in
+    from the manifest. A package version of "kit" means <version>, the running Nuhut."""
+    pkg = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
+    ver = pkg.get("version") or manifest.get("version")
+    if ver == "kit":
+        ver = version
+    meta = {"name": pkg.get("name") or manifest.get("id"),
+            "title": pkg.get("title") or manifest.get("id"),
+            "description": pkg.get("description", manifest.get("description") or ""),
+            "version": ver}
+    for key in ("author", "homepage", "license", "keywords", "commands", "context_file"):
+        if pkg.get(key):
+            meta[key] = pkg[key]
+    return meta
+
+
+def _common(meta, keys):
+    return [(k, meta[k]) for k in keys if k in meta]
+
+
+def package_files(manifest, tool, version):
+    """[(rel, text)] of the wrapper files <tool> expects for <manifest>. Pure: nothing is
+    read or written. No wrapper lists skills: they are model-invoked and cost context
+    every turn, so the installer chooses them per project."""
+    if tool not in PACKAGE_TOOLS:
+        raise ValueError("unknown tool %r: use one of %s" % (tool, ", ".join(PACKAGE_TOOLS)))
+    meta = package_meta(manifest, version)
+    base = [("name", meta["name"]), ("description", meta["description"]),
+            ("version", meta["version"])]
+    if tool == "claude":
+        obj = dict(base + _common(meta, ("author", "homepage", "license", "keywords",
+                                         "commands")))
+        return [(".claude-plugin/plugin.json", _json_text(obj))]
+    if tool == "gemini":
+        obj = dict([("name", meta["name"]), ("version", meta["version"]),
+                    ("description", meta["description"])])
+        if "context_file" in meta:
+            obj["contextFileName"] = meta["context_file"]
+        return [("gemini-extension.json", _json_text(obj))]
+    if tool == "codex":
+        obj = dict(base + _common(meta, ("author", "homepage", "license", "keywords")))
+        first = (meta["description"].strip().splitlines() or [""])[0]
+        obj["interface"] = {"displayName": meta["title"], "shortDescription": first}
+        return [(".codex-plugin/plugin.json", _json_text(obj))]
+    obj = dict([("name", meta["name"]), ("displayName", meta["title"]),
+                ("version", meta["version"]), ("description", meta["description"])]
+               + _common(meta, ("keywords", "author", "homepage", "license")))
+    # JSON strings are valid YAML double-quoted scalars, so no value can add a key.
+    front = ["---"] + ["%s: %s" % (k, json.dumps(obj[k], ensure_ascii=False))
+                       for k in ("name", "displayName", "description", "keywords")
+                       if k in obj] + ["---", ""]
+    body = "# %s\n\n%s\n" % (meta["title"], meta["description"].strip())
+    return [("plugin.json", _json_text(obj)), ("POWER.md", "\n".join(front) + "\n" + body)]
+
+
+def package_copies(manifest, tool):
+    """[(field, rel, is_dir)]: the extension files the <tool> wrapper refers to, which
+    `ext package` copies beside it."""
+    pkg = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
+    key = {"claude": "commands", "gemini": "context_file"}.get(tool)
+    if key and isinstance(pkg.get(key), str):
+        return [("package." + key, pkg[key], key == "commands")]
+    return []
 
 
 def check_tree(ext_dir, manifest):

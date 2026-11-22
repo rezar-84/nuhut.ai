@@ -527,6 +527,100 @@ def cmd_validate(rt, reg_mod, project, opts):
     return 0
 
 
+def _kit_version(project, reg):
+    version = (project.manifest or {}).get("kit_version")
+    if not version and reg.kit:
+        try:
+            with open(os.path.join(reg.kit, "VERSION"), encoding="utf-8") as handle:
+                version = handle.read().strip()
+        except (IOError, OSError):
+            version = None
+    return version
+
+
+def _copy_tree(src, dest, top):
+    """Copy <src> (a file or a directory) to <dest>. Symlinks and anything resolving
+    outside <top> are skipped; returns the relative names skipped."""
+    skipped = []
+    if os.path.isfile(src):
+        os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+        shutil.copyfile(src, dest)
+        return skipped
+    for folder, dirs, names in os.walk(src):
+        dirs[:] = sorted(d for d in dirs if d != ".git"
+                         and not os.path.islink(os.path.join(folder, d)))
+        for name in sorted(names):
+            full = os.path.join(folder, name)
+            rel = os.path.relpath(full, src)
+            real = os.path.realpath(full)
+            if os.path.islink(full) or not real.startswith(top.rstrip(os.sep) + os.sep):
+                skipped.append(rel)
+                continue
+            target = os.path.join(dest, rel)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copyfile(full, target)
+    return skipped
+
+
+def cmd_package(rt, reg_mod, project, opts):
+    """Write the plugin wrapper one tool expects for an extension (ADR 0003 decision 9)."""
+    tool = getattr(opts, "for_tool", None)
+    if not tool:
+        return _fail("ext package: give --for %s" % "|".join(reg_mod.PACKAGE_TOOLS))
+    reg, why = rt.load_registry(project)
+    if reg is None:
+        return _fail("ext package: %s" % why)
+    ext = reg.extensions.get(opts.target)
+    if ext is None:
+        if opts.target in reg.broken:
+            err = reg.broken[opts.target]
+            return _fail("ext package: %s is broken: %s: %s" % (opts.target, err["field"],
+                                                                 err["message"]))
+        return _fail("ext package: no extension %r; see sdlc.py ext list" % opts.target)
+    manifest = ext["manifest"]
+    pkg = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
+    if pkg.get("version") == "kit" and ext["source"] != reg_mod.BUILTIN:
+        return _fail("ext package: package.version \"kit\" is for the kit's own extensions; "
+                     "give a version such as \"1.0.0\"")
+    version = _kit_version(project, reg)
+    if pkg.get("version") == "kit" and not version:
+        return _fail("ext package: the running Nuhut version is unknown")
+    out = os.path.abspath(opts.out) if getattr(opts, "out", None) else os.path.join(
+        project.root, "dist", "extensions", opts.target, tool)
+    ext_dir = os.path.realpath(os.path.dirname(ext["path"]))
+    written = []
+    for rel, text in reg_mod.package_files(manifest, tool, version):
+        target = os.path.join(out, rel)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        written.append(rel)
+    notes = []
+    for field, rel, is_dir in reg_mod.package_copies(manifest, tool):
+        src = os.path.join(ext_dir, rel)
+        real = os.path.realpath(src)
+        if not real.startswith(ext_dir + os.sep) or not (
+                os.path.isdir(src) if is_dir else os.path.isfile(src)):
+            if not os.path.exists(os.path.join(out, rel)):
+                notes.append("%s: %s is not in the extension directory, so it was not "
+                             "copied; put it at %s before you publish"
+                             % (field, rel, os.path.join(out, rel)))
+            continue
+        for name in _copy_tree(src, os.path.join(out, rel), ext_dir):
+            notes.append("%s: skipped %s (a symlink or outside the extension)"
+                         % (field, os.path.join(rel, name)))
+        written.append(rel.rstrip("/") + ("/" if is_dir else ""))
+    print("ext package: %s %s for %s -> %s" % (opts.target, reg_mod.package_meta(
+        manifest, version)["version"], tool, out))
+    for rel in written:
+        print("  wrote %s" % rel)
+    for note in notes:
+        print("  note  %s" % note)
+    print("  skills are not listed in the wrapper: install them per project with "
+          "install.sh or sdlc.py ext add")
+    return 0
+
+
 def _sibling(name):
     here = os.path.dirname(os.path.abspath(__file__))
     if here not in sys.path:
@@ -540,13 +634,15 @@ def _fail(message):
 
 
 ACTIONS = {"list": cmd_list, "add": cmd_add, "update": cmd_update, "remove": cmd_remove,
-           "search": cmd_search, "validate": cmd_validate}
-NEEDS_TARGET = ("add", "update", "remove", "validate")
+           "search": cmd_search, "validate": cmd_validate, "package": cmd_package}
+NEEDS_TARGET = ("add", "update", "remove", "validate", "package")
 
 
 def main(rt, project, opts):
     if opts.action in NEEDS_TARGET and not opts.target:
         return _fail("ext %s: give %s" % (opts.action, "a source" if opts.action == "add"
                                           else "a path" if opts.action == "validate"
+                                          else "an extension id and --for TOOL"
+                                          if opts.action == "package"
                                           else "an extension id"))
     return ACTIONS[opts.action](rt, _sibling("registry"), project, opts)

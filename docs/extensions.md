@@ -165,6 +165,46 @@ The catalog is fetched through `.ai-sdlc/bin/net.py`:
 An entry whose URL breaks the `ext add` rules is shown as refused. `validate.py` checks
 that the kit's `VERSION` satisfies every range in the kit's own catalog.
 
+## Package it for other tools
+
+`ext package <id> --for claude|gemini|codex|kiro` writes the plugin wrapper that tool
+expects, from the same manifest, into `dist/extensions/<id>/<tool>/` (or `--out DIR`):
+
+| `--for` | Writes | Copies beside it |
+| --- | --- | --- |
+| `claude` | `.claude-plugin/plugin.json` | the `package.commands` directory |
+| `gemini` | `gemini-extension.json` (with `contextFileName` from `package.context_file`) | the context file |
+| `codex` | `.codex-plugin/plugin.json` | nothing |
+| `kiro` | `plugin.json` and `POWER.md` | nothing |
+
+The metadata comes from an optional top-level `package` block. Every key is optional and
+falls back to the manifest's `id`, `version` and `description`:
+
+```json
+"package": {
+  "name": "lint-pack", "title": "Lint Pack", "version": "1.0.0",
+  "description": "Lint rules for agent shell calls",
+  "author": {"name": "Your Name", "url": "https://example.com"},
+  "homepage": "https://example.com/lint-pack", "license": "MIT",
+  "keywords": ["lint"], "commands": "./commands", "context_file": "CONTEXT.md"
+}
+```
+
+- No wrapper lists skills. Skills are model-invoked and cost context every turn, so they
+  are chosen per project by the installer or `ext add`, never shipped globally.
+- `package` is data: nothing in it runs. `commands` and `context_file` follow the same
+  path rules as the rest of the manifest, and symlinks are not copied.
+- `"version": "kit"` means the running Nuhut version. Only the kit's own extensions may
+  use it.
+
+The kit's own `.claude-plugin/plugin.json` is generated this way from the `core`
+extension, and `validate.py` fails when the two disagree. After editing core's `package`
+block, regenerate it from the kit checkout:
+
+```sh
+python3 .ai-sdlc/bin/sdlc.py ext package core --for claude --out .
+```
+
 ## Not yet
 
 - `commands` entry points are validated, pinned and listed, but `sdlc.py` does not yet

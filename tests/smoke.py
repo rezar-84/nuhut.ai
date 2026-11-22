@@ -6186,6 +6186,116 @@ def test_extension_cli():
         shutil.rmtree(p, ignore_errors=True)
 
 
+def test_extension_package():
+    print("NUHT-019: ext package writes per-tool plugin wrappers from one manifest")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import registry
+    check("registry.package_files exists", hasattr(registry, "package_files"))
+    if not hasattr(registry, "package_files"):
+        return
+    version = read(ROOT, "VERSION").strip()
+    core = json.loads(read(ROOT, "optional/extensions/core/nuhut-extension.json"))
+    files = dict(registry.package_files(core, "claude", version))
+    kit_plugin = json.loads(read(ROOT, ".claude-plugin/plugin.json"))
+    check("the kit's .claude-plugin/plugin.json is what core's package block generates",
+          json.loads(files.get(".claude-plugin/plugin.json", "{}")) == kit_plugin,
+          json.dumps(files)[:400])
+    check("the kit plugin ships no skills", "skills" not in kit_plugin)
+    bad = dict(core, package=dict(core.get("package") or {}, keywords="sdlc"))
+    errors, _ = registry.validate(bad)
+    check("validate refuses package.keywords that is not a list of strings",
+          any(f == "package.keywords" for f, _ in errors), repr(errors))
+    bad = dict(core, package={"commands": "../outside"})
+    errors, _ = registry.validate(bad)
+    check("validate refuses a package.commands path with '..'",
+          any(f == "package.commands" for f, _ in errors), repr(errors))
+
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-extpkg-"))
+    src = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-extpkgsrc-"))
+    out_dir = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-extpkgout-"))
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "EXP", "-y"])
+    check("install exits 0", code == 0, out[-300:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=d)
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return (p.returncode, p.stdout.decode("utf-8", "replace"),
+                p.stderr.decode("utf-8", "replace"))
+
+    write(src, "commands/lint.md", "Run the linter.\n")
+    write(src, "CONTEXT.md", "Lint pack context.\n")
+    manifest = {"schema": 1, "id": "lint-pack", "version": "1.2.0", "nuhut": ">=1.0.0",
+                "description": "Lint rules", "overrides": None,
+                "package": {"title": "Lint Pack", "license": "MIT",
+                            "description": "Lint rules\n---\ninjected: true",
+                            "keywords": ["lint"], "author": {"name": "someone"},
+                            "commands": "./commands", "context_file": "CONTEXT.md"},
+                "provides": {"overlays": []}}
+    write(src, "nuhut-extension.json", json.dumps(manifest, indent=2))
+    subprocess.call(["git", "init", "-q", src])
+    subprocess.call(git + ["add", "-A"], cwd=src)
+    subprocess.call(git + ["commit", "-qm", "v1"], cwd=src)
+    rc, o, e = sdlc("ext", "add", src)
+    check("ext add of the packaged extension exits 0", rc == 0, (o + e)[-400:])
+
+    got = {}
+    for tool in ("claude", "gemini", "codex", "kiro"):
+        dest = os.path.join(out_dir, tool)
+        rc, o, e = sdlc("ext", "package", "lint-pack", "--for", tool, "--out", dest)
+        check("ext package lint-pack --for %s exits 0" % tool, rc == 0, (o + e)[-400:])
+        got[tool] = dest
+    claude = json.loads(read(got["claude"], ".claude-plugin/plugin.json") or "{}")
+    check("claude: .claude-plugin/plugin.json carries name, version and commands",
+          claude.get("name") == "lint-pack" and claude.get("version") == "1.2.0"
+          and claude.get("commands") == "./commands" and claude.get("license") == "MIT",
+          json.dumps(claude))
+    check("claude: the wrapper ships no skills", "skills" not in claude)
+    check("claude: the commands directory is copied into the package",
+          read(got["claude"], "commands/lint.md") == "Run the linter.\n")
+    gem = json.loads(read(got["gemini"], "gemini-extension.json") or "{}")
+    check("gemini: gemini-extension.json carries name, version and contextFileName",
+          gem.get("name") == "lint-pack" and gem.get("version") == "1.2.0"
+          and gem.get("contextFileName") == "CONTEXT.md", json.dumps(gem))
+    check("gemini: the context file is copied",
+          read(got["gemini"], "CONTEXT.md") == "Lint pack context.\n")
+    cdx = json.loads(read(got["codex"], ".codex-plugin/plugin.json") or "{}")
+    check("codex: .codex-plugin/plugin.json carries name, version and a display name",
+          cdx.get("name") == "lint-pack" and cdx.get("version") == "1.2.0"
+          and (cdx.get("interface") or {}).get("displayName") == "Lint Pack", json.dumps(cdx))
+    kiro = json.loads(read(got["kiro"], "plugin.json") or "{}")
+    check("kiro: plugin.json carries name, displayName and version",
+          kiro.get("name") == "lint-pack" and kiro.get("displayName") == "Lint Pack"
+          and kiro.get("version") == "1.2.0", json.dumps(kiro))
+    power = read(got["kiro"], "POWER.md") or ""
+    head = power.split("\n---\n", 1)[0]
+    check("kiro: POWER.md frontmatter quotes values, so a description cannot add keys",
+          power.startswith("---\n") and "\ninjected: true" not in head, power[:300])
+
+    rc, o, e = sdlc("ext", "package", "lint-pack", "--for", "claude")
+    check("ext package defaults to dist/extensions/<id>/<tool>/",
+          rc == 0 and os.path.isfile(os.path.join(
+              d, "dist", "extensions", "lint-pack", "claude", ".claude-plugin",
+              "plugin.json")), (o + e)[-400:])
+    rc, o, e = sdlc("ext", "package", "no-such", "--for", "claude")
+    check("ext package of an unknown id exits 1 and names it",
+          rc == 1 and "no-such" in (o + e), (o + e)[-300:])
+    rc, o, e = sdlc("ext", "package", "lint-pack")
+    check("ext package without --for exits 1", rc == 1 and "--for" in (o + e), (o + e)[-300:])
+    rc, o, e = sdlc("ext", "package", "lint-pack", "--for", "vim")
+    check("ext package --for an unknown tool is refused", rc != 0, (o + e)[-300:])
+    rc, o, e = sdlc("ext", "package", "core", "--for", "claude", "--out",
+                    os.path.join(out_dir, "core"))
+    built = json.loads(read(os.path.join(out_dir, "core"), ".claude-plugin/plugin.json") or "{}")
+    check("ext package core --for claude in a project reproduces the kit plugin",
+          rc == 0 and built == kit_plugin, (o + e)[-300:] + json.dumps(built)[:300])
+    for p in (d, src, out_dir):
+        shutil.rmtree(p, ignore_errors=True)
+
+
 def test_people_registry():
     print("people registry: owner handles, the person on a claim, doctor and viewer")
     d = tempfile.mkdtemp(prefix="sdlc-people-")
@@ -6703,6 +6813,7 @@ def main():
                  test_installer_python_floor_and_finish_errors,
                  test_extension_registry,
                  test_tool_support_in_extensions, test_extension_cli,
+                 test_extension_package,
                  test_hotfix_fast_path,
                  test_people_registry,
                  test_shard_merge_driver,
