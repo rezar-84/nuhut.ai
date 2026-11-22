@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-022",
+  "title": "ci-check: enforce trailers, ledger run on HEAD, review file and path-derived tier floor in PR CI",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "devops-sre",
+  "status": "Deferred",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "install.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 2 (team): after v6.0 ships",
+  "dropped_reason": ""
+}

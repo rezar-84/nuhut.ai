@@ -57,7 +57,11 @@ already make small work cheap, once the checks respect them.
 | B, finishing tools | Done (`8ca7125`) | `sdlc.py finish <ID>` and `/sdlc-finish`; `verify --item`; named waivers that never count as Verified and are refused at Tier 1; the finish-guard Stop hook; `doctor --baseline` ratchet; the charter allowlist; record repairs that preview before writing. |
 | Dashboard | Done (`97871c4`) | Needs you pages and groups; the cards are balanced. |
 | Software Factory (`kit-v5`) | Done (`kit-v5`) | Unified Python stdlib hooks (`hooks.py`, Gemini Stop guard, zero `jq`); hardened `view --serve` (`HttpOnly` cookie + `Origin` check); sharded zero-conflict store (`items/`, `worklog/`, `ledger/`, `fix migrate-shards`); `--sync-refs` git-ref CAS leases + `next-id`; `<500ms` incremental `doctor` cache; `sdlc.py dispatch`; `Discovered defects` triage policy; multi-harness `kit-value` and 5-task `effort-modes` benchmarks. |
-| Release `v5.0.0` | Approved by `rezar-84` on 2026-11-21 | `kit-v5` merged to `main`; the Version workflow bumps `VERSION` and tags `v5.0.0`. |
+| Release `v5.0.0` | Done (`04970a6`) | `kit-v5` merged to `main`; the Version workflow bumped `VERSION` and tagged `v5.0.0`. |
+| v5.0.x, make the claims true | Planned | Self-install version drift (NUHT-011), binding verify evidence (NUHT-012, needs approval), shell-write guards (NUHT-013), release pipeline (NUHT-014, needs approval), `install.sh` and swallowed errors (NUHT-015). |
+| v6.0, extension system | Proposed (ADR 0003) | One `nuhut-extension.json` per extension; built-in tools become extensions; `ext` CLI, overlays, catalog, generated plugin wrappers (NUHT-016 to NUHT-021). |
+| v6.x, team and delivery | Deferred | PR and CI enforcement, people, GitHub approvals, shard merge driver, `status`, release and deploy ledger, hotfix path, delivery metrics (NUHT-022 to NUHT-029). |
+| v7, integrations | Deferred | Issue sync, MCP server, worktree scripts, standards discovery, webhooks, all as extensions (NUHT-030 to NUHT-034). See [landscape.md](landscape.md). |
 
 ### Trial (next)
 

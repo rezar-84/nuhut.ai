@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-035",
+  "title": "Move smoke tests to unittest with selection, a fast unit tier and a parallel pty tier",
+  "type": "test",
+  "tier": "2",
+  "effort": "",
+  "owner": "qa",
+  "status": "Deferred",
+  "depends": [],
+  "touch": [
+    "tests/"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "Before Phase 1 code lands",
+  "dropped_reason": ""
+}

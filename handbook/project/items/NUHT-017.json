@@ -1,0 +1,29 @@
+{
+  "id": "NUHT-017",
+  "title": "Move claude, codex, gemini, cursor support into built-in extensions (one agent table)",
+  "type": "refactor",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Deferred",
+  "depends": [
+    "NUHT-016"
+  ],
+  "touch": [
+    "optional/extensions/",
+    "install.py",
+    "optional/runtime/sdlc.py",
+    "optional/runtime/dispatch.py",
+    "optional/runtime/hooks.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 1: after ADR 0003 (extension system) is approved",
+  "dropped_reason": ""
+}

@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-020",
+  "title": "New harness extensions: OpenCode, Kiro, ACP agents (no core changes)",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Deferred",
+  "depends": [
+    "NUHT-017"
+  ],
+  "touch": [
+    "optional/extensions/"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 1: after ADR 0003 (extension system) is approved",
+  "dropped_reason": ""
+}

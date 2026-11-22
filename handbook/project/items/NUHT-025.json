@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-025",
+  "title": "Merge driver for item shards; rendered backlog and worklog gitignored",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Deferred",
+  "depends": [],
+  "touch": [
+    "optional/runtime/shards.py",
+    "install.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 2 (team): after v6.0 ships",
+  "dropped_reason": ""
+}

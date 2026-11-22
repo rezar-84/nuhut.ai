@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-031",
+  "title": "MCP server extension: backlog, verify, finish, doctor as tools (stdlib JSON-RPC)",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Deferred",
+  "depends": [
+    "NUHT-018"
+  ],
+  "touch": [],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v7 Phase 4 (integrations as extensions): after the extension system ships",
+  "dropped_reason": ""
+}
