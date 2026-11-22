@@ -10,6 +10,7 @@ item ID.
 python3 .ai-sdlc/bin/sdlc.py view                  # write .ai-sdlc/view/index.html and open it
 python3 .ai-sdlc/bin/sdlc.py view --serve          # the same page, live, on 127.0.0.1
 python3 .ai-sdlc/bin/sdlc.py view --serve --github # plus open GitHub issues and pull requests
+python3 .ai-sdlc/bin/sdlc.py view --serve --host tailscale  # reachable from your tailnet, read-only
 python3 .ai-sdlc/bin/sdlc.py view --export-html report.html   # one offline file for CI or a PR
 ```
 
@@ -176,10 +177,34 @@ On a live page you can:
 A static page (`view` or `--export-html`) is one self-contained file. It works offline, and
 there its buttons copy the equivalent command instead.
 
+### From another machine
+
+`--host` serves the live page somewhere other machines can reach it:
+
+```bash
+python3 .ai-sdlc/bin/sdlc.py view --serve --host tailscale       # this machine's Tailscale IPv4
+python3 .ai-sdlc/bin/sdlc.py view --serve --host 192.168.1.20    # one address of this machine
+python3 .ai-sdlc/bin/sdlc.py view --serve --host 0.0.0.0         # every interface
+```
+
+Each start prints a link with a new access key, `http://<address>:<port>/?k=<key>`. Open
+it once: the server trades the key for a cookie and takes it out of the address bar.
+Without the key or that cookie every request gets `403`. The key lives in the server's
+memory only and changes on every start, so stopping the server revokes every link.
+
+A remote page is read-only: the buttons copy the command, as on a static page, and the
+action endpoints answer `403`. Add `--allow-actions` to run commands and change settings
+from it, which still needs the page's session cookie and a same-origin request. Any Host
+header is accepted once the key checks out, so `tailscale serve` or a reverse proxy in
+front works. Outside Tailscale (`100.64.0.0/10`) traffic is plain HTTP and the server
+warns: anyone on the path can read the page and the key.
+
 ## What it never does
 
-- **It serves only on 127.0.0.1** and refuses requests addressed to any other host (DNS
-  rebinding). Every action needs a session token the page carries.
+- **It serves only on 127.0.0.1** unless you pass `--host`, and there refuses requests
+  addressed to any other host (DNS rebinding). With `--host` every request needs the
+  access key instead, and actions need `--allow-actions`. Every action needs a session
+  token the page carries.
 - **It never reads a secret value.** Environment files are read for variable names only,
   and only from templates; a real `.env` is checked for existence and whether git ignores
   it. MCP servers are listed by name and transport, never their arguments, environment or

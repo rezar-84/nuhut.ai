@@ -15,12 +15,16 @@ This file must never contain two opening braces in a row (see sdlc.py).
 """
 
 import datetime
+import errno
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
+import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -1406,8 +1410,9 @@ class Live(object):
     """The current model, rebuilt only when the fingerprint moves, and at most once per
     interval however many tabs are polling."""
 
-    def __init__(self, rt, project, template, interval):
+    def __init__(self, rt, project, template, interval, actions=True):
         self.rt, self.project, self.template, self.interval = rt, project, template, interval
+        self.actions = actions
         self.lock = threading.RLock()
         self.refreshing = False
         self.token = hashlib.sha256(os.urandom(32)).hexdigest()[:32]
@@ -1514,7 +1519,7 @@ class Live(object):
             if self.lens_full is not None:
                 model["lens"] = lens_summary(self.lens_full)
             model["live_interval"] = self.interval
-            model["live_actions"] = True
+            model["live_actions"] = self.actions
             new_json = json.dumps(model, ensure_ascii=False,
                                   separators=(",", ":")).encode("utf-8")
             new_page = render(model, self.template).encode("utf-8")
@@ -1542,25 +1547,106 @@ def _parse_host(raw_host):
     return raw.split(":", 1)[0]
 
 
-def _session_cookie(raw_cookie):
+def _session_cookie(raw_cookie, name="nuhut_session"):
     for part in (raw_cookie or "").split(";"):
         if "=" in part:
             k, v = part.split("=", 1)
-            if k.strip() == "nuhut_session":
+            if k.strip() == name:
                 return v.strip()
     return ""
 
 
-def _valid_origin(raw_origin, port):
+def _valid_origin(raw_origin, port, own_host=None):
+    """The Origin of a POST must be this server. Local mode knows its own addresses; remote
+    mode (own_host given) has no fixed name behind a proxy, so it compares the Origin with
+    the request's own Host header."""
     origin = (raw_origin or "").strip().lower().rstrip("/")
     if not origin:
         return False
+    if own_host is not None:
+        host = own_host.strip().lower()
+        return bool(host) and origin in ("http://" + host, "https://" + host)
     allowed = (
         "http://127.0.0.1:%d" % port,
         "http://localhost:%d" % port,
         "http://[::1]:%d" % port,
     )
     return origin in allowed
+
+
+def _query(path):
+    query = {}
+    for pair in (path.split("?", 1) + [""])[1].split("&"):
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            query[k] = v
+    return query
+
+
+TAILNET = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
+
+
+def _tailscale_ip():
+    """This machine's Tailscale IPv4 address from `tailscale ip -4`."""
+    candidates = ["tailscale"]
+    if sys.platform == "darwin":  # the Mac app ships its CLI inside the bundle
+        candidates.append("/Applications/Tailscale.app/Contents/MacOS/Tailscale")
+    missing = True
+    for exe in candidates:
+        try:
+            proc = subprocess.run([exe, "ip", "-4"], stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        missing = False
+        for line in proc.stdout.decode("utf-8", "replace").split():
+            try:
+                return str(ipaddress.IPv4Address(line.strip()))
+            except ValueError:
+                continue
+    if missing:
+        raise SystemExit("view: --host tailscale needs the tailscale command; install "
+                         "Tailscale, or pass the address with --host <ip>")
+    raise SystemExit("view: tailscale reports no IPv4 address for this machine; run "
+                     "`tailscale up`, or pass the address with --host <ip>")
+
+
+def bind_address(spec):
+    """--host as (address, is loopback). Raises SystemExit on a value that is not one."""
+    spec = (spec or "127.0.0.1").strip()
+    if spec.lower() == "localhost":
+        spec = "127.0.0.1"
+    if spec.lower() == "tailscale":
+        spec = _tailscale_ip()
+    try:
+        addr = ipaddress.ip_address(spec.strip("[]"))
+    except ValueError:
+        raise SystemExit("view: --host takes 127.0.0.1, tailscale, 0.0.0.0 or an IP address "
+                         "of this machine, not %r" % spec)
+    return str(addr), addr.is_loopback
+
+
+def _reachable_names():
+    """What another machine might use to reach a server bound to every interface: the host
+    name and the address of the default route, found without sending a packet."""
+    names = []
+    try:
+        names.append(socket.gethostname())
+    except OSError:
+        pass
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 9))  # TEST-NET-1: a UDP connect only picks a route
+        names.append(probe.getsockname()[0])
+    except OSError:
+        pass
+    finally:
+        probe.close()
+    return [n for i, n in enumerate(names) if n and n not in names[:i]]
+
+
+def _url_host(addr):
+    return "[%s]" % addr if ":" in addr else addr
 
 
 def _kill_proc_tree(proc):
@@ -1585,7 +1671,14 @@ def serve(rt, project, template, opts):
     except ImportError:  # Python < 3.7
         raise SystemExit("--serve needs Python 3.7 or newer")
     interval = max(1, int(getattr(opts, "interval", 2) or 2))
-    live = Live(rt, project, template, interval)
+    addr, loopback = bind_address(getattr(opts, "host", None))
+    # Remote mode: any bind another machine can reach. NUHUT_VIEW_REMOTE_TEST turns it on
+    # for a loopback bind too, so the smoke tests can drive it on any OS; it only adds checks.
+    remote = not loopback or os.environ.get("NUHUT_VIEW_REMOTE_TEST") == "1"
+    allow_actions = bool(getattr(opts, "allow_actions", False))
+    # The key is printed once and kept in memory only: never in a file, a log or the page.
+    access_key = secrets.token_urlsafe(32) if remote else ""
+    live = Live(rt, project, template, interval, actions=allow_actions or not remote)
     live.github = bool(getattr(opts, "github", False))
     live.include_user = not getattr(opts, "no_user", False)
 
@@ -1612,13 +1705,31 @@ def serve(rt, project, template, opts):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
+        def _gate(self):
+            """None when the request may go on, else the reason it may not. Local mode
+            refuses any Host but this machine, so a web page cannot reach it through DNS
+            rebinding. Remote mode takes any Host (a proxy, a tailnet name) and asks for the
+            access key instead: ?k= in the address or the cookie a valid ?k= sets."""
+            if not remote:
+                host = _parse_host(self.headers.get("Host"))
+                return None if host in ("127.0.0.1", "localhost", "::1") else "forbidden"
+            given = _query(self.path).get("k", "") or _session_cookie(
+                self.headers.get("Cookie"), "nuhut_key")
+            if given and hmac.compare_digest(given.encode("utf-8", "replace"),
+                                             access_key.encode("ascii")):
+                return None
+            return "the access key is missing or wrong; open the link view --serve printed"
+
         def do_GET(self):
-            # The page carries the records' contents. Refuse any Host but this machine,
-            # so a web page cannot reach it through DNS rebinding.
-            host = _parse_host(self.headers.get("Host"))
-            if host not in ("127.0.0.1", "localhost", "::1"):
-                return self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
+            refused = self._gate()
+            if refused:
+                return self._send(403, (refused + "\n").encode("utf-8"), "text/plain; charset=utf-8")
             path = self.path.split("?", 1)[0]
+            if remote and path in ("/", "/index.html") and "k" in _query(self.path):
+                # Trade the key in the address for a cookie, and take it out of the address bar.
+                cookie = "nuhut_key=%s; HttpOnly; SameSite=Strict; Path=/" % access_key
+                return self._send(303, b"", "text/plain; charset=utf-8",
+                                  extra_headers=(("Set-Cookie", cookie), ("Location", "./")))
             if path in ("/", "/index.html"):
                 live.refresh()
                 cookie = "nuhut_session=%s; HttpOnly; SameSite=Strict; Path=/" % live.token
@@ -1638,11 +1749,7 @@ def serve(rt, project, template, opts):
                 body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
                 return self._send(200, body, "application/json; charset=utf-8")
             if path == "/api/log":
-                query = {}
-                for pair in (self.path.split("?", 1) + [""])[1].split("&"):
-                    if "=" in pair:
-                        k, v = pair.split("=", 1)
-                        query[k] = v
+                query = _query(self.path)
                 text = read_log(rt, live.project, query.get("kind", ""), query.get("id", ""),
                                 query.get("stage", ""))
                 if text is None:
@@ -1653,11 +1760,19 @@ def serve(rt, project, template, opts):
         do_HEAD = do_GET
 
         def do_POST(self):
-            host = _parse_host(self.headers.get("Host"))
-            if host not in ("127.0.0.1", "localhost", "::1"):
-                return self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
+            refused = self._gate()
+            if refused:
+                body = json.dumps({"ok": False, "error": refused}).encode("utf-8")
+                return self._send(403, body, "application/json; charset=utf-8")
+            if not live.actions:
+                return self._send(
+                    403,
+                    b'{"ok":false,"error":"this server is read-only; start it with view --serve --allow-actions to run commands or change settings from the page"}\n',
+                    "application/json; charset=utf-8",
+                )
             port = self.server.server_address[1]
-            if not _valid_origin(self.headers.get("Origin"), port):
+            own_host = (self.headers.get("Host") or "") if remote else None
+            if not _valid_origin(self.headers.get("Origin"), port, own_host):
                 return self._send(403, b'{"ok":false,"error":"invalid or missing Origin"}\n',
                                   "application/json; charset=utf-8")
             cookie_tok = _session_cookie(self.headers.get("Cookie"))
@@ -1839,19 +1954,42 @@ def serve(rt, project, template, opts):
         def log_message(self, *args):  # the terminal shows rebuilds, not every poll
             pass
 
+    if ":" in addr:
+        LocalServer.address_family = socket.AF_INET6
     port = int(getattr(opts, "port", 8765))
     server = None
     for candidate in ([port] if port == 0 else range(port, port + 10)):
         try:
-            server = LocalServer(("127.0.0.1", candidate), Handler)
+            server = LocalServer((addr, candidate), Handler)
             break
-        except OSError:
+        except OSError as exc:
+            if exc.errno == errno.EADDRNOTAVAIL:
+                raise SystemExit("view: cannot listen on %s: it is not an address of this "
+                                 "machine" % addr)
             continue
     if server is None:
         raise SystemExit("view: ports %d-%d are all in use; pass --port" % (port, port + 9))
-    url = "http://127.0.0.1:%d/" % server.server_address[1]
-    print("view: live at %s (local only). The page follows the records as they change; "
-          "Ctrl+C stops it." % url)
+    bound = server.server_address[1]
+    if not remote:
+        url = "http://127.0.0.1:%d/" % bound
+        print("view: live at %s (local only). The page follows the records as they change; "
+              "Ctrl+C stops it." % url)
+    else:
+        ip = ipaddress.ip_address(addr)
+        hosts = _reachable_names() if ip.is_unspecified else [_url_host(addr)]
+        urls = ["http://%s:%d/?k=%s" % (h, bound, access_key) for h in hosts]
+        mode = ("actions allowed: the page can run kit commands" if allow_actions else
+                "read-only; start with --allow-actions to run commands from the page")
+        print("view: live at %s (remote, %s). Anyone with this link can read the records; "
+              "Ctrl+C stops it." % (urls[0] if urls else "port %d" % bound, mode))
+        for other in urls[1:]:
+            print("      also %s" % other)
+        if not loopback and (ip.is_unspecified or not any(ip in net for net in TAILNET
+                                                          if net.version == ip.version)):
+            sys.stderr.write("view: warning: traffic is plain HTTP; anyone on the network path "
+                             "can read the page and the key. Prefer --host tailscale.\n")
+        url = "http://%s:%d/?k=%s" % ("127.0.0.1" if ip.is_unspecified else _url_host(addr),
+                                      bound, access_key)
     sys.stdout.flush()
     if not getattr(opts, "no_open", False):
         webbrowser.open(url)

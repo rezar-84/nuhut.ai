@@ -11,7 +11,8 @@ markdown commands that call this.
     python3 .ai-sdlc/bin/sdlc.py plan-check ACME-12 [--base main] [--json] [--strict]
     python3 .ai-sdlc/bin/sdlc.py approvals ACME-12 [--json]
     python3 .ai-sdlc/bin/sdlc.py ci-check [--base main] [--head REF|event] [--charter-ref REF] [--json]
-    python3 .ai-sdlc/bin/sdlc.py view [--no-open] [--json] [--serve [--port 8765]]
+    python3 .ai-sdlc/bin/sdlc.py view [--no-open] [--json] [--serve [--port 8765]
+                                       [--host 127.0.0.1|tailscale|<ip>] [--allow-actions]]
     python3 .ai-sdlc/bin/sdlc.py metrics [--json]
     python3 .ai-sdlc/bin/sdlc.py log --since main [--write]
     python3 .ai-sdlc/bin/sdlc.py trailers ACME-12 [--agent X --model Y]
@@ -4780,7 +4781,8 @@ EXAMPLES = {
                  "ci-check --json"],
     "view": ["view                     # write .ai-sdlc/view/index.html and open it",
              "view --serve             # live page on 127.0.0.1",
-             "view --serve --github    # also open GitHub issues and PRs", "view --export-html report.html"],
+             "view --serve --github    # also open GitHub issues and PRs",
+             "view --serve --host tailscale  # reach it from your tailnet, read-only, key in the link", "view --export-html report.html"],
     "metrics": ["metrics", "metrics --json", "metrics --env staging   # DORA measures for another environment"],
     "log": ["log --since main", "log --since main --id ACME-12 --write"],
     "trailers": ["trailers ACME-12 --agent claude"],
@@ -5526,6 +5528,8 @@ def _cmd_view(project, opts, parser):
     import view
     if opts.command == "metrics":
         return view.print_metrics(sys.modules[__name__], project, opts)
+    if not opts.serve and (opts.allow_actions or opts.host not in (None, "127.0.0.1")):
+        parser.error("view: --host and --allow-actions only apply with --serve")
     return view.run(sys.modules[__name__], project, opts)
 
 
@@ -6042,9 +6046,15 @@ def build_parser():
     vw.add_argument("--no-user", action="store_true", help="live mode: leave user-level skills, "
                     "commands and MCP servers (~/.claude) out of the Project lens")
     vw.add_argument("--serve", action="store_true", help="live mode: serve the page on "
-                     "127.0.0.1 and update it as the records change")
+                     "127.0.0.1 (or --host) and update it as the records change")
     vw.add_argument("--port", type=int, default=8765, help="live mode port (default 8765; "
                      "0 picks a free one)")
+    vw.add_argument("--host", default=None, help="live mode: where to listen. 127.0.0.1 "
+                    "(default, this machine only), tailscale (this machine's Tailscale IPv4), "
+                    "0.0.0.0 or an IP address. Anything but loopback needs the access key "
+                    "printed in the link and is read-only")
+    vw.add_argument("--allow-actions", action="store_true", help="live mode with --host: let "
+                    "the page run kit commands and change settings, as it does locally")
     vw.add_argument("--interval", type=int, default=2, help="live mode: seconds between "
                      "checks for changes (default 2)")
     vw.add_argument("--svg", nargs="?", const="", default=None,

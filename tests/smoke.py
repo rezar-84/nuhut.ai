@@ -1702,6 +1702,154 @@ def test_view():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_view_remote():
+    print("view --serve --host: an access key in the link, read-only unless --allow-actions")
+    import http.client
+    d = tempfile.mkdtemp(prefix="sdlc-view-remote-")
+    subprocess.call(["git", "init", "-q", d])
+    run([d, "VWR", "-y"])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    for args, what in ((["--allow-actions"], "--allow-actions without --serve"),
+                       (["--host", "0.0.0.0"], "--host without --serve"),
+                       (["--serve", "--host", "not-an-address"], "a --host that is not an address")):
+        try:
+            p = subprocess.run([sys.executable, script, "view", "--no-open"] + args, cwd=d,
+                               stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, timeout=60)
+            code, out = p.returncode, p.stdout.decode("utf-8", "replace")
+        except subprocess.TimeoutExpired:
+            code, out = 0, "it started a server"
+        check("%s is refused" % what, code != 0 and "--" in out, out[-300:])
+
+    def start(extra, remote):
+        env = dict(os.environ)
+        env.pop("NUHUT_VIEW_REMOTE_TEST", None)
+        if remote:
+            # Remote mode on a loopback bind, so the test runs the same on macOS and Linux.
+            env["NUHUT_VIEW_REMOTE_TEST"] = "1"
+        proc = subprocess.Popen([sys.executable, script, "view", "--serve", "--no-open",
+                                 "--port", "0"] + extra, cwd=d, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        line = proc.stdout.readline().decode("utf-8", "replace")
+        m = re.search(r"http://127\.0\.0\.1:([0-9]+)/(?:\?k=([A-Za-z0-9_-]+))?", line)
+        return proc, (int(m.group(1)) if m else 0), ((m.group(2) or "") if m else ""), line
+
+    def req(port, method, path, host=None, cookie=None, origin=None, payload=None):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+        hdrs = {"Host": host or "127.0.0.1:%d" % port}
+        raw = None
+        if payload is not None:
+            raw = json.dumps(payload).encode("utf-8")
+            hdrs["Content-Type"] = "application/json"
+            hdrs["Content-Length"] = str(len(raw))
+        if cookie:
+            hdrs["Cookie"] = cookie
+        if origin:
+            hdrs["Origin"] = origin
+        c.request(method, path, body=raw, headers=hdrs)
+        r = c.getresponse()
+        return r.status, r.read().decode("utf-8", "replace"), dict((k.lower(), v) for k, v in r.getheaders())
+
+    def session_of(headers):
+        m = re.search(r"nuhut_session=([0-9a-f]+)", headers.get("set-cookie", ""))
+        return m.group(1) if m else ""
+
+    servers = []
+    try:
+        # The default stays local only: no key, and any Host but this machine is refused.
+        proc, port, key, line = start([], False)
+        servers.append(proc)
+        check("the default prints a local URL without a key", port > 0 and not key, line)
+        code, _, _ = req(port, "GET", "/")
+        check("the default serves the page to 127.0.0.1", code == 200, str(code))
+        code, _, _ = req(port, "GET", "/", host="evil.example:%d" % port)
+        check("the default still refuses a foreign Host", code == 403, str(code))
+
+        # Remote and read-only.
+        proc, port, key, line = start([], True)
+        servers.append(proc)
+        check("remote mode prints the URL with an access key", port > 0 and len(key) >= 32, line)
+        check("remote mode says it is read-only", "read-only" in line and "--allow-actions" in line, line)
+        no_key = [req(port, "GET", p)[0] for p in ("/", "/model.json", "/version", "/api/lens")]
+        check("remote mode without the key is refused", no_key == [403] * 4, str(no_key))
+        code, _, _ = req(port, "GET", "/?k=" + "x" * len(key))
+        check("remote mode with a wrong key is refused", code == 403, str(code))
+        code, _, hdrs = req(port, "GET", "/?k=" + key)
+        set_cookie = hdrs.get("set-cookie", "")
+        check("a valid key on / redirects to the page without the key in the address",
+              code in (302, 303) and "k=" not in hdrs.get("location", "k="), "%s %s" % (code, hdrs))
+        check("a valid key sets an HttpOnly SameSite=Strict key cookie on Path=/",
+              ("nuhut_key=%s" % key) in set_cookie and "HttpOnly" in set_cookie
+              and "SameSite=Strict" in set_cookie and "Path=/" in set_cookie, set_cookie)
+        code, body, _ = req(port, "GET", "/model.json?k=" + key)
+        check("a valid ?k= on another path is served",
+              code == 200 and bool(json.loads(body).get("version")), str(code))
+        key_cookie = "nuhut_key=%s" % key
+        code, page, hdrs = req(port, "GET", "/", cookie=key_cookie, host="box.example.ts.net")
+        check("the key cookie alone serves the page, under any Host",
+              code == 200 and "/*NUHUT_MODEL*/" not in page, str(code))
+        session = session_of(hdrs)
+        code, body, _ = req(port, "GET", "/model.json", cookie=key_cookie)
+        check("a read-only page is told not to offer actions",
+              code == 200 and json.loads(body).get("live_actions") is False, body[:200])
+        cookies = "%s; nuhut_session=%s" % (key_cookie, session)
+        code, body, _ = req(port, "POST", "/api/run", cookie=cookies,
+                            origin="http://127.0.0.1:%d" % port,
+                            payload={"subcommand": "trailers", "item_id": "VWR-1"})
+        check("POST in read-only remote mode is refused and names --allow-actions",
+              code == 403 and "--allow-actions" in body and json.loads(body).get("ok") is False, body)
+        code, _, _ = req(port, "POST", "/api/config", cookie="nuhut_session=%s" % session,
+                         origin="http://127.0.0.1:%d" % port, payload={})
+        check("POST without the key is refused", code == 403, str(code))
+
+        # Remote with actions allowed.
+        proc, port, key, line = start(["--allow-actions"], True)
+        servers.append(proc)
+        key_cookie = "nuhut_key=%s" % key
+        code, _, hdrs = req(port, "GET", "/", cookie=key_cookie)
+        session = session_of(hdrs)
+        cookies = "%s; nuhut_session=%s" % (key_cookie, session)
+        _, body, _ = req(port, "GET", "/model.json", cookie=key_cookie)
+        check("--allow-actions tells the page it may run commands",
+              code == 200 and json.loads(body).get("live_actions") is True, body[:200])
+        run_payload = {"subcommand": "trailers", "item_id": "VWR-1"}
+        code, body, _ = req(port, "POST", "/api/run", cookie=cookies,
+                            origin="http://127.0.0.1:%d" % port, payload=run_payload)
+        check("POST with --allow-actions, both cookies and a matching Origin passes the gate",
+              code == 200 and "Work-Item: VWR-1" in body, body[:300])
+        code, body, _ = req(port, "POST", "/api/run", cookie=cookies, host="box.example.ts.net",
+                            origin="https://box.example.ts.net", payload=run_payload)
+        check("the Origin is checked against the request's own Host (a proxy in front)",
+              code == 200 and "Work-Item: VWR-1" in body, body[:300])
+        code, _, _ = req(port, "POST", "/api/run", cookie=cookies, host="box.example.ts.net",
+                         origin="http://127.0.0.1:%d" % port, payload=run_payload)
+        check("an Origin that is not the request's Host is refused", code == 403, str(code))
+        code, _, _ = req(port, "POST", "/api/run", cookie=key_cookie,
+                         origin="http://127.0.0.1:%d" % port, payload=run_payload)
+        check("POST with the key but no session cookie is refused", code == 403, str(code))
+        code, _, _ = req(port, "POST", "/api/run", cookie="nuhut_session=%s" % session,
+                         origin="http://127.0.0.1:%d" % port, payload=run_payload)
+        check("POST with the session but no key is refused", code == 403, str(code))
+
+        leaked = []
+        for base, dirs, files in os.walk(d):
+            dirs[:] = [x for x in dirs if x != ".git"]
+            for name in files:
+                try:
+                    with open(os.path.join(base, name), "rb") as fh:
+                        if key and key.encode("ascii") in fh.read():
+                            leaked.append(os.path.relpath(os.path.join(base, name), d))
+                except (IOError, OSError):
+                    pass
+        check("the access key is never written to a file", bool(key) and not leaked, str(leaked))
+    finally:
+        for proc in servers:
+            proc.terminate()
+            proc.wait(timeout=10)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_kit_value_benchmark():
     print("kit-value benchmark runner (fake agent)")
     bench = os.path.join(ROOT, "benchmarks", "kit-value")
@@ -8462,7 +8610,7 @@ def main():
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_git_hooks, test_shell_write_guards,
-                 test_runtime, test_view, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_ci_check, test_kit_value_benchmark, test_kit_value_checks,
+                 test_runtime, test_view, test_view_remote, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_ci_check, test_kit_value_benchmark, test_kit_value_checks,
                  test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
                  test_domain_detection,
