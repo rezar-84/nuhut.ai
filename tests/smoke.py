@@ -4582,6 +4582,205 @@ def test_benchmarks_harnesses_and_effort_modes():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_release_records():
+    print("release records, the deploy ledger and deploy list")
+    d = tempfile.mkdtemp(prefix="sdlc-deploy-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    subprocess.call(["git", "init", "-q", repo])
+    for key, value in (("user.name", "Pat Doe"), ("user.email", "pat@example.invalid"),
+                       ("commit.gpgsign", "false")):
+        subprocess.call(["git", "config", key, value], cwd=repo)
+    code, out = run([repo, "REL", "-y"])
+    check("installs", code == 0, out[-300:])
+    attrs = read(repo, ".gitattributes") or ""
+    check("install writes the deploy ledger's merge=union line",
+          attrs.count("docs/project/deploys.jsonl merge=union") == 1, attrs)
+    check("the deploy module is installed", os.path.isfile(os.path.join(repo, ".ai-sdlc", "bin", "releases.py")))
+
+    def commit(item, subject, body="", tail=""):
+        write(repo, "src/%s.txt" % subject.replace(" ", "-"), subject + "\n")
+        subprocess.call(["git", "add", "-A"], cwd=repo)
+        if item:
+            msg = "%s\n\n%sWork-Item: %s\nAgent: t\nModel: t\n%s" % (subject, body + "\n" if body else "", item,
+                                                                    "\n" + tail if tail else "")
+        else:
+            msg = subject + "\n"
+        subprocess.call(["git", "commit", "-qm", msg], cwd=repo)
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, stdout=subprocess.PIPE,
+                              universal_newlines=True).stdout.strip()
+
+    commit("", "install the kit")
+    commit("REL-001", "feat one", "A follow-up to REL-009 in prose.\n")
+    # A co-author line in its own paragraph still leaves the Work-Item trailer readable.
+    first = commit("REL-002", "feat two", tail="Co-Authored-By: A Person <a@example.invalid>\n")
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args, **kw):
+        env = dict(os.environ)
+        for var in ("NUHUT_USER", "AI_SDLC_AGENT"):
+            env.pop(var, None)
+        env.update(kw.get("env") or {})
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, env=env)
+        return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
+
+    rel_dir = os.path.join(repo, "docs", "project", "releases")
+    ledger = os.path.join(repo, "docs", "project", "deploys.jsonl")
+
+    def ledger_lines():
+        return [l for l in (read(repo, "docs/project/deploys.jsonl") or "").splitlines() if l.strip()]
+
+    code, out, err = sdlc("deploy", "record", "--version", "1.0.0", "--env", "staging", "--dry-run", "--json")
+    check("--dry-run writes nothing", code == 0 and not os.path.exists(rel_dir) and not os.path.exists(ledger),
+          out + err)
+    code, out, err = sdlc("deploy", "record", "--version", "1.0.0", "--env", "staging", "--json",
+                          env={"AI_SDLC_AGENT": "codex"})
+    rec = json.loads(read(repo, "docs/project/releases/1.0.0.json") or "{}")
+    check("deploy record writes releases/<version>.json", code == 0 and rec.get("version") == "1.0.0"
+          and rec.get("env") == "staging" and rec.get("to") == first and rec.get("schema") == 1, out + err)
+    check("only Work-Item trailers count as shipped items", rec.get("items") == ["REL-001", "REL-002"], str(rec))
+    check("the commit count covers the whole history on a first record", rec.get("commits") == 3, str(rec))
+    check("by is the person (git user.name), agent is the tool",
+          rec.get("by") == "Pat Doe" and rec.get("agent") == "codex", str(rec))
+    check("no email address is stored", "example.invalid" not in json.dumps(rec)
+          and "example.invalid" not in (read(repo, "docs/project/deploys.jsonl") or ""))
+    check("one ledger line per record", len(ledger_lines()) == 1
+          and json.loads(ledger_lines()[0]).get("env") == "staging", str(ledger_lines()))
+    code, out, err = sdlc("deploy", "record", "--version", "1.0.0", "--env", "prod", "--by", "Sam")
+    rec = json.loads(read(repo, "docs/project/releases/1.0.0.json") or "{}")
+    check("recording the same version for another env is a promotion",
+          code == 0 and len(ledger_lines()) == 2 and sorted(rec.get("envs") or []) == ["prod", "staging"], out + err)
+    check("--by names who deployed", json.loads((ledger_lines() or ["{}"])[-1]).get("by") == "Sam",
+          str(ledger_lines()))
+    second = commit("REL-003", "feat three")
+    before = read(repo, "docs/project/releases/1.0.0.json")
+    code, out, err = sdlc("deploy", "record", "--version", "1.0.0", "--env", "staging")
+    after = read(repo, "docs/project/releases/1.0.0.json")
+    check("re-recording a version at a different commit is refused, the record unchanged",
+          code == 1 and first[:7] in err and second[:7] in err and before == after and len(ledger_lines()) == 2,
+          out + err)
+    code, out, err = sdlc("deploy", "record", "--version", "1.1.0", "--env", "staging", "--json")
+    rec2 = json.loads(read(repo, "docs/project/releases/1.1.0.json") or "{}")
+    check("--from defaults to the env's last deploy, so only new items appear",
+          code == 0 and rec2.get("from") == first and rec2.get("items") == ["REL-003"] and rec2.get("commits") == 1,
+          out + err)
+    code, out, err = sdlc("deploy", "list", "--json")
+    listed = json.loads(out) if code == 0 else {}
+    envs = listed.get("envs", {})
+    check("deploy list maps each env to the version running there",
+          envs.get("staging", {}).get("version") == "1.1.0" and envs.get("prod", {}).get("version") == "1.0.0",
+          out + err)
+    code, out, err = sdlc("deploy", "list")
+    check("deploy list prints a table", code == 0 and "staging" in out and "1.1.0" in out and "prod" in out, out + err)
+    with open(ledger, "a") as fh:
+        fh.write("{not json\n")
+    code, out, err = sdlc("deploy", "list", "--json")
+    listed = json.loads(out) if code == 0 else {}
+    check("a malformed ledger line is skipped and counted",
+          listed.get("skipped") == 1 and "staging" in listed.get("envs", {}), out + err)
+    code, out, err = sdlc("view", "--json")
+    model = json.loads(out) if code == 0 else {}
+    check("the view model carries env -> version",
+          (model.get("deploys") or {}).get("envs", {}).get("prod", {}).get("version") == "1.0.0", out[:300] + err)
+    # Hostile input never reaches a path or a git option.
+    count = len(ledger_lines())
+    for args, label in ((["--version", "../evil", "--env", "staging"], "a version with .."),
+                        (["--version", "a/b", "--env", "staging"], "a version with /"),
+                        (["--version", "", "--env", "staging"], "an empty version"),
+                        (["--version", "x" * 200, "--env", "staging"], "a 200-character version"),
+                        (["--version", "2.0.0", "--env", "Prod/1"], "an env with / and capitals"),
+                        (["--version", "2.0.0", "--env", "staging", "--from=--upload-pack=x"],
+                         "a --from like an option"),
+                        (["--version", "2.0.0", "--env", "staging", "--from", "no-such-ref"], "an unknown --from"),
+                        (["--version", "2.0.0", "--env", "staging", "--to=-x"], "a --to like an option")):
+        code, out, err = sdlc("deploy", "record", *args)
+        check("refused: %s" % label, code == 1 and len(ledger_lines()) == count
+              and not os.path.exists(os.path.join(rel_dir, "2.0.0.json")), out + err)
+    check("nothing was written outside releases/",
+          not os.path.exists(os.path.join(repo, "docs", "project", "evil.json")))
+    sys.path.insert(0, os.path.join(repo, ".ai-sdlc", "bin"))
+    try:
+        rel_mod = __import__("releases")
+        ok = all(rel_mod.validate_version(v) for v in ("1.0.0", "v2.3.4-rc.1", "2026.11.22+build5", "a1b2c3d"))
+        bad = not any(rel_mod.validate_version(v) for v in ("", "-1", "../x", "1..2", "a b", "x" * 65, ".hidden"))
+        envs_ok = all(rel_mod.validate_env(v) for v in ("prod", "staging", "eu-west_1"))
+        envs_bad = not any(rel_mod.validate_env(v) for v in ("", "Prod", "-x", "a/b", "a" * 33))
+        check("version and env validation tables", ok and bad and envs_ok and envs_bad)
+    except ImportError as exc:
+        check("version and env validation tables", False, str(exc))
+    finally:
+        sys.path.pop(0)
+        sys.modules.pop("releases", None)
+    code, out = run([repo, "--upgrade"])
+    attrs = read(repo, ".gitattributes") or ""
+    check("an upgrade never duplicates the merge=union line",
+          attrs.count("docs/project/deploys.jsonl merge=union") == 1, attrs + out[-300:])
+    # A project with no ledger: deploy list names the command, not an error.
+    empty = os.path.join(d, "empty")
+    os.makedirs(empty)
+    subprocess.call(["git", "init", "-q", empty])
+    run([empty, "EMP", "-y"])
+    emp_script = os.path.join(empty, ".ai-sdlc", "bin", "sdlc.py")
+    p = subprocess.run([sys.executable, emp_script, "deploy", "list"], cwd=empty,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    said = p.stdout.decode("utf-8", "replace")
+    check("an empty ledger names deploy record", p.returncode == 0 and "deploy record" in said, said)
+    p = subprocess.run([sys.executable, emp_script, "deploy", "record", "--version", "1.0.0", "--env", "prod"],
+                       cwd=empty, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    said = p.stdout.decode("utf-8", "replace")
+    check("a repository with no commits is a clear error", p.returncode == 1 and "commit" in said
+          and not os.path.exists(os.path.join(empty, "docs", "project", "deploys.jsonl")), said)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_unclaim_alias():
+    print("unclaim, and release as its deprecated alias")
+    d = tempfile.mkdtemp(prefix="sdlc-unclaim-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", repo])
+    code, out = run([repo, "UNC", "-y"])
+    check("installs", code == 0, out[-300:])
+    backlog = read(repo, "docs/project/backlog.md")
+    marker = "## Next"
+    head, _, tail = backlog.partition(marker)
+    tail_head, sep, tail_rest = tail.partition("| --- | --- | --- | --- | --- | --- |\n")
+    rows = "| UNC-1 | Login form | 3 | software-engineer |  | Ready |\n"
+    write(repo, "docs/project/backlog.md", head + marker + tail_head + sep + rows + tail_rest)
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "UNC-1 backlog"], cwd=repo)
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+        return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
+
+    code, out, err = sdlc("claim", "UNC-1", "--agent", "a", "--no-worktree")
+    check("claim names unclaim as the way to free it", code == 0 and "sdlc.py unclaim UNC-1" in out, out + err)
+    code, out, err = sdlc("unclaim", "UNC-1", "--agent", "a", "--json")
+    check("unclaim frees a claim", code == 0 and json.loads(out or "{}").get("released") == "UNC-1"
+          and not err.strip(), out + err)
+    code, out, err = sdlc("claims", "--json")
+    check("the claim is gone", code == 0 and json.loads(out or "null") == [], out + err)
+    sdlc("claim", "UNC-1", "--agent", "a", "--no-worktree")
+    code, out, err = sdlc("release", "UNC-1", "--agent", "a", "--json")
+    got = json.loads(out or "{}") if code == 0 else {}
+    check("release still frees a claim with the same JSON",
+          got.get("released") == "UNC-1" and "record" in got, out + err)
+    check("release prints one deprecation line that repeats the arguments",
+          err.strip() == "release: deprecated, use: sdlc.py unclaim UNC-1 --agent a --json", err)
+    code, out, err = sdlc("release", "UNC-1", "--agent", "a")
+    check("release keeps its exit code on a refusal", code == 1 and "deprecated" in err, out + err)
+    code, out, err = sdlc("unclaim", "-h")
+    check("unclaim -h shows an example", code == 0 and "sdlc.py unclaim ACME-12" in out, out + err)
+    code, out, err = sdlc("--help")
+    check("the main help names unclaim and deploy", "unclaim <ID>" in out and "deploy record" in out, out[-600:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -4600,7 +4799,8 @@ def main():
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
                  test_epics, test_decision_and_stack, test_semver, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
                  test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
-                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes):
+                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
+                 test_release_records, test_unclaim_alias):
         test()
     print("")
     if failures:

@@ -85,6 +85,11 @@ still cannot place sits under Other, with a note saying which statuses those are
   - **Doctor** (`#/dashboard/doctor`): findings grouped by rule, failures first.
   - **Parallel work** (`#/dashboard/parallel`): who holds what, and which Ready items can
     start together ([multi-agent work](multi-agent.md)).
+- **Environments:** which version runs in each environment, from the deploy ledger
+  (`sdlc.py deploy record`, see [the command reference](cli.md)), with its date, who
+  deployed it and how many work items it carries. A row opens the release record: its
+  commit range, the tool that recorded it, and the items from its `Work-Item` trailers.
+  With nothing recorded, the card names the command to run.
 
 ### Project
 

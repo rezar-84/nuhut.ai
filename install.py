@@ -73,7 +73,8 @@ RETIRED_STATE = "dashboard-state.js"
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
-                 "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py")
+                 "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py",
+                 "releases.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -3776,6 +3777,29 @@ class Installer(object):
                 return added
             self.merge_json_hooks(".cursor/hooks.json", cursor)
 
+    def apply_git_attributes(self):
+        """The deploy ledger is append-only, so parallel branches merge it by union."""
+        line = "%s/project/deploys.jsonl merge=union" % self.docs
+        path = ensure_inside(self.target, self.target / ".gitattributes")
+        content = ""
+        if path.exists():
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (IOError, OSError):
+                return
+        if any(existing.split() == line.split() for existing in content.splitlines()):
+            self.skipped += 1
+            print("  skip (exists)  %s in .gitattributes" % line)
+        elif self.o.dry_run:
+            self.added += 1
+            print("  would add      %s to .gitattributes" % line)
+        else:
+            entry = ("\n" if content and not content.endswith("\n") else "") + \
+                "# Nuhut: the deploy ledger is append-only\n" + line + "\n"
+            atomic_write_text(path, content + entry)
+            self.added += 1
+            print("  gitattributes  %s" % line)
+
     def apply_git_ignores(self):
         want_gitignore = bool(self.o.gitignore_tools)
         want_exclude = bool(self.o.git_exclude)
@@ -4811,6 +4835,7 @@ def upgrade(target, o):
             print("  update         .claude/settings.json (%d hook command%s anchored on "
                   "$CLAUDE_PROJECT_DIR)" % (repaired, "" if repaired == 1 else "s"))
         inst.apply_git_ignores()
+        inst.apply_git_attributes()
     except Exception as exc:
         for rel, data in originals.items():
             path = target / rel
@@ -5374,6 +5399,7 @@ def main(argv):
             inst.install_hooks()
             inst.install_git_hooks()
             inst.apply_git_ignores()
+            inst.apply_git_attributes()
             inst.record_manifest()
             inst.write_profile()
     except (IOError, OSError, RuntimeError) as exc:

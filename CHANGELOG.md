@@ -4,6 +4,9 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Release records and a deploy ledger (`sdlc.py deploy record`, `sdlc.py deploy list`).** `deploy record --version 1.4.0 --env staging` writes `<docs>/project/releases/1.4.0.json` (the commit range, the work items from its `Work-Item` trailers, the date, `by` the person and `agent` the tool) and appends one line to `<docs>/project/deploys.jsonl`. The same version at the same commit in another env is a promotion; at a different commit it is refused. `deploy list` and the viewer's new **Environments** card show which version runs where. `by` is `--by`, else `git config user.name`, else null, and email addresses are never stored. Versions, envs and refs are checked before they reach a path or git. The installer adds `<docs>/project/deploys.jsonl merge=union` to `.gitattributes` once.
+- **`sdlc.py unclaim <ID>` frees a claim; `release` is deprecated.** `release` keeps working with the same stdout, `--json` output and exit codes, and prints one stderr line that repeats your arguments under the new name (`release: deprecated, use: sdlc.py unclaim ACME-12 --remove-worktree`). The `release` alias will be removed in 7.0. Claim hints and doctor messages now name `unclaim`.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.

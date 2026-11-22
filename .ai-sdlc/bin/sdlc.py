@@ -447,8 +447,8 @@ FIX_HINTS = (
      "kept on disk but missing from the ledger: " + SDLC + " fix link-evidence. For past work "
      "that cannot be re-run, change the worklog's Verified line to 'Not run: <reason>', or "
      "accept the history once with doctor --baseline"),
-    ("claims", r"still claimed", "tool", SDLC + " release {item}"),
-    ("claims", r"", "owner", "Decide which agent keeps {item}; the other releases it"),
+    ("claims", r"still claimed", "tool", SDLC + " unclaim {item}"),
+    ("claims", r"", "owner", "Decide which agent keeps {item}; the other unclaims it"),
     ("specs", r"not applied", "tool", SDLC + " spec apply {item} --write"),
     ("harnesses", r"git-ignored", "owner", "Remove {where} from .gitignore or your global "
      "gitignore so commands and skills travel to other devices on git pull"),
@@ -3690,13 +3690,17 @@ Work items and agents
   next-id             allocate the next work item or ADR ID (--sync-refs for CAS)     next-id --sync-refs
   render              materialize backlog.md and worklog.md from shards (--check)     render --check
   claim <ID>          take an item: atomic claim, its branch and its own worktree     claim ACME-12
-  release <ID>        free it (--remove-worktree to clean up)                         release ACME-12
+  unclaim <ID>        free it (--remove-worktree to clean up; release is the old name) unclaim ACME-12
   claims / parallel   who holds what / which Ready items can run side by side        parallel
   dispatch            execute conflict-free waves of Ready items across workers       dispatch --workers 2 --by claude
   trailers <ID>       the Work-Item, Agent and Model commit trailers                   trailers ACME-12
   sync                behind the remote or the default branch? conflicts? next command  sync --fetch
   review <ID>         one role's review of the diff, by another model family          review ACME-12 --role security --by codex
   log                 draft worklog lines from commits and verify runs                log --since main --write
+
+Releases and deploys
+  deploy record       write releases/<version>.json and a deploys.jsonl line          deploy record --version 1.4.0 --env prod
+  deploy list         which version runs in each environment                          deploy list
 
 Specs (when the charter's Specs row is on)
   spec                list, show, validate, apply <ID> [--write]                       spec apply ACME-12 --write
@@ -3754,7 +3758,12 @@ EXAMPLES = {
              "spec apply ACME-12 --write"],
     "claim": ["claim ACME-12", "claim ACME-12 --no-worktree --mark",
               "claim ACME-12 --agent codex --worktree ../acme-12"],
-    "release": ["release ACME-12", "release ACME-12 --remove-worktree"],
+    "unclaim": ["unclaim ACME-12", "unclaim ACME-12 --remove-worktree"],
+    "release": ["unclaim ACME-12          # release is deprecated; it still works until 7.0"],
+    "deploy": ["deploy record --version 1.4.0 --env staging",
+               "deploy record --version 1.4.0 --env prod --by Sam   # promote the same commit",
+               "deploy record --version 1.4.1 --env staging --from v1.4.0 --dry-run",
+               "deploy list", "deploy list --json"],
     "claims": ["claims", "claims --json"],
     "parallel": ["parallel", "parallel --json"],
     "dispatch": ["dispatch --dry-run", "dispatch --workers 2 --by claude",
@@ -3964,14 +3973,38 @@ def main(argv):
     cl.add_argument("--sync-refs", dest="sync_refs", action="store_true",
                     help="coordinate atomically across clones via refs/nuhut/claims/<ID> on origin")
     cl.add_argument("--json", action="store_true")
-    rl = sub.add_parser("release", help="free a claimed item")
-    rl.add_argument("item")
-    rl.add_argument("--agent", help="who is releasing (default: the identity trailers would use)")
-    rl.add_argument("--force", action="store_true", help="override agent/host ownership check")
-    rl.add_argument("--remove-worktree", action="store_true", help="also remove its worktree (refused when dirty)")
-    rl.add_argument("--sync-refs", dest="sync_refs", action="store_true",
-                    help="also delete refs/nuhut/claims/<ID> on origin")
-    rl.add_argument("--json", action="store_true")
+    for rl in (sub.add_parser("unclaim", help="free a claimed item"),
+               sub.add_parser("release", help="deprecated: use unclaim (removed in 7.0)")):
+        rl.add_argument("item")
+        rl.add_argument("--agent", help="who is releasing (default: the identity trailers would use)")
+        rl.add_argument("--force", action="store_true", help="override agent/host ownership check")
+        rl.add_argument("--remove-worktree", action="store_true",
+                        help="also remove its worktree (refused when dirty)")
+        rl.add_argument("--sync-refs", dest="sync_refs", action="store_true",
+                        help="also delete refs/nuhut/claims/<ID> on origin")
+        rl.add_argument("--json", action="store_true")
+    dep = sub.add_parser("deploy", help="release records and the deploy ledger: record which "
+                                        "version runs in which environment, and list them")
+    dverbs = dep.add_subparsers(dest="deploy_action", metavar="{record,list}")
+    dverbs.required = True
+    drec = dverbs.add_parser("record", help="write <docs>/project/releases/<version>.json and "
+                                            "append a line to <docs>/project/deploys.jsonl")
+    drec.add_argument("--version", required=True, help="the version label, e.g. 1.4.0")
+    drec.add_argument("--env", required=True, help="the environment, e.g. staging or prod")
+    drec.add_argument("--from", dest="from_ref", help="the range starts after this ref "
+                      "(default: the env's last deploy, else the newest record, else the "
+                      "whole history)")
+    drec.add_argument("--to", dest="to_ref", default="HEAD", help="the commit deployed "
+                      "(default: HEAD)")
+    drec.add_argument("--by", help="who deployed (default: git user.name); never an email")
+    drec.add_argument("--dry-run", action="store_true", help="say what it would write; write nothing")
+    drec.add_argument("--json", action="store_true")
+    dlist = dverbs.add_parser("list", help="which version runs in each environment")
+    dlist.add_argument("--json", action="store_true")
+    for verb, sp_ in (("record", drec), ("list", dlist)):
+        sp_.formatter_class = argparse.RawDescriptionHelpFormatter
+        sp_.epilog = "examples:\n" + "\n".join("  python3 .ai-sdlc/bin/sdlc.py " + e for e in EXAMPLES["deploy"]
+                                               if e.startswith("deploy " + verb))
     cs = sub.add_parser("claims", help="list active claims")
     cs.add_argument("--sync-refs", dest="sync_refs", action="store_true",
                     help="fetch refs/nuhut/claims/* from origin first")
@@ -4441,7 +4474,35 @@ def main(argv):
         else:
             print(dispatch_mod.format_dispatch_report(report))
         return rc
-    if opts.command in ("claim", "release", "claims", "parallel"):
+    if opts.command == "deploy":
+        releases_mod = runtime_module("releases")
+        if opts.deploy_action == "list":
+            state = releases_mod.deployed(project)
+            print(json.dumps(state, indent=2, sort_keys=True) if opts.json
+                  else releases_mod.format_list(state))
+            return 0
+        try:
+            result = releases_mod.record(project, sys.modules[__name__], opts.version, opts.env,
+                                         opts.from_ref, opts.to_ref, opts.by, opts.dry_run)
+        except (releases_mod.DeployError, OSError) as exc:
+            sys.stderr.write("deploy record: %s\n" % exc)
+            return 1
+        if opts.json:
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        rec = result["record"]
+        verb = "would record" if result["dry_run"] else "recorded"
+        if result["action"] == "promotion":
+            print("%s %s in %s (promotion of %s; record unchanged except envs)" % (
+                verb, opts.version, opts.env, rec.get("to", "")[:12]))
+        else:
+            print("%s %s in %s: %d commit(s), %d item(s)%s" % (
+                verb, opts.version, opts.env, rec.get("commits", 0), len(rec.get("items") or []),
+                ": " + ", ".join(rec["items"]) if rec.get("items") else ""))
+        print("  %s%s" % (result["path"], "" if result["dry_run"] else
+                          " and one line in %s/project/deploys.jsonl" % project.docs))
+        return 0
+    if opts.command in ("claim", "release", "unclaim", "claims", "parallel"):
         claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
         if opts.command == "claim":
             agent = opts.agent or identity(None, None)[0]
@@ -4459,10 +4520,17 @@ def main(argv):
                 print("claimed %s for %s on branch %s" % (record["id"], record["agent"], record["branch"]))
                 if record["worktree"]:
                     print("worktree: %s\n  cd %s" % (record["worktree"], record["worktree"]))
-                print("release it when the item is Done, Parked or Deferred: "
-                      "python3 .ai-sdlc/bin/sdlc.py release %s" % record["id"])
+                print("free it when the item is Done, Parked or Deferred: "
+                      "python3 .ai-sdlc/bin/sdlc.py unclaim %s" % record["id"])
             return 0
         if opts.command == "release":
+            # The claim command's old name. Same stdout, JSON and exit codes; one note on
+            # stderr that repeats the caller's own arguments under the new name.
+            rest = list(argv)
+            if "release" in rest:
+                rest = rest[rest.index("release") + 1:]
+            sys.stderr.write("release: deprecated, use: sdlc.py unclaim %s\n" % " ".join(rest))
+        if opts.command in ("release", "unclaim"):
             record, error = claims_mod.release(
                 project, opts.item, opts.remove_worktree,
                 agent=getattr(opts, "agent", None) or identity(None, None)[0],
@@ -4470,7 +4538,7 @@ def main(argv):
                 sync_refs=getattr(opts, "sync_refs", False),
             )
             if error:
-                sys.stderr.write("release: %s\n" % error)
+                sys.stderr.write("%s: %s\n" % (opts.command, error))
                 return 1
             if getattr(opts, "json", False):
                 print(json.dumps({"released": record["id"], "record": record}, indent=2))

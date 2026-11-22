@@ -603,6 +603,12 @@ def _build_inner(rt, project):
                                                   "error": str(exc)}
     try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import releases as releases_mod
+        model["deploys"] = releases_mod.view_model(project)
+    except Exception as exc:  # a broken ledger never stops the page opening
+        model["deploys"] = {"envs": {}, "skipped": 0, "records": {}, "error": str(exc)}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import shards as shards_mod
         import dispatch as dispatch_mod
         items_d = shards_mod.items_dir(project)
