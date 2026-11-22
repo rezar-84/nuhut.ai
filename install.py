@@ -74,7 +74,7 @@ RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
                  "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py",
-                 "registry.py", "status.py")
+                 "registry.py", "status.py", "skillgen.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -1101,60 +1101,10 @@ from detect import *  # noqa: E402,F401,F403  (detect(), Detected, Repo, DEPLOY_
 
 
 # Every agent tool looks for its instructions in a different file, and they nearly all
-# now also read AGENTS.md. So AGENTS.md stays the single source of truth and each of
-# these is a pointer to it — never a copy, which would drift within a release.
-# (relative path, header written when the file is created)
-V5_HARNESS_POINTERS = (
-    ("CLAUDE.md", "# Project instructions\n\n"),                     # Claude Code
-    ("GEMINI.md", "# Project instructions\n\n"),                     # Gemini CLI
-    ("AGENT.md", "# Project instructions\n\n"),                      # Amp
-    (".github/copilot-instructions.md", "# Copilot instructions\n\n"),
-    (".cursor/rules/agents.mdc",
-     "---\ndescription: Operating contract for this repository\nalwaysApply: true\n---\n\n"),
-    (".cursorrules", ""),                                            # Cursor (classic)
-    (".windsurfrules", ""),
-    (".clinerules", ""),
-    (".roo/rules/agents.md", "# Project instructions\n\n"),          # Roo Code (.roomodes is YAML)
-    ("CONVENTIONS.md", "# Conventions\n\n"),                         # Aider
-)
-
-# Tools whose own instruction file *is* AGENTS.md need no pointer at all: OpenAI Codex,
-# Jules, Zed, Factory, Cursor 1.x, Google Antigravity and others read it directly.
-V5_HARNESS_NATIVE = ("codex", "jules", "zed", "factory", "opencode", "antigravity")
-
-V5_HARNESS_ALIASES = {
-    "claude": ("CLAUDE.md",),
-    "gemini": ("GEMINI.md",),
-    "amp": ("AGENT.md",),
-    "copilot": (".github/copilot-instructions.md",),
-    "cursor": (".cursor/rules/agents.mdc", ".cursorrules"),
-    "windsurf": (".windsurfrules",),
-    "cline": (".clinerules",),
-    "roo": (".roo/rules/agents.md",),
-    "aider": ("CONVENTIONS.md",),
-}
-
-V5_HARNESS_TITLES = {
-    "claude": "Claude Code", "cursor": "Cursor", "copilot": "GitHub Copilot",
-    "gemini": "Gemini CLI", "windsurf": "Windsurf", "cline": "Cline", "roo": "Roo Code",
-    "amp": "Amp", "aider": "Aider",
-}
-# The order the guided setup offers them in, most used first.
-V5_HARNESS_ORDER = ("claude", "cursor", "copilot", "gemini", "windsurf", "cline", "roo",
-                 "amp", "aider")
-# Files or directories that show a tool is already used here. Detection only pre-ticks
-# the question; the answer decides.
-V5_HARNESS_MARKERS = {
-    "claude": ("CLAUDE.md", ".claude"),
-    "cursor": (".cursor", ".cursorrules"),
-    "copilot": (".github/copilot-instructions.md", ".github/instructions"),
-    "gemini": ("GEMINI.md", ".gemini"),
-    "windsurf": (".windsurfrules", ".windsurf"),
-    "cline": (".clinerules",),
-    "roo": (".roo", ".roomodes"),
-    "amp": ("AGENT.md",),
-    "aider": ("CONVENTIONS.md", ".aider.conf.yml"),
-}
+# now also read AGENTS.md. So AGENTS.md stays the single source of truth and each tool's
+# file is a pointer to it, never a copy. The tools, their pointer files, titles, markers
+# and hook dialects are records in the built-in extensions
+# (optional/extensions/*/nuhut-extension.json); HARNESS_* below are built from them.
 
 # Deployment platforms: (id, label). Each id has a checklist in optional/platforms/<id>.md
 # that installs into <docs>/platforms/ only when the project uses that platform -- the
@@ -2115,43 +2065,32 @@ SLOP_KEYS = {"o": "Off", "n": "On", "s": "Strict"}
 # Presets set four charter rows together. An explicit flag always wins over the preset,
 # whatever the order on the command line. Presets apply to new installs only: --upgrade
 # keeps whatever the project's charter already says.
-V5_PRESETS = {
-    "solo": {"effort_mode": "lean", "decision_style": "guide", "dev_method": "item",
-             "tier_rules": "standard"},
-    "team": {"effort_mode": "normal", "decision_style": "guide", "dev_method": "item",
-             "tier_rules": "standard"},
-    "regulated": {"effort_mode": "normal", "decision_style": "ask", "dev_method": "item",
-                  "tier_rules": "strict"},
-}
-V5_PRESET_HELP = {
-    "solo": "one person moving fast: lean effort, the agent recommends and you decide",
-    "team": "several people, normal depth -- the kit's own defaults",
-    "regulated": "audited or high-stakes work: every material choice asked, strict tiers",
-}
-
-
+#
 # Since 6.0 the kit's built-in extensions (optional/extensions/*/nuhut-extension.json,
-# read by optional/runtime/registry.py) are the source of the harness and preset tables.
-# The V5_ tables above are the fallback for a kit without them, and tests/smoke.py checks
-# that both agree until NUHT-017 removes the constants.
-def _registry_tables():
+# read by optional/runtime/registry.py) are the only source of the harness and preset
+# tables. The kit always ships them, so a kit without them is broken, not old.
+def _load_registry():
     try:
         import registry
-    except ImportError:
-        return None
+    except Exception as exc:   # a broken registry.py: say so rather than a traceback
+        sys.exit("install.py: optional/runtime/registry.py cannot be imported (%s: %s); "
+                 "re-download the kit" % (exc.__class__.__name__, exc))
     reg = registry.load(None, kit=SRC)
-    return None if reg.missing else registry.install_tables(reg)
+    if reg.missing:
+        sys.exit("install.py: optional/extensions/ is missing from the kit; re-download it")
+    return registry, reg
 
 
-_TABLES = _registry_tables() or {}
-HARNESS_POINTERS = _TABLES.get("HARNESS_POINTERS", V5_HARNESS_POINTERS)
-HARNESS_NATIVE = _TABLES.get("HARNESS_NATIVE", V5_HARNESS_NATIVE)
-HARNESS_ALIASES = _TABLES.get("HARNESS_ALIASES", V5_HARNESS_ALIASES)
-HARNESS_TITLES = _TABLES.get("HARNESS_TITLES", V5_HARNESS_TITLES)
-HARNESS_ORDER = _TABLES.get("HARNESS_ORDER", V5_HARNESS_ORDER)
-HARNESS_MARKERS = _TABLES.get("HARNESS_MARKERS", V5_HARNESS_MARKERS)
-PRESETS = _TABLES.get("PRESETS", V5_PRESETS)
-PRESET_HELP = _TABLES.get("PRESET_HELP", V5_PRESET_HELP)
+REGISTRY_MOD, REGISTRY = _load_registry()
+_TABLES = REGISTRY_MOD.install_tables(REGISTRY)
+HARNESS_POINTERS = _TABLES["HARNESS_POINTERS"]
+HARNESS_NATIVE = _TABLES["HARNESS_NATIVE"]
+HARNESS_ALIASES = _TABLES["HARNESS_ALIASES"]
+HARNESS_TITLES = _TABLES["HARNESS_TITLES"]
+HARNESS_ORDER = _TABLES["HARNESS_ORDER"]
+HARNESS_MARKERS = _TABLES["HARNESS_MARKERS"]
+PRESETS = _TABLES["PRESETS"]
+PRESET_HELP = _TABLES["PRESET_HELP"]
 
 # Menus for the guided setup: (stored value, name, what it means, recommended). The stored
 # values are the ones the charter writers already read, so a menu changes only the asking.
@@ -3095,54 +3034,16 @@ def extension_sources():
 
 
 # The loop's entry points, as skills for tools that list skills where Claude Code lists
-# commands (Antigravity's / menu, Codex, Cursor, Gemini CLI, Copilot). Generated from the
-# command files so there is one source. sdlc-doctor is not here: optional/skills/ already
-# ships a skill by that name.
-LOOP_SKILLS = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-finish", "sdlc-log")
-LOOP_SKILL_WHEN = {
-    "sdlc-plan": "Use when the user invokes /sdlc-plan or asks to plan, frame or scope a "
-                 "change, or when a new request needs a tracked work item and a reviewed "
-                 "plan before any code is written.",
-    "sdlc-build": "Use only when the user invokes /sdlc-build or explicitly asks to build "
-                  "or implement a plan that is already approved. Never on your own "
-                  "initiative: building without an approved plan is what this loop exists "
-                  "to prevent.",
-    "sdlc-verify": "Use when the user invokes /sdlc-verify or asks to run the checks, and "
-                   "before claiming that anything passes, works or is done.",
-    "sdlc-review": "Use when the user invokes /sdlc-review or asks for a review of a plan "
-                   "or a change, and when a plan or a diff reaches a review gate.",
-    "sdlc-finish": "Use when the user invokes /sdlc-finish or asks to finish, close or wrap "
-                   "up a work item that is built, and when the finish guard names an item "
-                   "this session left open.",
-    "sdlc-log": "Use when the user invokes /sdlc-log or asks to close, log or wrap up a "
-                "work item that is built, verified and reviewed.",
-}
+# commands. One converter (optional/runtime/skillgen.py) serves the installer and
+# `sdlc.py repair --shared-skills`.
+from skillgen import LOOP_SKILLS, LOOP_SKILL_WHEN, command_to_skill_text  # noqa: E402,F401
 
 
 def command_skill_text(name):
-    """A loop command rewritten as an Agent Skills SKILL.md: name and description in the
-    frontmatter, the argument placeholder turned into prose, and references to other
-    commands turned into references to their skills. Placeholders are left for
+    """A loop command rewritten as an Agent Skills SKILL.md. Placeholders are left for
     substitute()."""
     text = (SRC / "optional" / "claude-commands" / (name + ".md")).read_text(encoding="utf-8")
-    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
-    meta, body = {}, text
-    if m:
-        body = text[m.end():]
-        for line in m.group(1).splitlines():
-            key, _, value = line.partition(":")
-            meta[key.strip()] = value.strip().strip('"')
-    hint = meta.get("argument-hint", "")
-    body = body.replace(
-        "$ARGUMENTS",
-        "the request given with this skill: the text after its name, or the request in the "
-        "conversation that called for it" + (" (expected: `%s`)" % hint if hint else "") + ".")
-    body = re.sub(r"`/(sdlc-[a-z-]+)`", r"the `\1` skill", body)
-    description = "%s. %s" % (meta.get("description", name).rstrip("."), LOOP_SKILL_WHEN[name])
-    return ("---\nname: %s\ndescription: %s\n---\n\n"
-            "<!-- Generated from the kit's optional/claude-commands/%s.md by install.py. "
-            "Kit-managed: change the kit, not this file. -->\n%s"
-            % (name, json.dumps(description, ensure_ascii=False), name, body))
+    return command_to_skill_text(name, text)
 
 
 def hook_command(name):
@@ -3671,7 +3572,9 @@ class Installer(object):
     def install_hooks(self):
         """Merged into whatever settings.json is already there, never written over it:
         the file usually carries permissions somebody tuned by hand."""
-        if "CLAUDE.md" in self.harnesses and self.o.finish_guard is not False:
+        claude_wired = any((rec.get("hooks") or {}).get("dialect") == "claude"
+                           for _, rec in self.chosen_harness_records())
+        if claude_wired and self.o.finish_guard is not False:
             if self.o.dry_run:
                 print("  would merge    .claude/settings.json (finish guard)")
             else:
@@ -3773,53 +3676,88 @@ class Installer(object):
         print("  %s %s (%d hook%s)" % ("merge         " if added else "unchanged     ",
                                       rel, added, "" if added == 1 else "s"))
 
+    def chosen_harness_records(self):
+        """[(id, registry record)] for the tools this install wired: a pointer tool whose
+        first pointer file was chosen, or a native tool named with --harness."""
+        native = set(getattr(self.o, "native_harnesses", None) or ())
+        out = []
+        for hid, rec in REGISTRY.harnesses().items():
+            ptrs = rec.get("pointer") or []
+            if (ptrs and ptrs[0].get("path") in self.harnesses) or (
+                    rec.get("native") and hid in native):
+                out.append((hid, rec))
+        return out
+
     def install_harness_hooks(self):
-        """The same six rules under Gemini CLI and the three shell rules under Cursor,
-        through .claude/hooks/adapter.sh. Only for harnesses this install wired."""
-        if "GEMINI.md" in self.harnesses:
-            def gemini(data):
-                hooks = data.setdefault("hooks", {})
-                if not isinstance(hooks, dict):
-                    print("  skip           .gemini/settings.json has a non-object 'hooks' -- not merged.")
-                    return None
-                entries = hooks.setdefault("BeforeTool", [])
-                if not isinstance(entries, list):
-                    return None
-                added = 0
-                for name, _, matcher, _, status in self.HOOK_SPECS:
-                    command = 'sh "$GEMINI_PROJECT_DIR"/.claude/hooks/adapter.sh gemini %s' % name
-                    if any(isinstance(e, dict) and any(isinstance(h, dict) and h.get("command") == command
-                                                       for h in (e.get("hooks") or []))
-                           for e in entries):
-                        continue
-                    entries.append({"matcher": self.GEMINI_MATCHERS[matcher],
-                                    "hooks": [{"type": "command", "command": command,
-                                               "name": "ai-sdlc " + name[:-3],
-                                               "description": status}]})
-                    added += 1
-                return added
-            self.merge_json_hooks(".gemini/settings.json", gemini)
-        if ".cursor/rules/agents.mdc" in self.harnesses:
-            def cursor(data):
-                data.setdefault("version", 1)
-                hooks = data.setdefault("hooks", {})
-                if not isinstance(hooks, dict):
-                    print("  skip           .cursor/hooks.json has a non-object 'hooks' -- not merged.")
-                    return None
-                entries = hooks.setdefault("beforeShellExecution", [])
-                if not isinstance(entries, list):
-                    return None
-                added = 0
-                for name, _, matcher, _, _ in self.HOOK_SPECS:
-                    if "Bash" not in matcher:
-                        continue
-                    command = 'sh "$CURSOR_PROJECT_DIR"/.claude/hooks/adapter.sh cursor %s' % name
-                    if any(isinstance(e, dict) and e.get("command") == command for e in entries):
-                        continue
-                    entries.append({"command": command, "timeout": 15})
-                    added += 1
-                return added
-            self.merge_json_hooks(".cursor/hooks.json", cursor)
+        """The same rules under every other wired tool whose harness record names a hook
+        dialect, through .claude/hooks/adapter.sh. The record gives the settings file and
+        the event names; the dialect (how that file is shaped) is chosen by name here.
+        A tool with no dialect gets no guards, and the install says so."""
+        writers = {"gemini": self.gemini_hooks, "cursor": self.cursor_hooks}
+        for hid, rec in self.chosen_harness_records():
+            spec = rec.get("hooks") or {}
+            dialect = spec.get("dialect")
+            if dialect == "claude":
+                continue                 # install_hooks wrote .claude/settings.json
+            if dialect in writers and spec.get("settings"):
+                writers[dialect](hid, spec["settings"], spec.get("events") or {})
+            else:
+                print("  note           %s: guards do not run for this tool; the git hooks "
+                      "(--git-hooks) still check its commits" % rec.get("title", hid))
+
+    def gemini_hooks(self, hid, rel, events):
+        """Gemini CLI's dialect: every rule as a BeforeTool hook in <rel>, matched on its
+        tool names."""
+        event = events.get("pre_tool", "BeforeTool")
+
+        def mutate(data):
+            hooks = data.setdefault("hooks", {})
+            if not isinstance(hooks, dict):
+                print("  skip           %s has a non-object 'hooks' -- not merged." % rel)
+                return None
+            entries = hooks.setdefault(event, [])
+            if not isinstance(entries, list):
+                return None
+            added = 0
+            for name, _, matcher, _, status in self.HOOK_SPECS:
+                command = 'sh "$GEMINI_PROJECT_DIR"/.claude/hooks/adapter.sh %s %s' % (hid, name)
+                if any(isinstance(e, dict) and any(isinstance(h, dict) and h.get("command") == command
+                                                   for h in (e.get("hooks") or []))
+                       for e in entries):
+                    continue
+                entries.append({"matcher": self.GEMINI_MATCHERS[matcher],
+                                "hooks": [{"type": "command", "command": command,
+                                           "name": "ai-sdlc " + name[:-3],
+                                           "description": status}]})
+                added += 1
+            return added
+        self.merge_json_hooks(rel, mutate)
+
+    def cursor_hooks(self, hid, rel, events):
+        """Cursor's dialect: the shell rules as beforeShellExecution hooks in <rel>. The
+        event carries the command only, so the file-write rules are not registered."""
+        event = events.get("pre_shell", "beforeShellExecution")
+
+        def mutate(data):
+            data.setdefault("version", 1)
+            hooks = data.setdefault("hooks", {})
+            if not isinstance(hooks, dict):
+                print("  skip           %s has a non-object 'hooks' -- not merged." % rel)
+                return None
+            entries = hooks.setdefault(event, [])
+            if not isinstance(entries, list):
+                return None
+            added = 0
+            for name, _, matcher, _, _ in self.HOOK_SPECS:
+                if "Bash" not in matcher:
+                    continue
+                command = 'sh "$CURSOR_PROJECT_DIR"/.claude/hooks/adapter.sh %s %s' % (hid, name)
+                if any(isinstance(e, dict) and e.get("command") == command for e in entries):
+                    continue
+                entries.append({"command": command, "timeout": 15})
+                added += 1
+            return added
+        self.merge_json_hooks(rel, mutate)
 
     def apply_git_ignores(self):
         want_gitignore = bool(self.o.gitignore_tools)
@@ -4948,7 +4886,11 @@ def strip_kit_hooks(data):
     return removed
 
 
-HOOK_SETTINGS = (".claude/settings.json", ".gemini/settings.json", ".cursor/hooks.json")
+# Every settings file a hook dialect writes, from the harness records.
+HOOK_SETTINGS = tuple(sorted(set(
+    (rec.get("hooks") or {}).get("settings") for rec in REGISTRY.harnesses().values()
+    if (rec.get("hooks") or {}).get("dialect") and (rec.get("hooks") or {}).get("settings")),
+    key=lambda rel: (rel != ".claude/settings.json", rel)))
 
 
 def git_hook_dirs(target):

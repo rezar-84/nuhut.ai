@@ -40,28 +40,6 @@ import time
 # question order.
 STAGES = ("format", "lint", "typecheck", "complexity", "infra", "unit", "mutation",
           "integration", "data", "contract", "eval", "build", "scan", "a11y", "e2e", "perf")
-POINTER_FILES = ("CLAUDE.md", "GEMINI.md", "AGENT.md", "CONVENTIONS.md",
-                 ".github/copilot-instructions.md", ".cursorrules",
-                 ".windsurfrules", ".clinerules", ".roo/rules/agents.md")
-LOOP_SKILLS = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-finish", "sdlc-log")
-LOOP_SKILL_WHEN = {
-    "sdlc-plan": "Use when the user invokes /sdlc-plan or asks to plan, frame or scope a "
-                 "change, or when a new request needs a tracked work item and a reviewed "
-                 "plan before any code is written.",
-    "sdlc-build": "Use only when the user invokes /sdlc-build or explicitly asks to build "
-                  "or implement a plan that is already approved. Never on your own "
-                  "initiative: building without an approved plan is what this loop exists "
-                  "to prevent.",
-    "sdlc-verify": "Use when the user invokes /sdlc-verify or asks to run the checks, and "
-                   "before claiming that anything passes, works or is done.",
-    "sdlc-review": "Use when the user invokes /sdlc-review or asks for a review of a plan "
-                   "or a change, and when a plan or a diff reaches a review gate.",
-    "sdlc-finish": "Use when the user invokes /sdlc-finish or asks to finish, close or wrap "
-                   "up a work item that is built, and when the finish guard names an item "
-                   "this session left open.",
-    "sdlc-log": "Use when the user invokes /sdlc-log or asks to close, log or wrap up a "
-                "work item that is built, verified and reviewed.",
-}
 EFFORT = ("Lean", "Normal", "Beast")
 ACQUISITION = ("Standard", "Advanced")
 DEV_METHOD = ("Item", "Epic")
@@ -77,6 +55,7 @@ if _RUNTIME_DIR not in sys.path:
     sys.path.insert(0, _RUNTIME_DIR)
 import hooks as _hooks_mod  # noqa: E402
 import shards as _shards_mod  # noqa: E402
+from skillgen import LOOP_SKILLS, LOOP_SKILL_WHEN, command_to_skill_text  # noqa: E402,F401
 
 SECRET_PATTERNS = _hooks_mod.SECRET_PATTERNS
 URL_PASSWORD = _hooks_mod.URL_PASSWORD
@@ -507,11 +486,12 @@ def check_placeholders(project, out):
 
 
 def check_pointer(project, out):
-    candidates = list(POINTER_FILES)
+    candidates = list(pointer_files(project))
     rules = project.path(".cursor/rules")
     if os.path.isdir(rules):
         candidates += [os.path.join(".cursor/rules", name) for name in sorted(os.listdir(rules))
-                       if name.endswith(".mdc")]
+                       if name.endswith(".mdc")
+                       and os.path.join(".cursor/rules", name) not in candidates]
     pointing = [rel for rel in candidates if "AGENTS.md" in read(project.path(rel))]
     if not pointing:
         out.add("fail", "contract", "(repository)",
@@ -524,34 +504,12 @@ def check_pointer(project, out):
                     "was wired to AGENTS.md at install and no longer mentions it")
 
 
-def command_to_skill_text(name, cmd_text):
-    """Rewrite an installed .claude/commands/<name>.md into an Agent Skills SKILL.md."""
-    m = re.match(r"^---\n(.*?)\n---\n", cmd_text, re.S)
-    meta, body = {}, cmd_text
-    if m:
-        body = cmd_text[m.end():]
-        for line in m.group(1).splitlines():
-            key, _, value = line.partition(":")
-            meta[key.strip()] = value.strip().strip('"')
-    hint = meta.get("argument-hint", "")
-    body = body.replace(
-        "$ARGUMENTS",
-        "the request given with this skill: the text after its name, or the request in the "
-        "conversation that called for it" + (" (expected: `%s`)" % hint if hint else "") + ".")
-    body = re.sub(r"`/(sdlc-[a-z-]+)`", r"the `\1` skill", body)
-    description = "%s. %s" % (meta.get("description", name).rstrip("."),
-                              LOOP_SKILL_WHEN.get(name, ""))
-    return ("---\nname: %s\ndescription: %s\n---\n\n"
-            "<!-- Generated from the kit's optional/claude-commands/%s.md by install.py. "
-            "Kit-managed: change the kit, not this file. -->\n%s"
-            % (name, json.dumps(description, ensure_ascii=False), name, body))
-
-
 def check_harness_parity(project, out):
     """Warn when .agents/skills/ is missing loop skills or kit skills for a project that
     wired non-Claude harnesses, or when .claude/commands, .claude/skills or .agents/skills
     is git-ignored in a repository where AGENTS.md is tracked."""
-    non_claude_pointers = [rel for rel in POINTER_FILES if rel != "CLAUDE.md"
+    non_claude_pointers = [rel for rel in pointer_files(project) if rel != "CLAUDE.md"
+                           and not rel.startswith(".cursor/rules/")
                            and os.path.isfile(project.path(rel))
                            and "AGENTS.md" in read(project.path(rel))]
     rules_dir = project.path(".cursor/rules")
@@ -1133,7 +1091,7 @@ def _doctor_input_digest(project, today):
         ".ai-sdlc/profile.json", ".ai-sdlc/manifest.json",
         ".ai-sdlc/bite/active.json", ".ai-sdlc/bin/hooks.py", ".ai-sdlc/bin/registry.py",
         ".claude/settings.json",
-    ] + list(POINTER_FILES)
+    ] + list(pointer_files(project))
     for rel in single_files:
         p = project.path(rel)
         if os.path.isfile(p):
@@ -1534,21 +1492,16 @@ def trailers(message):
 
 
 # Each harness fills Agent and Model differently; `sdlc.py trailers` reads what the
-# environment gives and the agent supplies the rest (process/05-change-control.md).
-AGENT_ENV = (("CLAUDECODE", "claude-code"), ("GEMINI_CLI", "gemini-cli"),
-             ("CODEX_SANDBOX", "codex"), ("CODEX_HOME", "codex"),
-             ("CURSOR_TRACE_ID", "cursor"), ("CURSOR_AGENT", "cursor"))
-MODEL_ENV = ("AI_SDLC_MODEL", "ANTHROPIC_MODEL", "CLAUDE_CODE_MODEL", "GEMINI_MODEL",
-             "OPENAI_MODEL", "CODEX_MODEL")
-
-
-def identity(agent=None, model=None):
+# environment gives and the agent supplies the rest (process/05-change-control.md). The
+# variables each tool sets are in its agents record (`identity`).
+def identity(agent=None, model=None, project=None):
+    agent_env, model_env = identity_env(project)
     if not agent:
         agent = os.environ.get("AI_SDLC_AGENT", "")
     if not agent:
-        agent = next((name for var, name in AGENT_ENV if os.environ.get(var)), "unknown")
+        agent = next((name for var, name in agent_env if os.environ.get(var)), "unknown")
     if not model:
-        model = next((os.environ[var] for var in MODEL_ENV if os.environ.get(var)), "unknown")
+        model = next((os.environ[var] for var in model_env if os.environ.get(var)), "unknown")
     return agent, model
 
 
@@ -1888,22 +1841,116 @@ def load_registry(project):
     return reg, None
 
 
+# The v5 tables, one record per tool, for when the registry is missing (an install made
+# before 6.0, or a registry.py that cannot be imported). The built-in extensions in
+# .ai-sdlc/extensions/ are the source; tests/smoke.py checks that the two agree.
+V5_AGENTS = {
+    "claude": {"id": "claude", "family": "claude",
+               "review": ["claude", "-p", "{prompt}", "--output-format", "text"],
+               "build": ["claude", "-p", "{prompt}", "--permission-mode", "acceptEdits",
+                         "--output-format", "text"],
+               "model_flag": "--model",
+               "identity": {"agent": "claude-code", "env": ["CLAUDECODE"],
+                            "model_env": ["ANTHROPIC_MODEL", "CLAUDE_CODE_MODEL"]}},
+    "gemini": {"id": "gemini", "family": "gemini",
+               "review": ["gemini", "-p", "{prompt}"],
+               "build": ["gemini", "-p", "{prompt}", "-y"],
+               "model_flag": "--model",
+               "identity": {"agent": "gemini-cli", "env": ["GEMINI_CLI"],
+                            "model_env": ["GEMINI_MODEL"]}},
+    "codex": {"id": "codex", "family": "openai",
+              "review": ["codex", "exec", "{prompt}"],
+              "build": ["codex", "exec", "--full-auto", "{prompt}"],
+              "model_flag": "--model",
+              "identity": {"agent": "codex", "env": ["CODEX_SANDBOX", "CODEX_HOME"],
+                           "model_env": ["OPENAI_MODEL", "CODEX_MODEL"]}},
+    "cursor": {"id": "cursor", "family": "", "review": None, "build": None,
+               "model_flag": None,
+               "identity": {"agent": "cursor", "env": ["CURSOR_TRACE_ID", "CURSOR_AGENT"],
+                            "model_env": []}},
+}
+V5_POINTER_FILES = ("CLAUDE.md", ".cursor/rules/agents.mdc", ".cursorrules",
+                    ".github/copilot-instructions.md", "GEMINI.md", ".windsurfrules",
+                    ".clinerules", ".roo/rules/agents.md", "AGENT.md", "CONVENTIONS.md")
+# The --reviewer choices when even the fallback cannot be built.
+STATIC_REVIEWERS = ("claude", "codex", "gemini")
+
+
+def v5_agent_table(kind):
+    """{id: (argv, model_flag)} for kind "review" or "build", from V5_AGENTS."""
+    return dict((aid, (list(rec[kind]), rec.get("model_flag") or "--model"))
+                for aid, rec in V5_AGENTS.items() if rec.get(kind))
+
+
+def v5_identity_env():
+    agent_env, model_env = [], ["AI_SDLC_MODEL"]
+    for rec in V5_AGENTS.values():
+        ident = rec.get("identity") or {}
+        agent_env.extend((var, ident["agent"]) for var in ident.get("env") or ())
+        model_env.extend(v for v in ident.get("model_env") or () if v not in model_env)
+    return tuple(agent_env), tuple(model_env)
+
+
+def _registry_or_none(project=None):
+    """The registry for <project>, or for the project this file is installed in; None when
+    the v5 tables apply. Never raises."""
+    if project is not None:
+        return load_registry(project)[0]
+    try:
+        reg = runtime_module("registry").load(default_root(), warn=False)
+    except Exception:  # a broken registry.py must not break the CLI
+        return None
+    return None if reg.missing else reg
+
+
 def agent_table(project, kind):
     """{id: (argv, model_flag)} for kind "review" or "build", from the registry, or the
-    v5 table when the registry is missing."""
+    v5 table when the registry is missing. Both kinds come from one agents record."""
     reg, _ = load_registry(project)
     if reg is None:
-        return REVIEW_HARNESSES if kind == "review" else runtime_module("dispatch").BUILD_HARNESSES
+        return v5_agent_table(kind)
     return runtime_module("registry").agent_table(reg, kind)
+
+
+def identity_env(project=None):
+    """(AGENT_ENV, MODEL_ENV) from the agents records, or the v5 tables."""
+    reg = _registry_or_none(project)
+    if reg is not None:
+        try:
+            return runtime_module("registry").identity_env(reg)
+        except Exception:
+            pass
+    return v5_identity_env()
+
+
+def pointer_files(project=None, builtin_only=False):
+    """Every pointer file a harness record names, or the v5 list."""
+    reg = _registry_or_none(project)
+    if reg is not None:
+        try:
+            return runtime_module("registry").pointer_files(reg, builtin_only=builtin_only)
+        except Exception:
+            pass
+    return V5_POINTER_FILES
+
+
+def reviewer_choices():
+    """The --reviewer choices: every agent with a review argv. Built from the registry
+    inside a try, so a bad manifest or registry.py falls back to a static list."""
+    try:
+        reg = _registry_or_none()
+        table = (runtime_module("registry").agent_table(reg, "review") if reg is not None
+                 else v5_agent_table("review"))
+        return tuple(sorted(table)) or STATIC_REVIEWERS
+    except Exception:
+        return STATIC_REVIEWERS
 
 
 def agent_family(project, harness):
     """The model family an agent CLI runs by default, for the independence label."""
     reg, _ = load_registry(project)
-    rec = reg.agents().get(harness) if reg is not None else None
-    if rec and rec.get("family"):
-        return rec["family"]
-    return {"claude": "claude", "codex": "openai", "gemini": "gemini"}.get(harness, "")
+    rec = (reg.agents() if reg is not None else V5_AGENTS).get(harness)
+    return (rec or {}).get("family") or ""
 
 
 def broken_agent(project, by):
@@ -1934,15 +1981,6 @@ def check_extensions(project, out):
 
 
 # ---------------------------------------------------------------- review
-
-# The v5 table: the fallback when the registry is missing. The built-in extensions in
-# .ai-sdlc/extensions/ are the source; tests/smoke.py checks that the two agree.
-REVIEW_HARNESSES = {
-    "claude": (["claude", "-p", "{prompt}", "--output-format", "text"], "--model"),
-    "codex": (["codex", "exec", "{prompt}"], "--model"),
-    "gemini": (["gemini", "-p", "{prompt}"], "--model"),
-}
-
 
 def item_diff(project, item, base=None):
     if base and str(base).startswith("-"):
@@ -3233,7 +3271,7 @@ def kit_status(project):
     saved_pct = max(0, int(round((1.0 - (float(t1_words) / max(1, baseline_t1_words))) * 100)))
 
     # Harnesses and pointer files
-    pointer_candidates = list(POINTER_FILES)
+    pointer_candidates = list(pointer_files(project))
     cursor_rules_dir = project.path(".cursor/rules")
     if os.path.isdir(cursor_rules_dir):
         for name in sorted(os.listdir(cursor_rules_dir)):
@@ -3759,7 +3797,7 @@ def fix_kit(project, action="all", opts=None):
         check_pointer(project, ptr_findings)
         target_rel = opts.get("file") or "CLAUDE.md"
         if ptr_findings.items or action == "wire-pointer":
-            allowed_pointers = set(POINTER_FILES) | set(
+            allowed_pointers = set(pointer_files(project, builtin_only=True)) | set(
                 r for r in (project.profile.get("harnesses") or []) if isinstance(r, str)
             )
             root_real = os.path.realpath(project.root)
@@ -4285,7 +4323,7 @@ def main(argv):
                      help="set Decision style")
     cfg.add_argument("--dev-method", choices=("Item", "Epic", "item", "epic"),
                      help="set Development method")
-    cfg.add_argument("--reviewer", choices=("codex", "claude", "gemini"),
+    cfg.add_argument("--reviewer", choices=reviewer_choices(),
                      help="set preferred second reviewer CLI")
     cfg.add_argument("--token-saving", choices=("on", "off"),
                      help="toggle token-saving mode (Lean effort, single-agent review, "
@@ -4865,7 +4903,7 @@ def main(argv):
     if opts.command in ("claim", "release", "claims", "parallel"):
         claims_mod, view_mod = runtime_module("claims"), runtime_module("view")
         if opts.command == "claim":
-            agent = opts.agent or identity(None, None)[0]
+            agent = opts.agent or identity(None, None, project)[0]
             record, error = claims_mod.claim(
                 project, view_mod, opts.item, agent, opts.worktree,
                 opts.no_worktree, opts.mark, opts.base,
@@ -4886,7 +4924,7 @@ def main(argv):
         if opts.command == "release":
             record, error = claims_mod.release(
                 project, opts.item, opts.remove_worktree,
-                agent=getattr(opts, "agent", None) or identity(None, None)[0],
+                agent=getattr(opts, "agent", None) or identity(None, None, project)[0],
                 force=getattr(opts, "force", False),
                 sync_refs=getattr(opts, "sync_refs", False),
             )
@@ -4988,7 +5026,7 @@ def main(argv):
             print("no work item ID: %s" % orphan, file=sys.stderr)
         return 0
     if opts.command == "trailers":
-        agent, model = identity(opts.agent, opts.model)
+        agent, model = identity(opts.agent, opts.model, project)
         if getattr(opts, "json", False):
             print(json.dumps({"Work-Item": opts.item, "Agent": agent, "Model": model}, indent=2))
         else:

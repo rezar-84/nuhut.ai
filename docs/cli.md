@@ -58,8 +58,12 @@ Guides for the bigger commands: [the viewer](viewer.md) (`view`, `lens`, `audit`
 
 ### Where the agent tool tables come from
 
-`review --by` and `dispatch --by` take their agent CLIs from the extension registry
-(`.ai-sdlc/bin/registry.py`). It reads `nuhut-extension.json` manifests from
+`review --by`, `dispatch --by`, `dispatch --reviewer` and `config --reviewer` take their
+agent CLIs from the extension registry (`.ai-sdlc/bin/registry.py`). Each tool has one
+`agents` record with its review argv, build argv, model flag, model family and the
+environment variables `trailers` reads to name the agent and model, so the reviewer and
+builder tables cannot disagree. `dispatch --reviewer` is checked against the review argv
+it runs with. It reads `nuhut-extension.json` manifests from
 `.ai-sdlc/local/extensions/<id>/` (the project's own) and `.ai-sdlc/extensions/<id>/` (the
 built-ins: `core`, `claude`, `codex`, `gemini`, `cursor`, refreshed by `--upgrade`). The
 installer reads the same built-ins for its `--harness` tables and presets.
@@ -76,7 +80,12 @@ installer reads the same built-ins for its `--harness` tables and presets.
   `provides` is a warning.
 - If `.ai-sdlc/extensions/` does not exist (an install made before 6.0) or `registry.py`
   cannot be imported, the runtime uses the 5.x tables and `doctor` warns "registry
-  missing, using v5 tables". `install.sh <project> --upgrade` restores them.
+  missing, using v5 tables". `install.sh <project> --upgrade` restores them. The
+  `--reviewer` choices fall back to a fixed list, so a broken registry cannot break the
+  command line.
+- The hook dialect of a built-in tool cannot be changed by an override: `hooks.py` answers
+  `claude`, `gemini` and `cursor` in their built-in shapes even when a project extension
+  overrides their harness records.
 
 ## Slash commands (Claude Code) and loop skills (other tools)
 

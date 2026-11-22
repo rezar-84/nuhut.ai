@@ -44,7 +44,24 @@
         }
       }
     ],
-    "agents": [],
+    "agents": [
+      {
+        "id": "cursor",
+        "order": 4,
+        "family": "",
+        "review": null,
+        "build": null,
+        "model_flag": null,
+        "identity": {
+          "agent": "cursor",
+          "env": [
+            "CURSOR_TRACE_ID",
+            "CURSOR_AGENT"
+          ],
+          "model_env": []
+        }
+      }
+    ],
     "checks": [],
     "presets": []
   }

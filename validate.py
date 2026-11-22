@@ -122,9 +122,19 @@ def cross_references(errors):
     # Harnesses: every alias names a pointer the table actually knows how to write,
     # and the runtime doctor checks every pointer file the installer can wire.
     known = {rel for rel, _ in install.HARNESS_POINTERS}
-    runtime_pointers = set(runtime_sdlc.POINTER_FILES) | {".cursor/rules/agents.mdc"}
+    runtime_pointers = set(runtime_sdlc.V5_POINTER_FILES)
     for rel in sorted(known ^ runtime_pointers):
-        errors.append("install.py HARNESS_POINTERS and sdlc.py POINTER_FILES disagree on %r" % rel)
+        errors.append("the harness records and sdlc.py V5_POINTER_FILES (the fallback) disagree "
+                      "on %r" % rel)
+    reg_agents = install.REGISTRY.agents()
+    for kind in ("review", "build"):
+        if install.REGISTRY_MOD.agent_table(install.REGISTRY, kind) != runtime_sdlc.v5_agent_table(kind):
+            errors.append("the agents records and sdlc.py V5_AGENTS (the fallback) disagree on "
+                          "the %s argv" % kind)
+    if install.REGISTRY_MOD.identity_env(install.REGISTRY) != runtime_sdlc.v5_identity_env():
+        errors.append("the agents records and sdlc.py V5_AGENTS disagree on the identity variables")
+    for aid in sorted(set(reg_agents) ^ set(runtime_sdlc.V5_AGENTS)):
+        errors.append("agent %r is in only one of the agents records and sdlc.py V5_AGENTS" % aid)
     for alias, targets in sorted(install.HARNESS_ALIASES.items()):
         for rel in targets:
             if rel not in known:

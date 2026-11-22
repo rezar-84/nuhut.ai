@@ -29,6 +29,7 @@
     "agents": [
       {
         "id": "codex",
+        "order": 3,
         "family": "openai",
         "review": [
           "codex",
@@ -41,7 +42,18 @@
           "--full-auto",
           "{prompt}"
         ],
-        "model_flag": "--model"
+        "model_flag": "--model",
+        "identity": {
+          "agent": "codex",
+          "env": [
+            "CODEX_SANDBOX",
+            "CODEX_HOME"
+          ],
+          "model_env": [
+            "OPENAI_MODEL",
+            "CODEX_MODEL"
+          ]
+        }
       }
     ],
     "checks": [],
