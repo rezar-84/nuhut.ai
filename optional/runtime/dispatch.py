@@ -477,6 +477,9 @@ def run_dispatch(rt, project, opts):
     os.makedirs(wt_base, exist_ok=True)
 
     auto_merge = _may_auto_merge(project, rt, pr_mode=pr_mode, no_merge=no_merge)
+    # The human who started the run, recorded on every worker's claim (None when unknown).
+    who = rt.person_identity(project, warn=not getattr(opts, "json", False)) \
+        if hasattr(rt, "person_identity") else {"person": None}
     dispatched = []
     discovered_filed = []
     attempted_ids = set()
@@ -499,6 +502,7 @@ def run_dispatch(rt, project, opts):
                 claim_rec, c_err = claims_mod.claim(
                     project, view_mod, item_id, worker_agent, worktree=wt_path,
                     base=base_sha, mark=False, sync_refs=sync_refs,
+                    person=who.get("person"),
                 )
                 if c_err:
                     return {

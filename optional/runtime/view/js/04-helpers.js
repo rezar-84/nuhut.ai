@@ -55,6 +55,14 @@
     var x = (it && it.extra) || {};
     return (it && it.owner) || x.Owner || x["Owner role"] || x["Owner Role"] || "";
   }
+  // A people.json handle as shown: "Name (handle)" when the registry names it. An owner
+  // that is a role slug, or not in the registry, shows as written.
+  function personLabel(handle) {
+    var p = handle && M && M.people && M.people[handle];
+    return p && p.name ? p.name + " (" + handle + ")" : (handle || "");
+  }
+  // The human on a claim; a claim made without one records null and says so.
+  function claimPerson(c) { return c && c.person ? personLabel(c.person) : "unknown person"; }
   function h(level, text) { return el("h" + level, { text: text }); }
 
   // Inline markdown: code, bold, links, and work item IDs. Text nodes only.

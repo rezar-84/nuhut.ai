@@ -61,7 +61,8 @@ def load_people(project):
                 if isinstance(v, str) and v.strip():
                     names.add(v.strip().lstrip("@").lower())
         out.append((handle, names))
-    return out
+    # The installed template lists nobody: that is no registry yet, not an empty one.
+    return out or None
 
 
 def whoami(project):

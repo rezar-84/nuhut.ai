@@ -5466,6 +5466,136 @@ def test_extension_registry():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_people_registry():
+    print("people registry: owner handles, the person on a claim, doctor and viewer")
+    d = tempfile.mkdtemp(prefix="sdlc-people-")
+    gitcfg = os.path.join(d, "gitconfig")
+    write(d, "gitconfig", "")
+    repo = os.path.join(d, "repo")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", repo])
+    code, out = run([repo, "PPL", "-y"])
+    check("installs", code == 0, out[-300:])
+    try:
+        tpl = json.loads(read(repo, "docs/project/people.json"))
+    except (TypeError, ValueError):
+        tpl = None
+    check("the installer writes an empty people.json registry",
+          isinstance(tpl, dict) and tpl.get("people") == [], str(tpl)[:200])
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+    base_env = dict((k, v) for k, v in os.environ.items() if k not in ("NUHUT_USER", "CI"))
+    base_env.update(GIT_CONFIG_GLOBAL=gitcfg, GIT_CONFIG_NOSYSTEM="1", AI_SDLC_AGENT="agent-a")
+
+    def sdlc(*args, **env):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, universal_newlines=True,
+                           env=dict(base_env, **env), timeout=120)
+        return p.returncode, p.stdout, p.stderr
+
+    # No registry yet: an owner that is not a role is accepted as before.
+    code, out, err = sdlc("item", "add", "PPL-9", "--title", "Before the registry", "--owner", "whoever")
+    check("without a registry any owner is accepted", code == 0, out + err)
+    write(repo, "docs/project/people.json", json.dumps({"people": [
+        {"handle": "alice", "name": "Alice A", "roles": ["software-engineer"], "github": "alice-gh"},
+        {"handle": "bob", "name": "Bob B", "roles": ["qa"], "github": "bobby"}]}, indent=2))
+    charter = read(repo, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| \*\*Approvers\*\* \|[^\n]*$", "| **Approvers** | alice, Bob B, mallory |", charter)
+    write(repo, "docs/project/charter.md", charter)
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore: people registry"], cwd=repo)
+
+    code, out, err = sdlc("item", "add", "PPL-1", "--title", "Login", "--owner", "alice", "--json")
+    rec = json.loads(out) if code == 0 else {}
+    check("item add --owner takes a people.json handle", rec.get("owner") == "alice", out + err)
+    code, out, err = sdlc("item", "add", "PPL-2", "--title", "Billing", "--owner", "Bob B", "--json")
+    rec = json.loads(out) if code == 0 else {}
+    check("an owner given by name is stored as the handle", rec.get("owner") == "bob", out + err)
+    code, out, err = sdlc("item", "add", "PPL-3", "--title", "Copy", "--owner", "qa", "--json")
+    rec = json.loads(out) if code == 0 else {}
+    check("a role slug is still a valid owner", rec.get("owner") == "qa", out + err)
+    code, out, err = sdlc("item", "add", "PPL-4", "--title", "Typo", "--owner", "alcie")
+    check("an owner that is neither a role nor a handle is refused, naming people.json",
+          code != 0 and "people.json" in err and "alcie" in err
+          and not os.path.isfile(os.path.join(repo, "docs/project/items/PPL-4.json")), out + err)
+    code, out, err = sdlc("item", "set", "PPL-1", "--owner", "nobody-here")
+    check("item set --owner validates the same way", code != 0 and "people.json" in err, out + err)
+
+    # A claim records the person; without one it records null and warns once.
+    code, out, err = sdlc("claim", "PPL-1", "--no-worktree", "--json", NUHUT_USER="alice")
+    rec = json.loads(out) if code == 0 else {}
+    check("a claim records the person from NUHUT_USER", rec.get("person") == "alice"
+          and rec.get("agent") == "agent-a" and "host" in rec, out + err)
+    subprocess.call(["git", "config", "user.name", "Bob B"], cwd=repo)
+    code, out, err = sdlc("claim", "PPL-2", "--no-worktree", "--json")
+    rec = json.loads(out) if code == 0 else {}
+    check("git user.name mapped in people.json gives the handle", rec.get("person") == "bob", out + err)
+    subprocess.call(["git", "config", "user.name", "Zed Unmapped"], cwd=repo)
+    code, out, err = sdlc("claim", "PPL-3", "--no-worktree")
+    held = {}
+    try:
+        with open(os.path.join(repo, ".git", "nuhut", "claims", "PPL-3.json")) as fh:
+            held = json.load(fh)
+    except (IOError, OSError, ValueError):
+        pass
+    warning = "no person identity: set NUHUT_USER=<handle> or map git user.name in project/people.json"
+    check("an unmapped identity records person null, never a guess",
+          code == 0 and "person" in held and held["person"] is None, json.dumps(held) + out + err)
+    check("the missing person is warned about exactly once", err.count(warning) == 1, err)
+    code, out, err = sdlc("claims")
+    check("claims lists the person, and unknown person for a null one",
+          "alice" in out and "unknown person" in out, out + err)
+
+    def probe(body):
+        code_p = ("import sys; sys.path.insert(0, %r); import sdlc; p = sdlc.Project(%r)\n" + body) % (
+            os.path.dirname(script), repo)
+        return subprocess.run([sys.executable, "-c", code_p], cwd=repo, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, universal_newlines=True, env=dict(base_env, CI="true"))
+    p = probe("print(sdlc.person_identity(p, read_only=True)['person'])")
+    check("CI=true: a read-only lookup records None and does not warn",
+          p.stdout.strip() == "None" and warning not in p.stderr, p.stdout + p.stderr)
+    p = probe("sdlc.person_identity(p, read_only=True); sdlc.person_identity(p); sdlc.person_identity(p)")
+    check("CI=true: a write still warns, once per process", p.stderr.count(warning) == 1, p.stdout + p.stderr)
+    p = probe("print(sdlc.handle_for_github(p, 'Alice-GH')); print(sdlc.handle_for_github(p, '@bobby')); "
+              "print(sdlc.handle_for_github(p, 'stranger'))")
+    check("a GitHub login maps to its handle, an unknown one to None",
+          p.stdout.split() == ["alice", "bob", "None"], p.stdout + p.stderr)
+
+    # Doctor: owners outside the registry, a count of person-less claims, Approvers names.
+    code, out, err = sdlc("doctor", "--json", "--no-cache")
+    try:
+        found = json.loads(out)
+    except ValueError:
+        found = []
+    people_f = [f for f in found if f.get("check") == "people"]
+    check("doctor warns about an owner not in the registry",
+          any("whoever" in f["message"] and "PPL-9" in f["message"] for f in people_f), json.dumps(people_f))
+    check("doctor does not flag role or handle owners",
+          not any(re.search(r"'(alice|bob|qa)'", f["message"]) for f in people_f), json.dumps(people_f))
+    nop = [f for f in people_f if "no person" in f["message"]]
+    check("doctor reports one count line for claims without a person",
+          len(nop) == 1 and nop[0]["message"].startswith("1 claim"), json.dumps(people_f))
+    appr = [f for f in found if f.get("check") == "approvers"]
+    check("doctor warns about an Approvers entry that is not a handle",
+          any("mallory" in f["message"] for f in appr)
+          and any("Bob B" in f["message"] and "bob" in f["message"] for f in appr)
+          and not any("'alice'" in f["message"] for f in appr), json.dumps(appr))
+
+    # The viewer shows the person.
+    code, out, err = sdlc("view", "--json")
+    try:
+        model = json.loads(out)
+    except ValueError:
+        model = {}
+    by_id = dict((c.get("id"), c) for c in model.get("claims", []))
+    check("the viewer model carries the claim's person and the registry",
+          by_id.get("PPL-1", {}).get("person") == "alice" and "PPL-3" in by_id
+          and by_id["PPL-3"].get("person") is None
+          and (model.get("people") or {}).get("alice", {}).get("name") == "Alice A", out[:300] + err)
+    page = read(os.path.dirname(script), "view.html") or ""
+    check("the viewer page says unknown person for a claim without one", "unknown person" in page)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -5487,7 +5617,8 @@ def main():
                  test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
                  test_installer_python_floor_and_finish_errors,
                  test_extension_registry,
-                 test_hotfix_fast_path):
+                 test_hotfix_fast_path,
+                 test_people_registry):
         test()
     print("")
     if failures:

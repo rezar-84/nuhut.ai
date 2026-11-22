@@ -196,7 +196,7 @@
     held.slice(0, 4).forEach(function (c) {
       var open = function () { openItemDrawer(c.id); };
       var row = el("div", { cls: "sum-row", role: "listitem" }, [claimChip(c), el("strong", { text: c.id }), el("span", { cls: "muted sum-txt", text: c.branch })]);
-      row.addEventListener("click", open); makeInteractive(row, open, c.id + " claimed by " + c.agent);
+      row.addEventListener("click", open); makeInteractive(row, open, c.id + " claimed by " + claimPerson(c) + " via " + c.agent);
       parRows.appendChild(row);
     });
     if (par.groups && par.groups.length) parRows.appendChild(el("p", { style: "font-size: 12.5px; margin: 8px 0 0;" },

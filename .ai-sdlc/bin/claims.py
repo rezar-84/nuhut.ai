@@ -445,8 +445,10 @@ def _existing_item_branch(project, item):
 
 
 def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark=False,
-          base=None, sync_refs=False, remote="origin"):
-    """Returns (record, error)."""
+          base=None, sync_refs=False, remote="origin", person=None):
+    """Returns (record, error). <person> is the people.json handle of the human behind
+    the agent (sdlc.person_identity), or None when it is not known: recorded as null,
+    never guessed."""
     backlog = items(project, view_mod)
     it = backlog.get(item)
     if not it:
@@ -483,6 +485,7 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
     record = {
         "id": item,
         "agent": agent,
+        "person": person or None,
         "branch": branch,
         "worktree": path or "",
         "since": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
