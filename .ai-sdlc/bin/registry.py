@@ -888,6 +888,88 @@ def _branch_ref(root, branch):
     return None
 
 
+# ---------------------------------------------------------------- CI context
+# Which branch a pull or merge request targets and which commit it ends at, from the
+# variables each CI host sets. The first variable that is set decides; a value that is
+# not a plain branch name or commit id is an error, never passed on to git.
+CI_BASE_VARS = (
+    ("NUHUT_BASE", "any CI"),
+    ("GITHUB_BASE_REF", "GitHub, Gitea, Forgejo"),
+    ("CI_MERGE_REQUEST_TARGET_BRANCH_NAME", "GitLab"),
+    ("BITBUCKET_PR_DESTINATION_BRANCH", "Bitbucket"),
+    ("SYSTEM_PULLREQUEST_TARGETBRANCH", "Azure Pipelines"),
+    ("CHANGE_TARGET", "Jenkins"),
+)
+CI_HEAD_VARS = ("NUHUT_HEAD", "GITHUB_EVENT_PATH", "CI_COMMIT_SHA", "BITBUCKET_COMMIT")
+_CI_BRANCH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._/+-]*$")
+_CI_COMMIT = re.compile(r"^[0-9a-fA-F]{7,64}$")
+
+
+def _ci_branch_ok(value):
+    return bool(_CI_BRANCH.match(value)) and ".." not in value and "//" not in value \
+        and not value.endswith(("/", ".", ".lock"))
+
+
+def ci_base(env=None):
+    """(branch, variable, error): the branch the change merges into, from NUHUT_BASE, then
+    GITHUB_BASE_REF (GitHub, Gitea, Forgejo), CI_MERGE_REQUEST_TARGET_BRANCH_NAME (GitLab),
+    BITBUCKET_PR_DESTINATION_BRANCH, SYSTEM_PULLREQUEST_TARGETBRANCH (Azure, refs/heads/
+    stripped) and CHANGE_TARGET (Jenkins multibranch). (None, None, None) when none is set."""
+    env = os.environ if env is None else env
+    for var, _ in CI_BASE_VARS:
+        value = str(env.get(var) or "").strip()
+        if not value:
+            continue
+        if value.startswith("refs/heads/"):
+            value = value[len("refs/heads/"):]
+        if not _ci_branch_ok(value):
+            return None, var, "$%s %r is not a branch name" % (var, value)
+        return value, var, None
+    return None, None, None
+
+
+def event_head(path):
+    """(sha, error): pull_request.head.sha from the GitHub (or Gitea) event file at <path>."""
+    if not path:
+        return None, "--head event needs $GITHUB_EVENT_PATH (set by GitHub Actions)"
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        sha = data["pull_request"]["head"]["sha"]
+    except (IOError, OSError, ValueError, KeyError, TypeError):
+        return None, "no pull_request.head.sha in the event file $GITHUB_EVENT_PATH"
+    if not isinstance(sha, str) or not _CI_COMMIT.match(sha):
+        return None, "pull_request.head.sha in $GITHUB_EVENT_PATH is not a commit id"
+    return sha, None
+
+
+def ci_head(env=None):
+    """(commit, source, error): the change's last commit, from NUHUT_HEAD (a commit id or
+    branch name), pull_request.head.sha in $GITHUB_EVENT_PATH, CI_COMMIT_SHA (GitLab), then
+    BITBUCKET_COMMIT. An event file with no pull request in it (a push) is passed over.
+    (None, None, None) when nothing names one: the caller judges HEAD."""
+    env = os.environ if env is None else env
+    value = str(env.get("NUHUT_HEAD") or "").strip()
+    if value:
+        if not (_CI_COMMIT.match(value) or _ci_branch_ok(value)):
+            return None, "NUHUT_HEAD", "$NUHUT_HEAD %r is not a commit id or branch name" % value
+        return value, "NUHUT_HEAD", None
+    path = str(env.get("GITHUB_EVENT_PATH") or "").strip()
+    if path:
+        sha, error = event_head(path)
+        if sha:
+            return sha, "GITHUB_EVENT_PATH", None
+        if error and "not a commit id" in error:
+            return None, "GITHUB_EVENT_PATH", error
+    for var in ("CI_COMMIT_SHA", "BITBUCKET_COMMIT"):
+        value = str(env.get(var) or "").strip()
+        if value:
+            if not _CI_COMMIT.match(value):
+                return None, var, "$%s %r is not a commit id" % (var, value)
+            return value, var, None
+    return None, None, None
+
+
 def show_at(root, ref, rel):
     """<rel>'s text at <ref>, or None when it is not there. <rel> is relative to <root>,
     which may be a subdirectory of the repository (a monorepo package): `ref:./rel`
@@ -905,7 +987,8 @@ def trusted_ref(root, charter_rel=None):
     A branch must not be able to choose it, so the working tree decides only when git
     names nothing else. In order: origin/HEAD, which `git clone` sets and no branch can
     edit, followed to the branch its own charter's Default branch row names;
-    $GITHUB_BASE_REF in a pull_request job; then the working tree's Default branch row
+    the target branch the CI job names (ci_base: NUHUT_BASE, then GitHub, GitLab,
+    Bitbucket, Azure or Jenkins); then the working tree's Default branch row
     or profile.json default_branch. origin/<name> is preferred to the local branch."""
     if charter_rel is None:
         docs = str(_profile(root).get("docs_dir") or "docs")
@@ -917,7 +1000,7 @@ def trusted_ref(root, charter_rel=None):
         if named and named != head[len("refs/remotes/origin/"):]:
             return _branch_ref(root, named) or head
         return head
-    base = os.environ.get("GITHUB_BASE_REF", "").strip()
+    base = ci_base()[0]
     if base:
         ref = _branch_ref(root, base)
         if ref:

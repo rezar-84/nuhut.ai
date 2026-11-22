@@ -646,7 +646,7 @@ What gets installed
   --deploy <list>        platform checklists, e.g. vercel,cloudflare-edge (or none)
   --profile <name>       full (default) | compact -- shorter docs for small models
   --no-skills            no skills in .claude/skills/
-  --scaffold-tests, --scaffold-ci github|gitlab   a starter test plan, a starter CI
+  --scaffold-tests, --scaffold-ci github|gitlab|bitbucket|gitea|generic   test plan, CI
   --gitignore-tools | --git-exclude    keep .ai-sdlc/ out of git (shared | local only)
   --acquisition-profile  standard | advanced -- for scrapers and crawlers
 
@@ -693,7 +693,11 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --no-skills        do not install anything into .claude/skills/
   --scaffold-tests   create a detected project test plan and machine-readable profile
   --scaffold-ci <provider>
-                     create CI for github or gitlab from detected quality commands
+                     create CI from detected quality commands: github
+                     (.github/workflows/quality.yml), gitlab (.gitlab-ci.yml),
+                     bitbucket (bitbucket-pipelines.yml), gitea
+                     (.gitea/workflows/nuhut.yml) or generic (ci/nuhut-check.sh, a
+                     shell script any CI can run with NUHUT_BASE set)
   --hooks            install the opt-in Claude Code hooks: deny a commit with no work
                      item ID or with a credential in it, a file write that holds a
                      credential (and a warning for personal data in a record), an edit to a path in
@@ -987,8 +991,8 @@ def parse_args(argv):
         elif arg == "--scaffold-tests":
             o.scaffold_tests = True
         elif arg == "--scaffold-ci":
-            if i + 1 >= len(argv) or argv[i + 1] not in ("github", "gitlab"):
-                bad_value("--scaffold-ci requires github or gitlab")
+            if i + 1 >= len(argv) or argv[i + 1] not in CI_PROVIDERS:
+                bad_value("--scaffold-ci requires one of: %s" % ", ".join(CI_PROVIDERS))
             o.scaffold_ci = argv[i + 1]
             i += 1
         elif arg == "--hooks":
@@ -2195,7 +2199,15 @@ CI_OPTIONS = (
     ("none", "None", "no CI file is written", True),
     ("github", "GitHub Actions", "a manual-only workflow running the confirmed check commands", False),
     ("gitlab", "GitLab CI", "the same, as .gitlab-ci.yml", False),
+    ("bitbucket", "Bitbucket Pipelines", "the record checks on pull requests, as bitbucket-pipelines.yml", False),
+    ("gitea", "Gitea / Forgejo Actions", "the GitHub workflow, as .gitea/workflows/nuhut.yml", False),
+    ("generic", "Any CI (shell script)", "ci/nuhut-check.sh: doctor and ci-check, given NUHUT_BASE", False),
 )
+CI_PROVIDERS = tuple(value for value, _, _, _ in CI_OPTIONS if value != "none")
+# Where each --scaffold-ci provider writes its file.
+CI_FILES = {"github": ".github/workflows/quality.yml", "gitlab": ".gitlab-ci.yml",
+            "bitbucket": "bitbucket-pipelines.yml", "gitea": ".gitea/workflows/nuhut.yml",
+            "generic": "ci/nuhut-check.sh"}
 ACCESS_OPTIONS = (
     ("Role-Based (RBAC)", "Role-Based (RBAC)", "users hold roles; roles grant permissions", False),
     ("Simple Owner/User", "Simple Owner/User", "an owner and ordinary users", False),
@@ -3525,11 +3537,10 @@ class Installer(object):
         if self.o.scaffold_tests:
             candidates.extend((self.target / self.docs / "project" / "test-plan.md",
                                self.target / ".ai-sdlc" / "testing-profile.json"))
+        if self.o.scaffold_ci:
+            candidates.append(self.target / CI_FILES[self.o.scaffold_ci])
         if self.o.scaffold_ci == "github":
-            candidates.extend((self.target / ".github" / "workflows" / "quality.yml",
-                               self.target / ".github" / "pull_request_template.md"))
-        elif self.o.scaffold_ci == "gitlab":
-            candidates.append(self.target / ".gitlab-ci.yml")
+            candidates.append(self.target / ".github" / "pull_request_template.md")
         for candidate in candidates:
             ensure_inside(self.target, candidate)
         if not self.o.dry_run:
@@ -4298,10 +4309,12 @@ class Installer(object):
         commands = self.selected_commands()
         ordered = [(key, commands[key]) for _, _, key in CMD_FIELDS
                    if key not in ("run",) and key in commands]
-        if provider == "github":
+        if provider in ("github", "gitea"):
             # Never pull_request_target: a fork's PR gets no secrets and a read-only token.
             # The PR's range is judged by the base branch's ci-check, read from the
             # environment and the event file, so this text needs no GitHub expression.
+            # Gitea and Forgejo Actions run the same syntax and set the same variables.
+            head = "event" if provider == "github" else "env"
             lines = ["name: Project quality", "", "on:", "  pull_request:", "  workflow_dispatch:",
                      "", "permissions:", "  contents: read", "",
                      "jobs:", "  quality:", "    runs-on: ubuntu-latest", "    steps:",
@@ -4323,7 +4336,7 @@ class Installer(object):
                      '            checker=".ai-sdlc/bin/sdlc.py"',
                      "          fi",
                      '          python3 "$checker" --root "$GITHUB_WORKSPACE" ci-check --base "origin/$GITHUB_BASE_REF" \\',
-                     '            --head event --charter-ref "origin/$GITHUB_BASE_REF"']
+                     '            --head %s --charter-ref "origin/$GITHUB_BASE_REF"' % head]
             for key, command in ordered:
                 lines.extend(("      - name: %s" % key.replace("_", " ").title(),
                               "        run: %s" % json.dumps(command)))
@@ -4334,19 +4347,84 @@ class Installer(object):
                           "# service versions, against the charter: a wrong command fails every PR or",
                           "# passes one it should not. ci-check binds only when branch protection on the",
                           "# default branch requires the `quality` status and CODEOWNERS assigns",
-                          "# .github/workflows/** and .ai-sdlc/** to the people who approve Tier 1 work;",
+                          "# .%s/workflows/** and .ai-sdlc/** to the people who approve Tier 1 work;" % provider,
                           "# without both, a PR can edit or skip this job.", ""))
             return "\n".join(lines)
-        lines = ["stages:", "  - quality", "", "quality:", "  stage: quality",
-                 "  when: manual", "  script:",
-                 "    - python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
+        if provider == "generic":
+            return "\n".join(["#!/bin/sh",
+                              "# Nuhut merge-time checks for any CI host: doctor, then ci-check on the",
+                              "# change's commits. Run it from the repository root in the job that must pass",
+                              "# before a merge, with NUHUT_BASE set to the branch the change merges into and,",
+                              "# when the checkout is not the change's last commit, NUHUT_HEAD to that commit.",
+                              "# It binds only when the host requires this job and the people who approve",
+                              "# Tier 1 work own this file and .ai-sdlc/**.",
+                              "set -eu",
+                              'case "${NUHUT_BASE:-}" in',
+                              '  "") echo "nuhut-check: set NUHUT_BASE to the target branch, e.g. main" >&2; exit 2 ;;',
+                              '  -*) echo "nuhut-check: NUHUT_BASE must not start with -" >&2; exit 2 ;;',
+                              "esac",
+                              "export NUHUT_BASE",
+                              "# ci-check needs full history and the target branch.",
+                              'if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then',
+                              "  git fetch --quiet --unshallow origin",
+                              "fi",
+                              "python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
+                             + self.base_checker_shell("$NUHUT_BASE", '"$PWD"', "") + [""])
+        script = ["python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
+        if provider == "bitbucket":
+            lines = ["image: python:3.12", "", "clone:", "  depth: full", "",
+                     "pipelines:", "  pull-requests:", '    "**":', "      - step:",
+                     "          name: Project quality", "          script:"]
+            pad = "            "
+            body = self.base_checker_shell("$BITBUCKET_PR_DESTINATION_BRANCH",
+                                           '"$BITBUCKET_CLONE_DIR"', pad + "  ")
+            lines.extend(pad + "- " + json.dumps(line) for line in script)
+            lines.append(pad + "- |")
+            lines.extend(body)
+            lines.extend(pad + "- " + json.dumps(command) for _, command in ordered)
+            if not ordered:
+                lines.extend(self.NO_CHECKS_TODO)
+            lines.extend(("", "# Runs on every pull request. Confirm the commands above, and the runtime",
+                          "# version, against the charter. ci-check binds only when the destination",
+                          "# branch requires a passing build before merge and the people who approve",
+                          "# Tier 1 work review changes to this file and .ai-sdlc/**.", ""))
+            return "\n".join(lines)
+        lines = ["stages:", "  - quality", "",
+                 "records:", "  stage: quality", "  image: python:3.12",
+                 "  rules:", '    - if: $CI_PIPELINE_SOURCE == "merge_request_event"',
+                 "  variables:", "    GIT_DEPTH: 0", "  script:",
+                 "    - python3 .ai-sdlc/bin/sdlc.py doctor --strict", "    - |"]
+        lines.extend(self.base_checker_shell("$CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
+                                             '"$CI_PROJECT_DIR"', "      "))
+        lines.extend(("", "quality:", "  stage: quality",
+                      "  when: manual", "  script:",
+                      "    - python3 .ai-sdlc/bin/sdlc.py doctor --strict"))
         for _, command in ordered:
             lines.append("    - %s" % json.dumps(command))
         if not ordered:
             lines.extend(self.NO_CHECKS_TODO)
-        lines.extend(("", "# Manual-only by default. Confirm commands, runtime, and service versions",
-                      "# from the charter before making this job automatic or required.", ""))
+        lines.extend(("", "# records runs on every merge request; ci-check binds only when the project",
+                      "# requires the pipeline to succeed before merge and CODEOWNERS covers this",
+                      "# file and .ai-sdlc/**. quality is manual-only by default: confirm commands,",
+                      "# runtime, and service versions from the charter before making it automatic.", ""))
         return "\n".join(lines)
+
+    @staticmethod
+    def base_checker_shell(base, root, pad):
+        """Shell lines that fetch the target branch <base> (a variable), take ci-check from
+        that branch's .ai-sdlc/bin so the change cannot edit its own checker, and run it
+        with the CI context ci-check reads itself (--head env, base from the variables)."""
+        return [pad + line for line in (
+            'git fetch --quiet origin "+refs/heads/%s:refs/remotes/origin/%s"' % (base, base),
+            'tmp="$(mktemp -d)"',
+            'if git archive "origin/%s" .ai-sdlc/bin | tar -x -C "$tmp" \\' % base,
+            '    && [ -f "$tmp/.ai-sdlc/bin/sdlc.py" ]; then',
+            '  checker="$tmp/.ai-sdlc/bin/sdlc.py"',
+            "else",
+            '  echo "warning: origin/%s has no .ai-sdlc/bin/sdlc.py; running this change\'s own ci-check" >&2' % base,
+            "  checker=.ai-sdlc/bin/sdlc.py",
+            "fi",
+            'python3 "$checker" --root %s ci-check --head env --charter-ref "origin/%s"' % (root, base))]
 
     def pr_template_text(self):
         """.github/pull_request_template.md: what ci-check judges, asked up front."""
@@ -4372,9 +4450,10 @@ class Installer(object):
         if self.o.scaffold_tests:
             self.scaffold_test_plan()
         if self.o.scaffold_ci:
-            dest = (self.target / ".github" / "workflows" / "quality.yml"
-                    if self.o.scaffold_ci == "github" else self.target / ".gitlab-ci.yml")
-            self.install_text(dest, self.ci_text(self.o.scaffold_ci))
+            dest = self.target / CI_FILES[self.o.scaffold_ci]
+            if self.install_text(dest, self.ci_text(self.o.scaffold_ci)) and \
+                    self.o.scaffold_ci == "generic" and not self.o.dry_run:
+                os.chmod(dest, os.stat(dest).st_mode | 0o111)
             if self.o.scaffold_ci == "github":
                 self.install_text(self.target / ".github" / "pull_request_template.md",
                                   self.pr_template_text())

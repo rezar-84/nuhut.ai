@@ -1072,7 +1072,7 @@ def check_bite_leftover(project, out):
                 "`sdlc.py bite --restore`")
 
 
-DOCTOR_CACHE_VERSION = 5
+DOCTOR_CACHE_VERSION = 6
 
 
 def _doctor_input_digest(project, today):
@@ -1088,6 +1088,7 @@ def _doctor_input_digest(project, today):
     head_refs = project.git("for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes", "refs/nuhut")
     head_sha = project.git("rev-parse", "HEAD").strip()
     h.update(("HEAD:%s\n%s\0" % (head_sha, head_refs)).encode("utf-8"))
+    h.update(json.dumps(ci_enforcement(project)).encode("utf-8") + b"\0")
 
     single_files = [
         "AGENTS.md", ".gitignore", ".git/info/exclude",
@@ -1203,6 +1204,7 @@ def doctor(project, today=None, use_cache=True):
         check_specs(project, out, today)
         check_hotfix(project, out, today)
         check_postmortems(project, out)
+        check_enforcement(project, out)
         if can_cache and digest and cache_file:
             try:
                 cache_dir = os.path.dirname(cache_file)
@@ -2598,6 +2600,65 @@ def check_hotfix(project, out, today):
 FOLLOW_UP_ID = re.compile(r"\b[A-Z][A-Z0-9]*-[0-9]+\b")
 
 
+# (provider, path): CI files the kit recognises, relative to the repository's top. A
+# directory counts through any .yml or .yaml file in it.
+CI_FILES = (("GitHub", ".github/workflows"), ("Gitea", ".gitea/workflows"),
+            ("Forgejo", ".forgejo/workflows"), ("GitLab", ".gitlab-ci.yml"),
+            ("Bitbucket", "bitbucket-pipelines.yml"), ("Azure Pipelines", "azure-pipelines.yml"),
+            ("Jenkins", "Jenkinsfile"), ("generic script", "ci/nuhut-check.sh"))
+
+
+def ci_enforcement(project):
+    """(providers, files, has_remote): the CI files the kit recognises that run sdlc.py,
+    looked for at the project root and at the repository's top, and whether git has a
+    remote. File existence, a read of each candidate and `git remote`: nothing slower."""
+    remotes = project.git("remote").split()
+    tops = [project.root]
+    top = project.git("rev-parse", "--show-toplevel").strip()
+    if top and os.path.realpath(top) != os.path.realpath(project.root):
+        tops.append(top)
+    providers, found = [], []
+    for provider, rel in CI_FILES:
+        for base in tops:
+            path = os.path.join(base, rel)
+            paths = [path] if os.path.isfile(path) else []
+            if os.path.isdir(path):
+                paths = [os.path.join(path, n) for n in sorted(os.listdir(path))
+                         if n.endswith((".yml", ".yaml"))]
+            for candidate in paths:
+                try:
+                    with open(candidate, encoding="utf-8", errors="replace") as handle:
+                        runs = "sdlc.py" in handle.read(262144)
+                except (IOError, OSError):
+                    runs = False
+                if runs:
+                    found.append(os.path.relpath(candidate, base).replace(os.sep, "/"))
+                    if provider not in providers:
+                        providers.append(provider)
+    return providers, found, bool(remotes)
+
+
+def check_enforcement(project, out):
+    """Whether anything outside this machine runs the kit's checks before a merge."""
+    providers, found, has_remote = ci_enforcement(project)
+    fix = ("Push to a git host and add a CI job that runs doctor and ci-check before merge "
+           "(install.sh <project> --scaffold-ci github|gitlab|bitbucket|gitea|generic), then "
+           "make the host require it")
+    if not has_remote:
+        out.add("warn", "enforcement", "git remote",
+                "enforcement: advisory. This repository has no git remote, so no CI runs the "
+                "kit's checks: they are local only and can be skipped", fix=fix, who="owner")
+    elif not providers:
+        out.add("warn", "enforcement", "CI",
+                "enforcement: advisory. No CI file the kit recognises runs sdlc.py (GitHub, "
+                "Gitea, Forgejo, GitLab, Bitbucket, Azure, Jenkins, ci/nuhut-check.sh), so the "
+                "checks are local only and can be skipped", fix=fix, who="owner")
+    else:
+        out.add("info", "enforcement", ", ".join(found[:3]),
+                "enforcement: CI (%s). It binds only if the host requires that job to pass "
+                "before a merge" % ", ".join(providers))
+
+
 def check_postmortems(project, out):
     """Each postmortem names its follow-up items, and they exist; and names the regression
     test that reproduces the failure."""
@@ -3428,7 +3489,6 @@ CI_NOT_TIER1 = (".ai-sdlc/test-lock.txt",) + tuple(
     ".ai-sdlc/%s/" % name for name in ("backups", "bite", "cache", "dispatch", "evidence",
                                        "guard", "runs", "session", "view"))
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
-_SHA = re.compile(r"^[0-9a-fA-F]{7,64}$")
 
 
 def _printable(text):
@@ -3492,23 +3552,39 @@ def _ci_paths(project, sha, parents, merge_base):
 
 def ci_event_head(path):
     """(sha, error): pull_request.head.sha from the GitHub event file at <path>."""
-    if not path:
-        return None, "--head event needs $GITHUB_EVENT_PATH (set by GitHub Actions)"
-    try:
-        with open(path, encoding="utf-8") as handle:
-            data = json.load(handle)
-        sha = data["pull_request"]["head"]["sha"]
-    except (IOError, OSError, ValueError, KeyError, TypeError):
-        return None, "no pull_request.head.sha in the event file $GITHUB_EVENT_PATH"
-    if not isinstance(sha, str) or not _SHA.match(sha):
-        return None, "pull_request.head.sha in $GITHUB_EVENT_PATH is not a commit id"
-    return sha, None
+    return runtime_module("registry").event_head(path)
+
+
+def ci_env_head():
+    """(commit, error) for `--head env`: registry.ci_head (NUHUT_HEAD, the GitHub event
+    file, CI_COMMIT_SHA, BITBUCKET_COMMIT), else HEAD."""
+    value, _, error = runtime_module("registry").ci_head()
+    return (None, error) if error else (value or "HEAD", None)
+
+
+def ci_env_base(project):
+    """(ref, error): the target branch the CI job names (registry.ci_base), as
+    origin/<branch> when that is fetched, else the local branch; (None, None) when no CI
+    variable names one."""
+    branch, var, error = runtime_module("registry").ci_base()
+    if error or not branch:
+        return None, error
+    for ref in ("refs/remotes/origin/" + branch, "refs/heads/" + branch):
+        if project.git("rev-parse", "--verify", "--quiet", ref + "^{commit}").strip():
+            return ref, None
+    return None, ("%s (from $%s) is not a branch here. Fetch it with full history, or pass "
+                  "--base" % (branch, var))
 
 
 def ci_check(project, base=None, head=None, charter_ref=None):
     """Returns (result, error). Judges the commits in merge_base(base, head)..head, merge
     commits included: trailers, the ledger record behind each item, a review file for
-    each Tier 1 item, the tier floor its changed paths imply, and tier lowering."""
+    each Tier 1 item, the tier floor its changed paths imply, and tier lowering. With no
+    <base>, the target branch the CI job names, else the charter's Default branch."""
+    if not base:
+        base, error = ci_env_base(project)
+        if error:
+            return None, error
     base = base or default_branch(project) or "main"
     head = head or "HEAD"
     for name, ref in (("base", base), ("head", head), ("charter-ref", charter_ref)):
@@ -5659,12 +5735,14 @@ def _cmd_ext(project, opts, parser):
 
 def _cmd_ci_check(project, opts, parser):
     """ci-check: judge a pull request's commits."""
-    head = opts.head
+    head, error = opts.head, None
     if head == "event":
         head, error = ci_event_head(os.environ.get("GITHUB_EVENT_PATH", ""))
-        if error:
-            sys.stderr.write("ci-check: %s\n" % error)
-            return 2
+    elif head == "env":
+        head, error = ci_env_head()
+    if error:
+        sys.stderr.write("ci-check: %s\n" % error)
+        return 2
     result, error = ci_check(project, opts.base, head, opts.charter_ref)
     if error:
         sys.stderr.write("ci-check: %s\n" % error)
@@ -6025,10 +6103,13 @@ def build_parser():
                      "not marked (new), or the plan is too broad (ignores --base and --strict)")
     cic = sub.add_parser("ci-check", help="judge a pull request's commits: trailers, the "
                          "ledger record behind each item, Tier 1 reviews and the tier floor")
-    cic.add_argument("--base", help="branch the PR targets (default: the charter's Default "
-                     "branch, else main)")
+    cic.add_argument("--base", help="branch the PR targets (default: the CI job's target "
+                     "branch: NUHUT_BASE, GITHUB_BASE_REF, CI_MERGE_REQUEST_TARGET_BRANCH_NAME, "
+                     "BITBUCKET_PR_DESTINATION_BRANCH, SYSTEM_PULLREQUEST_TARGETBRANCH or "
+                     "CHANGE_TARGET; else the charter's Default branch, else main)")
     cic.add_argument("--head", help="the PR's last commit (default: HEAD); `event` reads "
-                     "pull_request.head.sha from $GITHUB_EVENT_PATH")
+                     "pull_request.head.sha from $GITHUB_EVENT_PATH; `env` reads NUHUT_HEAD, "
+                     "the event file, CI_COMMIT_SHA or BITBUCKET_COMMIT, else HEAD")
     cic.add_argument("--charter-ref", dest="charter_ref", help="read the Always Tier 1 here "
                      "globs from the charter on this ref (CI: the base branch), so the PR "
                      "cannot weaken them")
