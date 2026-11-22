@@ -142,7 +142,7 @@ container or server you started for testing.
 
 **Forbidden in this project:** Never add `pip`/`npm` runtime dependencies; never put literal doubled curly braces in `optional/runtime/*` (the installer substitutes placeholders); never write developer machine paths or real credentials into tracked files; never edit `optional/runtime/view.html` directly without rebuilding from `optional/runtime/view/` via `python3 tools/build_view.py`.
 
-**Human approval required for:** Cutting or tagging a release (`VERSION` bump / `main` merge), removing a public CLI subcommand or flag, changing Tier 1 governance gates, or modifying `.github/workflows/release.yml`.
+**Human approval required for:** Cutting or tagging a release (`VERSION` bump / `main` merge), removing a public CLI subcommand or flag, changing Tier 1 governance gates, or modifying the release job in `.github/workflows/version.yml`.
 
 A command above that a machine can recognise (a production deploy, a migration) also
 goes in `.ai-sdlc/gates.txt`. Prepare everything up to it; a human runs it.

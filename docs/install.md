@@ -443,5 +443,5 @@ Installing from a branch that is ahead of the last release (for example `kit-v5`
 merges) still stamps `VERSION` into the manifest and `AGENTS.md`, so a later `--upgrade`
 compares versions correctly. The installer's banner says so, for example
 `v4.0.0 + 30 unreleased commits (next release: 5.0.0)`. The version changes when the branch
-merges to `main` and the release workflow tags it; bumping `VERSION` by hand would stop
-that workflow from tagging the release.
+merges to `main` and the release job in `.github/workflows/version.yml` tags it; bumping
+`VERSION` by hand would stop that job from tagging the release.

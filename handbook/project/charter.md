@@ -28,7 +28,7 @@ last-reviewed: 2026-11-13
 | Hosting & Cloud provider | Distributed via git / GitHub Releases (runs locally on developer & CI machines) |
 | CDN / Edge / WAF | none |
 | TLS certificates | none (local loopback only) |
-| CI | GitHub Actions (`.github/workflows/ci.yml`, `version.yml`, `release.yml`) |
+| CI | GitHub Actions (`.github/workflows/ci.yml`, `version.yml`; `version.yml` also releases) |
 | Test tooling | `validate.py`, `optional/runtime/sdlc.py --selftest`, `tests/smoke.py` |
 
 ## Constraints

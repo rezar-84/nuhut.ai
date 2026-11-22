@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Docs, chore, test and ci commits no longer cut a release.** `tools/semver.py` keeps one list of release types: `feat` is a minor; `fix`, `perf`, `refactor` and `revert` are a patch. Other types and non-conventional subjects give level `none`, and the release job is skipped. `BREAKING CHANGE:` counts only at the start of a line in the footer, so a quoted or inline mention no longer makes a major. The release job runs in concurrency group `release`, stops with "superseded by a newer push" when `main` has moved past its commit (it never rebases), recomputes the version before pushing, and fails without pushing if the tag exists. The release-commit skip now also requires the `github-actions[bot]` actor. `.github/workflows/release.yml` is removed; `version.yml` publishes releases.
+
 ## 5.0.0 — 2026-11-21
 
 - **The guided installer no longer draws 40 columns wide on Python 3.8–3.10** when the terminal reports a size of 0. Those versions return 0×0 instead of the fallback; the installer now uses 80×24.
