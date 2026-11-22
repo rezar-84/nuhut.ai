@@ -7,7 +7,8 @@ ADR 0003 (`handbook/project/adr/0003-extension-system.md` in the kit repository)
 
 There are two kinds:
 
-- **Built-in** extensions (`core`, `claude`, `codex`, `gemini`, `cursor`) live in
+- **Built-in** extensions (`core`, `claude`, `codex`, `gemini`, `cursor`, `opencode`,
+  `kiro`, `acp`, `github-issues`) live in
   `.ai-sdlc/extensions/`. They are kit-managed files and `install.sh --upgrade` refreshes
   them.
 - **Project** extensions live in `.ai-sdlc/local/extensions/<id>/`. Only `sdlc.py ext`
@@ -140,6 +141,34 @@ and its record.
   `"overrides": "codex"` and the id in **Extensions allowed**. Without both, the override
   is ignored and `doctor` says why.
 
+### Add a command
+
+A `commands` record adds one `sdlc.py` subcommand, named by its `id`:
+
+```json
+"commands": [{"id": "issues", "file": "issues.py"}]
+```
+
+The file defines `register(add, runtime)`. `runtime` is the `sdlc.py` module, and `add`
+registers a handler under the record's name only:
+
+```python
+def register(add, runtime):
+    add(pull, help="read issues", configure=lambda p: p.add_argument("--dry-run",
+        action="store_true"), verb="pull")      # sdlc.py issues pull
+```
+
+Leave out `verb` for a plain command. The handler is called as
+`handler(project, opts, parser)` and returns the exit code.
+
+- The command loads like any other code: always for a built-in, and for a project
+  extension only when **Extensions allowed** lists it and the file matches its pin.
+- A name that a core command uses (`doctor`, `item`, `deploy`, ...) is ignored, with a
+  stderr line that names the extension. The core command keeps running.
+- `sdlc.py` imports extension command files only when the command line names something
+  other than a core command (or asks for `--help`). A broken extension cannot stop
+  `doctor`, `finish` or the merge driver.
+
 Check a manifest before you publish it:
 
 ```sh
@@ -239,9 +268,54 @@ python3 .ai-sdlc/bin/sdlc.py notify --test     # send a test event; exit 1 if no
   the path or query, which often carry a token) and never blocks the command. An unset
   variable sends nothing and stays quiet, except under `notify --test`.
 
+## GitHub issues
+
+The `github-issues` built-in extension adds `sdlc.py issues pull` and
+`sdlc.py issues push`. They map GitHub issues to work items through the
+[`gh` CLI](https://cli.github.com), which does the network calls and holds the login.
+Nuhut never reads a token. Install `gh` and run `gh auth login` first.
+
+```sh
+python3 .ai-sdlc/bin/sdlc.py issues pull --dry-run        # what would be parked or linked
+python3 .ai-sdlc/bin/sdlc.py issues pull                  # park the issues no item maps to
+python3 .ai-sdlc/bin/sdlc.py issues pull --label triage --state all --limit 200
+python3 .ai-sdlc/bin/sdlc.py issues push ACME-12 ACME-14  # open issues for these items
+python3 .ai-sdlc/bin/sdlc.py issues push --all --dry-run  # every open item without one
+python3 .ai-sdlc/bin/sdlc.py render                       # refresh backlog.md afterwards
+```
+
+- **The link.** An item's shard holds the issue number in `issue`, for example
+  `"issue": 42`. An item without a link has no such field. When two branches link one
+  item to different issues, the shard merge driver shows a conflict instead of picking
+  one.
+- **pull** runs `gh issue list --json number,title,labels,url` (open issues, at most 100,
+  by default). Each issue that no item maps to becomes a new **Parked** item. It waits on
+  the backlog owner, and its park reason names the issue, so a person decides whether it
+  becomes Ready, gets deferred or is dropped. A label containing `bug` makes it a
+  `defect`. An issue titled `<ID>: ...` that names an item without a link links that item
+  instead, which is how an issue opened by `push` is found again. Running pull twice
+  creates nothing new.
+- **push** needs the IDs, or `--all` for every item that is not Done or Dropped and has no
+  issue. With neither, it lists those items and exits 2. Each issue is titled
+  `<ID>: <title>`, and its body says only the ID, type, tier and status. Summaries, park
+  reasons and plans stay in the repository. An item that already has an issue is
+  skipped.
+- **Untrusted text.** Anyone who can open an issue writes its title, and agents read the
+  backlog. pull never reads the issue body. It cuts each title to one line of at most 120
+  characters, with no escape sequences, control or invisible format characters and no
+  `|`. Each import is Parked until a person triages it.
+- `--repo OWNER/NAME` picks a repository other than the one `gh` finds in this
+  directory. `--json` prints what was created, linked and skipped.
+
+### Other trackers
+
+Linear and Jira are planned as further extensions of the same shape: a `commands` record
+that adds `sdlc.py linear pull|push` or `sdlc.py jira pull|push`. Each will keep the
+tracker's key on the shard in its own field and park unmapped tickets the same way. Neither
+exists yet. Until then, a project can write one as a project extension with
+`sdlc.py ext add` and turn it on with **Extensions allowed**.
+
 ## Not yet
 
-- `commands` entry points are validated, pinned and listed, but `sdlc.py` does not yet
-  dispatch to them. That waits for the command table (NUHT-021).
 - `checks` from an allowed extension load into the registry, but `verify` still runs
   only the charter's Commands rows.
