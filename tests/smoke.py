@@ -6959,23 +6959,23 @@ def test_command_table():
         mod.register_command("hello-ext", hello, help="say hello",
                              configure=lambda p: p.add_argument("--name", default="world"))
         check("an extension name already taken is refused", refused("hello-ext", noop))
-        mod.register_command("deploy", deploy_record, verb="record", help="record a deploy",
+        mod.register_command("rollout", deploy_record, verb="record", help="record a deploy",
                              configure=lambda p: p.add_argument("--env", required=True))
-        mod.register_command("deploy", deploy_list, verb="list", help="list deploys")
-        check("a verb already in a group is refused", refused("deploy", noop, verb="record"))
-        check("a plain command over a verb group is refused", refused("deploy", noop))
+        mod.register_command("rollout", deploy_list, verb="list", help="list deploys")
+        check("a verb already in a group is refused", refused("rollout", noop, verb="record"))
+        check("a plain command over a verb group is refused", refused("rollout", noop))
         check("a verb over a plain extension command is refused", refused("hello-ext", noop, verb="x"))
         rc = mod.main(["--root", d, "hello-ext", "--name", "nuhut"])
         check("an extension subcommand dispatches with its own flags",
               rc == 7 and seen.get("hello") == (os.path.realpath(d), "nuhut"), "%r %r" % (rc, seen))
-        rc = mod.main(["--root", d, "deploy", "record", "--env", "prod"])
+        rc = mod.main(["--root", d, "rollout", "record", "--env", "prod"])
         check("a grouped noun-verb command dispatches the verb", rc == 3 and seen.get("record") == "prod",
               "%r %r" % (rc, seen))
-        rc = mod.main(["--root", d, "deploy", "list"])
+        rc = mod.main(["--root", d, "rollout", "list"])
         check("the second verb of the group dispatches", rc == 4 and seen.get("list"), "%r" % rc)
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            rc = mod.main(["--root", d, "deploy"])
+            rc = mod.main(["--root", d, "rollout"])
         check("a group with no verb exits 2 and names its verbs",
               rc == 2 and "record" in err.getvalue() and "list" in err.getvalue(), err.getvalue())
         outbuf = io.StringIO()
@@ -6985,9 +6985,9 @@ def test_command_table():
         except SystemExit:
             pass
         check("the top-level help lists extension commands",
-              "hello-ext" in outbuf.getvalue() and "deploy" in outbuf.getvalue(), outbuf.getvalue()[-400:])
+              "hello-ext" in outbuf.getvalue() and "rollout" in outbuf.getvalue(), outbuf.getvalue()[-400:])
     finally:
-        for name in ("hello-ext", "deploy"):
+        for name in ("hello-ext", "rollout"):
             mod.COMMANDS.pop(name, None)
 
     script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")

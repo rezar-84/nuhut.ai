@@ -5605,8 +5605,8 @@ def _cmd_fix(project, opts, parser):
 
 
 class Command(object):
-    """One entry in COMMANDS. A plain command has a handler; a noun-verb group (deploy
-    record|list) has verbs, a name -> Command map, and no handler of its own. A handler is
+    """One entry in COMMANDS. A plain command has a handler; a noun-verb group (rollout
+    start|list) has verbs, a name -> Command map, and no handler of its own. A handler is
     called as handler(project, opts, parser) and returns the exit code; configure(subparser)
     adds the command's flags. A command with needs_project False (the merge driver) is
     called with project None, since git may run it where no project can be read."""
