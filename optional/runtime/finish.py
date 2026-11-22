@@ -667,6 +667,11 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     else:
         out.append("log      not owed (Tier 3: the commit is the record)")
 
+    lifecycle = getattr(rt, "extension_lifecycle", None)
+    for ext_id, message in (lifecycle(project, "before_finish", project.root, item)
+                            if lifecycle else []):
+        owe("ext      %s before_finish: %s" % (ext_id, message))
+
     if owing:
         return out + ["", "not finished: %d thing(s) owed (OWED above)" % len(owing)], 1
     if already:

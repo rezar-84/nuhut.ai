@@ -162,7 +162,7 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 | **Work items and agents** | `item` per-item shards · `hotfix` the hotfix fast path, retroactive review owed · `next-id` atomic ID allocation · `claim` / `release` / `claims` · `parallel` · `dispatch` headless multi-worker queue execution · `trailers` commit trailers · `sync` behind the remote? conflicts? · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |
 | **Specs** | `spec list \| show \| validate \| apply` |
 | **Writing** | `slop` find the phrasings that read as machine-written (`--strict` fails the file) |
-| **Setup** | `config` see or change the charter's constraints · `fix` safe repairs |
+| **Setup** | `config` see or change the charter's constraints · `fix` safe repairs · `ext` add, update, remove and search [extensions](docs/extensions.md) |
 
 In Claude Code: `/sdlc-plan`, `/sdlc-build`, `/sdlc-verify`, `/sdlc-review`, `/sdlc-finish`, `/sdlc-log`,
 `/sdlc-doctor`, `/sdlc-slop`. Every flag: [command reference](docs/cli.md).

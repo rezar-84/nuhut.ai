@@ -1026,6 +1026,43 @@ def dialect_for(harness, root=None):
     return name
 
 
+# Extension hook rules (ADR 0003) run with this rule, which every guarded tool wires for
+# Bash, Write and Edit, so they need no hook entry of their own.
+EXTENSION_RULES_HOST = "approval-gate"
+
+
+def eval_extension_rules(payload, cwd, root):
+    """The deny reason from a built-in or allowed extension's hook rule, or None. A
+    project extension's rules run only when the charter's Extensions allowed row names
+    it on the default branch and its files match the hashes pinned at `ext add`."""
+    if not root or not (os.path.isdir(os.path.join(root, ".ai-sdlc", "local", "extensions"))
+                        or os.path.isdir(os.path.join(root, ".ai-sdlc", "extensions"))):
+        return None
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import registry
+    version = _kit_version(root)
+    reg = registry.load(root, kit=None, warn=False, version=version)
+    records = reg.code_records("hook_rules")
+    if not records:
+        return None
+    if any(reg.extensions[ext_id]["source"] != registry.BUILTIN for ext_id, _ in records):
+        # Only now pay for the git reads behind the allow list.
+        reg = registry.load(root, kit=None, warn=False, version=version,
+                            allowed=registry.trusted_allowed(root))
+    return registry.run_hook_rules(reg, payload, cwd, root)
+
+
+def _kit_version(root):
+    try:
+        with open(os.path.join(root, ".ai-sdlc", "manifest.json"), encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data.get("kit_version") if isinstance(data, dict) else None
+    except (IOError, OSError, ValueError):
+        return None
+
+
 def normalize_payload(raw_payload, harness):
     if not isinstance(raw_payload, dict):
         raise ValueError("payload must be a JSON object")
@@ -1065,6 +1102,8 @@ def run_agent_hook(harness, rule):
         if isinstance(p_cwd, str) and p_cwd.strip() and os.path.isdir(p_cwd):
             cwd = os.path.realpath(p_cwd)
         reason = RULE_DISPATCH[rule](payload, cwd, root)
+        if not reason and rule == EXTENSION_RULES_HOST:
+            reason = eval_extension_rules(payload, cwd, root)
     except Exception as exc:
         reason = "hook %s failed closed (%s)" % (rule, exc.__class__.__name__)
     out = format_verdict(harness, reason)

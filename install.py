@@ -74,7 +74,7 @@ RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
                  "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py",
-                 "registry.py", "status.py", "skillgen.py")
+                 "registry.py", "status.py", "skillgen.py", "ext.py", "net.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -2062,6 +2062,36 @@ DECISION_KEYS = {"a": "Ask", "g": "Guide", "p": "Autopilot"}
 SLOP_KEYS = {"o": "Off", "n": "On", "s": "Strict"}
 
 
+def apply_extension_overlays(target, docs, planned, pins):
+    """Render the template overlays of the project's extensions into <planned> in place.
+    Returns ({template rel: ["id@version", ...]}, notes). Only extensions installed with
+    `sdlc.py ext add` (recorded in <pins>) contribute, and only kit templates are
+    targets."""
+    if not pins:
+        return {}, []
+    try:
+        import registry
+    except ImportError:
+        return {}, ["registry.py is missing, so extension overlays were not applied"]
+    reg = registry.load(str(target), kit=None, version=VERSION, warn=False,
+                        use_cache=False, pins=pins)
+    found, notes = registry.template_overlays(reg)
+    applied = {}
+    for target_rel, overlays in sorted(found.items()):
+        overlays = [o for o in overlays if o["ext"] in pins]
+        rel = (Path(docs) / target_rel).as_posix()
+        if not overlays:
+            continue
+        if rel not in planned:
+            notes.append("extension overlay target %s is not a kit template here; skipped"
+                         % target_rel)
+            continue
+        planned[rel] = registry.apply_overlays(planned[rel], overlays)
+        applied[rel] = ["%s@%s" % (o["ext"], o["version"]) for o in sorted(
+            overlays, key=lambda o: (registry.OVERLAY_MODES.index(o["mode"]), o["ext"]))]
+    return applied, notes
+
+
 # Presets set four charter rows together. An explicit flag always wins over the preset,
 # whatever the order on the command line. Presets apply to new installs only: --upgrade
 # keeps whatever the project's charter already says.
@@ -3132,7 +3162,9 @@ def load_manifest(target):
     return None
 
 
-def write_manifest(target, docs, files, regions=None):
+def write_manifest(target, docs, files, regions=None, extensions=None, overlays=None):
+    """<extensions> is the `sdlc.py ext` record of project extensions, copied through
+    unchanged; <overlays> names, per template, the extension overlays rendered into it."""
     payload = {
         "schema": 1,
         "kit_version": VERSION,
@@ -3141,6 +3173,10 @@ def write_manifest(target, docs, files, regions=None):
     }
     if regions:
         payload["regions"] = dict(sorted(regions.items()))
+    if extensions:
+        payload["extensions"] = extensions
+    if overlays:
+        payload["overlays"] = dict(sorted(overlays.items()))
     atomic_write_text(ensure_inside(target, Path(target) / MANIFEST_REL),
                       json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
@@ -4578,6 +4614,11 @@ def upgrade(target, o):
     planned = managed_source_texts(target, docs, inst.ctx, o.profile,
                                    shared_skills=inst.shared_skills)
     planned.update(slop_filter_upgrade(target, charter, o, inst.ctx))
+    # Project extensions (`sdlc.py ext`) are recorded under their own key: copied through
+    # unchanged, never part of the obsolete set, their overlays rendered into templates.
+    ext_pins = (previous or {}).get("extensions")
+    ext_pins = ext_pins if isinstance(ext_pins, dict) else {}
+    overlays_applied, overlay_notes = apply_extension_overlays(target, docs, planned, ext_pins)
     if o.profile == "compact":
         print("Compact profile: the numbered process/ documents stay uninstalled.")
     try:
@@ -4720,7 +4761,9 @@ def upgrade(target, o):
                          "up first): --upgrade --repair\n")
         return 1
 
-    obsolete = sorted(set(previous_files) - set(planned))
+    obsolete = sorted(rel for rel in set(previous_files) - set(planned)
+                      if not rel.startswith(".ai-sdlc/local/"))
+    notes.extend(overlay_notes)
     changed = sorted(rel for rel, content in planned.items()
                      if sha256_file(target / rel) != sha256_text(content))
 
@@ -4781,7 +4824,8 @@ def upgrade(target, o):
                 path.unlink()
                 print("  remove         %s (obsolete managed file)" % rel)
         hashes = dict((rel, sha256_text(content)) for rel, content in planned.items())
-        write_manifest(target, docs, hashes, regions)
+        write_manifest(target, docs, hashes, regions, extensions=ext_pins,
+                       overlays=overlays_applied)
         if o.harnesses is not None or getattr(o, "native_harnesses", []):
             inst.wire_harnesses()
             if inst.wired:

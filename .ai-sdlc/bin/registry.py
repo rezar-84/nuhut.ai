@@ -8,18 +8,23 @@ for them, highest priority first, in:
     <kit>/optional/extensions/<id>/          only when running from the kit checkout
 
 Built-in status comes from the location, never from the manifest. A project extension
-may add harness and preset records; it replaces a built-in record only when its manifest
-says `"overrides": "<built-in id>"`, and then only records of that built-in, by id.
-Executable contributions (agent argv, check commands) from project extensions are
-refused until NUHT-018 adds the Extensions allowed gate.
+may add harness and preset records. It replaces a built-in record only when its manifest
+says `"overrides": "<built-in id>"` and the charter's Extensions allowed row lists it, and
+then only records of that built-in, by id. Executable contributions (agent argv, check
+commands, hook rules, doctor checks, commands, lifecycle hooks) from a project extension
+load only when Extensions allowed lists its id, as that row stands on the default branch,
+and only while its files match the sha256 pinned by `sdlc.py ext add` (NUHT-018).
 
 Zero third-party dependencies (Python 3.8+ stdlib).
 NOTE: Must never contain two literal opening curly braces in a row.
 """
 
+import hashlib
+import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 
 SCHEMA = 1
@@ -39,6 +44,13 @@ DIR_PROVIDES = ("skills", "roles", "templates")
 DIALECTS = ("claude", "gemini", "cursor")
 # Executable contributions: these reach a subprocess or the interpreter.
 EXECUTABLE = ("agents", "checks", "hook_rules", "doctor", "commands", "lifecycle")
+# Code entry points: Python files loaded with importlib.
+CODE_KINDS = ("hook_rules", "doctor", "commands")
+OVERLAY_MODES = ("prepend", "wrap", "append")
+OVERLAY_TARGET_RE = re.compile(r"^templates/[A-Za-z0-9][A-Za-z0-9._-]*\.md$")
+# In a `wrap` overlay this line is replaced by the template's text.
+WRAP_MARKER = "<!-- nuhut:content -->"
+ALLOWED_LABEL = "Extensions allowed"
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _WARNED = set()
@@ -201,8 +213,30 @@ def _check_check(errors, field, rec):
         errors.append((field + ".command", "expected a string"))
 
 
+def _check_code(errors, field, rec):
+    if not _safe_rel(rec.get("file")):
+        errors.append((field + ".file", "expected a relative path with no '..'"))
+    elif not rec["file"].endswith(".py"):
+        errors.append((field + ".file", "expected a .py file"))
+    tools = rec.get("tools")
+    if tools is not None and not _is_str_list(tools):
+        errors.append((field + ".tools", "expected list of strings"))
+
+
+def _check_overlay(errors, field, rec):
+    target = rec.get("target")
+    if not isinstance(target, str) or not OVERLAY_TARGET_RE.match(target):
+        errors.append((field + ".target", "expected a kit template such as "
+                       "\"templates/plan.md\""))
+    if rec.get("mode") not in OVERLAY_MODES:
+        errors.append((field + ".mode", "expected one of %s" % ", ".join(OVERLAY_MODES)))
+    if not _safe_rel(rec.get("file")):
+        errors.append((field + ".file", "expected a relative path with no '..'"))
+
+
 RECORD_CHECKS = {"harnesses": _check_harness, "agents": _check_agent,
-                 "presets": _check_preset, "checks": _check_check}
+                 "presets": _check_preset, "checks": _check_check,
+                 "hook_rules": _check_code, "doctor": _check_code, "commands": _check_code}
 
 
 def validate(manifest):
@@ -255,7 +289,9 @@ def validate(manifest):
                 if not isinstance(rec, dict):
                     errors.append((where, "expected an object"))
                     continue
-                if key in RECORD_CHECKS:
+                if key == "overlays":
+                    _check_overlay(errors, where, rec)
+                elif key in RECORD_CHECKS:
                     if _check_id(errors, where + ".id", rec.get("id")):
                         if rec["id"] in seen:
                             errors.append((where + ".id", "duplicate id %r" % rec["id"]))
@@ -276,10 +312,13 @@ class Registry(object):
     """The loaded extensions. `missing` is True when no built-in location exists at all,
     in which case callers use their v5 tables."""
 
-    def __init__(self, root, kit):
+    def __init__(self, root, kit, allowed=(), pins=None):
         self.root = root
         self.kit = kit
+        self.allowed = frozenset(allowed or ())
+        self.pins = pins or {}   # id -> the manifest.json "extensions" record
         self.missing = False
+        self._code = {}          # (id, rel) -> (module, None) or (None, error)
         self.extensions = {}     # id -> {"id", "path", "source", "manifest"}
         self.errors = []         # {"id", "path", "field", "message"}
         self.warnings = []
@@ -324,14 +363,18 @@ class Registry(object):
                                    "overrides %r, which is not a loaded built-in extension; "
                                    "its overriding records are ignored" % target})
                 target = None
+            code_ok, why = self.code_allowed(ext["id"])
+            if target and ext["id"] not in self.allowed:
+                self.notes.append({"id": ext["id"], "path": ext["rel"], "message":
+                                   "the override of built-in %r is ignored: the charter row "
+                                   "%s does not list %r (run `sdlc.py config "
+                                   "--allow-extension %s`)" % (target, ALLOWED_LABEL,
+                                                               ext["id"], ext["id"])})
+                target = None
             for kind in kinds:
                 for rec in ext["manifest"].get("provides", {}).get(kind, []) or []:
-                    if kind in EXECUTABLE:
-                        self.notes.append({"id": ext["id"], "path": ext["rel"], "message":
-                                           "%s record %r refused: executable contributions "
-                                           "from project extensions need NUHT-018"
-                                           % (kind, rec["id"])})
-                        continue
+                    if kind in EXECUTABLE and not code_ok:
+                        continue       # reported once per extension by blocked_notes()
                     if rec["id"] in merged[kind]:
                         if target and owner[kind][rec["id"]] == target:
                             merged[kind][rec["id"]] = dict(rec, source=OVERRIDE,
@@ -347,12 +390,91 @@ class Registry(object):
                         continue
                     merged[kind][rec["id"]] = dict(rec, source=PROJECT, extension=ext["id"])
                     owner[kind][rec["id"]] = ext["id"]
-            for kind in EXECUTABLE:
-                if kind not in kinds and ext["manifest"].get("provides", {}).get(kind):
-                    self.notes.append({"id": ext["id"], "path": ext["rel"], "message":
-                                       "%s refused: executable contributions from project "
-                                       "extensions need NUHT-018" % kind})
+            if executable_entries(ext["manifest"]) and not code_ok:
+                self.notes.append({"id": ext["id"], "path": ext["rel"], "blocked": True,
+                                   "message": "extension %s: executable contributions are "
+                                   "blocked: %s" % (ext["id"], why)})
         self._records = merged
+
+    def code_allowed(self, ext_id):
+        """(True, None) when <ext_id>'s executable contributions may load: built-in, or
+        listed in Extensions allowed with its manifest unchanged since `ext add` pinned
+        it. Otherwise (False, why)."""
+        ext = self.extensions.get(ext_id)
+        if ext is None:
+            return False, "not installed"
+        if ext["source"] == BUILTIN:
+            return True, None
+        if ext_id not in self.allowed:
+            return False, ("code is disabled until the charter row %s lists `%s` on the "
+                           "default branch: run `sdlc.py config --allow-extension %s`"
+                           % (ALLOWED_LABEL, ext_id, ext_id))
+        pinned = (self.pins.get(ext_id) or {}).get("files") or {}
+        if MANIFEST not in pinned:
+            return False, ("it was not installed with `sdlc.py ext add`, so nothing pins "
+                           "its files; reinstall it with `sdlc.py ext add <source>`")
+        if sha256_file(ext["path"]) != pinned[MANIFEST]:
+            return False, ("%s changed since it was pinned: run `sdlc.py ext update %s`"
+                           % (MANIFEST, ext_id))
+        return True, None
+
+    def status(self, ext_id):
+        """data, code-enabled, code-blocked, version-refused or invalid."""
+        if ext_id not in self.extensions:
+            err = self.broken.get(ext_id) or {}
+            return "version-refused" if err.get("field") in ("nuhut", "schema") else "invalid"
+        if not executable_entries(self.extensions[ext_id]["manifest"]):
+            return "data"
+        return "code-enabled" if self.code_allowed(ext_id)[0] else "code-blocked"
+
+    def load_code(self, ext_id, rel):
+        """(module, None) for code file <rel> of extension <ext_id>, or (None, why). A
+        non-built-in file loads only when the extension is allowed and the file's sha256
+        equals the hash pinned at `ext add`; the realpath must stay inside its directory."""
+        key = (ext_id, rel)
+        if key in self._code:
+            return self._code[key]
+        ok, why = self.code_allowed(ext_id)
+        ext = self.extensions.get(ext_id)
+        path = None
+        if ok:
+            base = os.path.dirname(ext["path"])
+            path = os.path.join(base, rel)
+            if not _safe_rel(rel) or not _inside(path, base):
+                ok, why = False, "%s escapes the extension directory" % rel
+            elif not os.path.isfile(path):
+                ok, why = False, "%s is missing" % rel
+        if ok and ext["source"] != BUILTIN:
+            pinned = ((self.pins.get(ext_id) or {}).get("files") or {}).get(rel)
+            if pinned is None or sha256_file(path) != pinned:
+                ok, why = False, ("%s does not match the sha256 pinned at `ext add`: run "
+                                  "`sdlc.py ext update %s` or restore the file"
+                                  % (rel, ext_id))
+        result = (None, why)
+        if ok:
+            name = "nuhut_ext_%s_%s" % (re.sub(r"[^A-Za-z0-9]", "_", ext_id),
+                                        re.sub(r"[^A-Za-z0-9]", "_", rel))
+            try:
+                spec = importlib.util.spec_from_file_location(name, path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                result = (module, None)
+            except Exception as exc:  # an extension's own bug must not crash the caller
+                result = (None, "%s failed to load (%s: %s)"
+                          % (rel, exc.__class__.__name__, exc))
+        self._code[key] = result
+        return result
+
+    def code_records(self, kind):
+        """[(extension id, record)] for code kind <kind> across every loaded extension,
+        built-ins first, then by id. Records of blocked extensions are included: callers
+        decide, through load_code, whether they run."""
+        out = []
+        for ext_id in sorted(self.extensions, key=lambda i: (
+                self.extensions[i]["source"] != BUILTIN, i)):
+            for rec in self.extensions[ext_id]["manifest"].get("provides", {}).get(kind) or []:
+                out.append((ext_id, rec))
+        return out
 
     def _sorted(self, kind):
         recs = self._records.get(kind, {})
@@ -382,15 +504,21 @@ def _read_manifest(path):
         return None, ("(file)", "unreadable: %s" % exc.__class__.__name__)
 
 
-def load(root=None, kit=True, version=None, warn=True, use_cache=True):
+def load(root=None, kit=True, version=None, warn=True, use_cache=True, allowed=None,
+         pins=None):
     """Load every extension for project <root>. kit=True finds the kit checkout this file
     runs from; pass a path or None to choose. <version> is the running Nuhut version,
-    used only for non-built-in ranges."""
+    used only for non-built-in ranges. <allowed> is the set of extension ids the charter's
+    Extensions allowed row names (default: none, so project code stays off). <pins> is
+    the manifest.json "extensions" record (default: read from <root>)."""
     if kit is True:
         kit = default_kit()
     root = os.path.realpath(root) if root else None
     kit = os.path.realpath(kit) if kit else None
-    key = (root, kit, version)
+    allowed = frozenset(allowed or ())
+    if pins is None:
+        pins = read_pins(root)
+    key = (root, kit, version, allowed, json.dumps(pins, sort_keys=True))
     if use_cache and key in _CACHE:
         return _CACHE[key]
     if version is None and kit and os.path.isfile(os.path.join(kit, "VERSION")):
@@ -399,7 +527,7 @@ def load(root=None, kit=True, version=None, warn=True, use_cache=True):
                 version = handle.read().strip()
         except (IOError, OSError):
             version = None
-    reg = Registry(root, kit)
+    reg = Registry(root, kit, allowed, pins)
     locations = []
     if root:
         locations.append((os.path.join(root, ".ai-sdlc", "local", "extensions"), PROJECT))
@@ -466,6 +594,309 @@ def load(root=None, kit=True, version=None, warn=True, use_cache=True):
     if use_cache:
         _CACHE[key] = reg
     return reg
+
+
+def sha256_file(path):
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except (IOError, OSError):
+        return None
+
+
+def _inside(path, base):
+    real, top = os.path.realpath(path), os.path.realpath(base)
+    return real == top or real.startswith(top.rstrip(os.sep) + os.sep)
+
+
+def read_pins(root):
+    """The manifest.json "extensions" record: {id: {source, ref, commit, version, files}}."""
+    if not root:
+        return {}
+    try:
+        with open(os.path.join(root, ".ai-sdlc", "manifest.json"), encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (IOError, OSError, ValueError):
+        return {}
+    pins = data.get("extensions") if isinstance(data, dict) else None
+    return pins if isinstance(pins, dict) else {}
+
+
+def executable_entries(manifest):
+    """[(field, what)] for every executable contribution in <manifest>: agent argv,
+    check commands and code entry points, each with its path or argv[0]."""
+    provides = manifest.get("provides") or {}
+    out = []
+    for n, rec in enumerate(provides.get("agents") or []):
+        for key in ("review", "build"):
+            if isinstance(rec, dict) and rec.get(key):
+                out.append(("provides.agents[%d].%s" % (n, key),
+                            "runs `%s`" % " ".join(str(a) for a in rec[key])))
+    for n, rec in enumerate(provides.get("checks") or []):
+        if isinstance(rec, dict) and rec.get("command"):
+            out.append(("provides.checks[%d].command" % n, "runs `%s`" % rec["command"]))
+    for kind in CODE_KINDS:
+        for n, rec in enumerate(provides.get(kind) or []):
+            if isinstance(rec, dict):
+                out.append(("provides.%s[%d]" % (kind, n), "loads %s" % rec.get("file")))
+    lifecycle = provides.get("lifecycle")
+    if isinstance(lifecycle, dict):
+        for event in sorted(lifecycle):
+            out.append(("provides.lifecycle.%s" % event, "loads %s" % lifecycle[event]))
+    return out
+
+
+def referenced_paths(manifest):
+    """[(field, rel, is_dir)] for every path a manifest names."""
+    provides = manifest.get("provides") or {}
+    out = []
+    for kind in CODE_KINDS:
+        for n, rec in enumerate(provides.get(kind) or []):
+            if isinstance(rec, dict) and isinstance(rec.get("file"), str):
+                out.append(("provides.%s[%d].file" % (kind, n), rec["file"], False))
+    for n, rec in enumerate(provides.get("overlays") or []):
+        if isinstance(rec, dict) and isinstance(rec.get("file"), str):
+            out.append(("provides.overlays[%d].file" % n, rec["file"], False))
+    lifecycle = provides.get("lifecycle")
+    if isinstance(lifecycle, dict):
+        for event in sorted(lifecycle):
+            if isinstance(lifecycle[event], str):
+                out.append(("provides.lifecycle.%s" % event, lifecycle[event], False))
+    for key in DIR_PROVIDES:
+        if isinstance(provides.get(key), str):
+            out.append(("provides." + key, provides[key], True))
+    return out
+
+
+def check_tree(ext_dir, manifest):
+    """[(field, message)] for an extension directory on disk: every path the manifest
+    names exists, and no file or symlink resolves outside <ext_dir>."""
+    errors = []
+    top = os.path.realpath(ext_dir)
+    for folder, dirs, names in os.walk(ext_dir):
+        dirs[:] = sorted(d for d in dirs if d != ".git")
+        for name in sorted(dirs + names):
+            full = os.path.join(folder, name)
+            if not _inside(full, top):
+                errors.append(("(files)", "%s escapes the extension directory (it resolves "
+                               "outside it)" % os.path.relpath(full, ext_dir)))
+    for field, rel, is_dir in referenced_paths(manifest):
+        if not _safe_rel(rel):
+            continue           # validate() reports it
+        full = os.path.join(ext_dir, rel)
+        if not _inside(full, top):
+            errors.append((field, "%s escapes the extension directory" % rel))
+        elif not (os.path.isdir(full) if is_dir else os.path.isfile(full)):
+            errors.append((field, "%s does not exist" % rel))
+    for n, rec in enumerate((manifest.get("provides") or {}).get("overlays") or []):
+        if isinstance(rec, dict) and rec.get("mode") == "wrap" and _safe_rel(rec.get("file")):
+            try:
+                with open(os.path.join(ext_dir, rec["file"]), encoding="utf-8") as handle:
+                    body = handle.read()
+            except (IOError, OSError, UnicodeDecodeError):
+                continue
+            if WRAP_MARKER not in body:
+                errors.append(("provides.overlays[%d].file" % n, "a wrap overlay needs a "
+                               "line %s where the template goes" % WRAP_MARKER))
+    return errors
+
+
+def parse_allowed(cell):
+    """The extension ids an Extensions allowed cell names. A placeholder, `none` or a
+    blank cell names none."""
+    text = re.sub(r"_\([^)]*\)_", "", cell or "").replace("`", " ")
+    return frozenset(w for w in re.split(r"[\s,;]+", text) if ID_RE.match(w) and w != "none")
+
+
+def _row(text, label):
+    for line in (text or "").splitlines():
+        m = re.match(r"^\|\s*\*\*%s\*\*\s*\|(.*?)\|\s*$" % re.escape(label), line.strip())
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def _git(root, *args):
+    try:
+        proc = subprocess.run(["git", "-C", root] + list(args), stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout.decode("utf-8", "replace") if proc.returncode == 0 else ""
+
+
+def trusted_allowed(root):
+    """The Extensions allowed ids as the charter stands on the default branch, the same
+    rule as sdlc.py's trusted_text (ADR 0003 decision 8), for callers that do not load
+    sdlc.py (the hooks). Falls back to the working tree only when there is no default
+    branch or the charter is not on it yet."""
+    docs, default = "docs", ""
+    try:
+        with open(os.path.join(root, ".ai-sdlc", "profile.json"), encoding="utf-8") as handle:
+            prof = json.load(handle)
+        if isinstance(prof, dict):
+            docs = str(prof.get("docs_dir") or docs)
+            default = str(prof.get("default_branch") or "")
+    except (IOError, OSError, ValueError):
+        pass
+    rel = docs.strip("/") + "/project/charter.md"
+    try:
+        with open(os.path.join(root, rel), encoding="utf-8") as handle:
+            work = handle.read()
+    except (IOError, OSError, UnicodeDecodeError):
+        work = ""
+    cell = re.sub(r"_\([^)]*\)_", "", _row(work, "Default branch") or "").strip().strip("`")
+    branch = cell.strip() or default
+    if not branch:
+        head = _git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").strip()
+        if head.startswith("refs/remotes/origin/"):
+            branch = head[len("refs/remotes/origin/"):]
+    text = work
+    if branch and not branch.startswith("-"):
+        for ref in ("refs/remotes/origin/" + branch, "refs/heads/" + branch):
+            if _git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}").strip():
+                if _git(root, "ls-tree", "--name-only", ref, "--", rel).strip():
+                    text = _git(root, "show", "%s:%s" % (ref, rel))
+                break
+    return parse_allowed(_row(text, ALLOWED_LABEL))
+
+
+_HOOK_WARNED = set()
+
+
+def run_hook_rules(reg, payload, cwd, root, warn=True):
+    """The deny reason from the first extension hook rule that denies this tool call, or
+    None. A blocked extension's rules do not run (doctor reports them). An allowed one
+    whose code cannot load fails closed: one stderr warning per process names it, and
+    only the calls its rules would judge are denied."""
+    tool = str(payload.get("tool_name") or "")
+    for ext_id, rec in reg.code_records("hook_rules"):
+        ext = reg.extensions[ext_id]
+        if ext["source"] != BUILTIN and ext_id not in reg.allowed:
+            continue
+        tools = rec.get("tools")
+        if tools and tool not in tools and "*" not in tools:
+            continue
+        module, why = reg.load_code(ext_id, rec.get("file") or "")
+        evaluate = getattr(module, "evaluate", None) if module else None
+        if module is not None and not callable(evaluate):
+            why = "%s has no evaluate(payload, cwd, root)" % rec.get("file")
+        if why:
+            if warn and ext_id not in _HOOK_WARNED:
+                _HOOK_WARNED.add(ext_id)
+                sys.stderr.write("nuhut: extension %s: hook rules skipped: %s\n" % (ext_id, why))
+            return ("extension %s hook rule %s failed closed, so this %s call is denied: %s"
+                    % (ext_id, rec.get("id"), tool or "tool", why))
+        try:
+            reason = evaluate(payload, cwd, root)
+        except Exception as exc:
+            return ("extension %s hook rule %s failed closed (%s)"
+                    % (ext_id, rec.get("id"), exc.__class__.__name__))
+        if reason:
+            return "%s [extension %s, rule %s]" % (reason, ext_id, rec.get("id"))
+    return None
+
+
+def run_doctor(reg, root):
+    """Findings {level, where, message} from the doctor checks of built-in and allowed
+    extensions. A check returns a list of (level, where, message) tuples or dicts."""
+    out = []
+    for ext_id, rec in reg.code_records("doctor"):
+        if reg.extensions[ext_id]["source"] != BUILTIN and ext_id not in reg.allowed:
+            continue           # blocked: check_extensions warns once instead
+        where = "%s:%s" % (ext_id, rec.get("file"))
+        module, why = reg.load_code(ext_id, rec.get("file") or "")
+        fn = getattr(module, "check", None) if module else None
+        if module is not None and not callable(fn):
+            why = "%s has no check(root)" % rec.get("file")
+        if why:
+            out.append({"level": "fail", "where": where, "message": "skipped: %s" % why})
+            continue
+        try:
+            found = list(fn(root) or [])
+        except Exception as exc:
+            out.append({"level": "fail", "where": where, "message": "the check raised %s"
+                        % exc.__class__.__name__})
+            continue
+        for item in found:
+            if isinstance(item, dict):
+                level, at, msg = item.get("level"), item.get("where"), item.get("message")
+            elif isinstance(item, (list, tuple)) and len(item) == 3:
+                level, at, msg = item
+            else:
+                continue
+            out.append({"level": level if level in ("fail", "warn", "info") else "warn",
+                        "where": str(at or where), "message": "[%s] %s" % (ext_id, msg)})
+    return out
+
+
+def run_lifecycle(reg, event, *args):
+    """[(extension id, message)] from every built-in or allowed extension's <event> hook:
+    the function named <event> in the file `provides.lifecycle.<event>` names. A hook
+    returns None to pass or a message to stop; one that cannot load or raises stops too."""
+    out = []
+    for ext_id in sorted(reg.extensions):
+        ext = reg.extensions[ext_id]
+        rel = ((ext["manifest"].get("provides") or {}).get("lifecycle") or {}).get(event)
+        if not rel or (ext["source"] != BUILTIN and ext_id not in reg.allowed):
+            continue
+        module, why = reg.load_code(ext_id, rel)
+        fn = getattr(module, event, None) if module else None
+        if module is not None and not callable(fn):
+            why = "%s has no %s()" % (rel, event)
+        if why:
+            out.append((ext_id, "failed closed: %s" % why))
+            continue
+        try:
+            message = fn(*args)
+        except Exception as exc:
+            message = "failed closed (%s)" % exc.__class__.__name__
+        if message:
+            out.append((ext_id, str(message)))
+    return out
+
+
+def template_overlays(reg):
+    """({target: [overlay]}, notes) for every loaded extension's overlays, each overlay a
+    dict of ext, version, mode and content. A non-built-in overlay file applies only
+    while it matches the sha256 pinned at `ext add`."""
+    found, notes = {}, []
+    for ext_id in sorted(reg.extensions):
+        ext = reg.extensions[ext_id]
+        base = os.path.dirname(ext["path"])
+        pinned = (reg.pins.get(ext_id) or {}).get("files") or {}
+        for rec in (ext["manifest"].get("provides") or {}).get("overlays") or []:
+            rel = rec["file"]
+            path = os.path.join(base, rel)
+            if not _inside(path, base) or not os.path.isfile(path):
+                notes.append("extension %s: overlay %s is missing or escapes its directory; "
+                             "skipped" % (ext_id, rel))
+                continue
+            if ext["source"] != BUILTIN and sha256_file(path) != pinned.get(rel):
+                notes.append("extension %s: overlay %s does not match the hash pinned at "
+                             "`ext add`; skipped (run `sdlc.py ext update %s`)"
+                             % (ext_id, rel, ext_id))
+                continue
+            with open(path, encoding="utf-8") as handle:
+                content = handle.read()
+            found.setdefault(rec["target"], []).append({
+                "ext": ext_id, "version": ext["manifest"].get("version"),
+                "mode": rec["mode"], "content": content})
+    return found, notes
+
+
+def apply_overlays(text, overlays):
+    """<text> with <overlays> applied: prepend, then wrap, then append, and by extension
+    id within each mode (ADR 0003 decision 7)."""
+    for ov in sorted(overlays, key=lambda o: (OVERLAY_MODES.index(o["mode"]), o["ext"])):
+        content = ov["content"]
+        if ov["mode"] == "prepend":
+            text = content + ("" if content.endswith("\n") else "\n") + text
+        elif ov["mode"] == "wrap":
+            text = content.replace(WRAP_MARKER, text.rstrip("\n"), 1)
+        else:
+            text = text + ("" if text.endswith("\n") else "\n") + content
+    return text
 
 
 def install_tables(reg):

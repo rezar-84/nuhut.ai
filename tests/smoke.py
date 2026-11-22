@@ -5413,9 +5413,9 @@ def test_extension_registry():
         data.update(extra)
         return data
 
-    def reload():
+    def reload(allowed=()):
         return registry.load(d, kit=None, version=installer.VERSION, warn=False,
-                             use_cache=False)
+                             use_cache=False, allowed=allowed)
 
     codex_local = {"id": "codex", "title": "Codex Local", "pointer": None, "native": True,
                    "markers": [".codex"], "skills_dir": ".agents/skills",
@@ -5424,8 +5424,13 @@ def test_extension_registry():
     put("codex-local", manifest_for("codex-local", overrides="codex",
                                     provides={"harnesses": [codex_local]}))
     r = reload()
+    check("an override that Extensions allowed does not list is ignored, with a note",
+          r.harnesses()["codex"]["source"] == "built-in"
+          and any("Extensions allowed" in n["message"] for n in r.notes),
+          json.dumps(r.notes)[:400])
+    r = reload(allowed={"codex-local"})
     h = r.harnesses()
-    check("an override with \"overrides\" replaces only that harness record",
+    check("an allowed override with \"overrides\" replaces only that harness record",
           h["codex"]["title"] == "Codex Local" and h["codex"]["source"] == "override"
           and h["claude"]["source"] == "built-in" and not r.errors,
           json.dumps([r.errors, r.notes])[:400])
@@ -5437,13 +5442,13 @@ def test_extension_registry():
     put("codex-local", manifest_for("codex-local", overrides="codex", provides={
         "agents": [{"id": "codex", "family": "openai", "review": ["evil", "{prompt}"],
                     "build": ["evil", "{prompt}"], "model_flag": "--model"}]}))
-    r = reload()
-    check("a project agents override is refused in this item",
+    r = reload(allowed={"codex-local"})
+    check("an allowed agents override nobody pinned with `ext add` is refused",
           r.agents()["codex"]["review"][0] == "codex" and r.agents()["codex"]["source"] == "built-in"
-          and any("NUHT-018" in n["message"] for n in r.notes), json.dumps(r.notes)[:400])
+          and any("ext add" in n["message"] for n in r.notes), json.dumps(r.notes)[:400])
     found = ext_findings()
-    check("doctor notes the refused executable contribution",
-          any("NUHT-018" in f["message"] for f in found), json.dumps(found)[:400])
+    check("doctor notes the blocked executable contribution",
+          any("blocked" in f["message"] for f in found), json.dumps(found)[:400])
     shutil.rmtree(local)
 
     put("future", manifest_for("future", nuhut=">=99"))
@@ -5651,6 +5656,246 @@ def test_tool_support_in_extensions():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_extension_cli():
+    print("NUHT-018: ext add | list | update | remove | search | validate, allow list, pins")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    try:
+        import registry
+        import ext as _ext
+        import net as _net
+    except ImportError as exc:
+        check("optional/runtime/ext.py and net.py import", False, str(exc))
+        return
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-extcli-"))
+    src = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-extsrc-"))
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "EXC", "-y", "--hooks"])
+    check("install exits 0", code == 0, out[-300:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=d)
+    env.pop("AI_SDLC_APPROVAL", None)
+    env.pop("NUHUT_CATALOG_URL", None)
+
+    def sdlc(*args, **extra):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d,
+                           env=dict(env, **extra), stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+        return (p.returncode, p.stdout.decode("utf-8", "replace"),
+                p.stderr.decode("utf-8", "replace"))
+
+    def fire(hook, payload):
+        p = subprocess.Popen(["sh", os.path.join(d, ".claude", "hooks", hook)], cwd=d,
+                             env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT)
+        o, _ = p.communicate(json.dumps(payload).encode())
+        return o.decode("utf-8", "replace")
+
+    def bash(cmd):
+        return fire("approval-gate.sh", {"tool_name": "Bash", "tool_input": {"command": cmd}})
+
+    def ext_findings():
+        _, o, _ = sdlc("doctor", "--json")
+        try:
+            return [f for f in json.loads(o) if f.get("check") == "extensions"]
+        except ValueError:
+            return [{"level": "fail", "where": "", "message": "not JSON: " + o[-300:]}]
+
+    rule = ("def evaluate(payload, cwd, root):\n"
+            "    cmd = (payload.get('tool_input') or {}).get('command') or ''\n"
+            "    return 'curl is not allowed here (lint-pack)' if 'curl ' in cmd else None\n")
+    write(src, "rules/no_curl.py", rule)
+    write(src, "overlays/plan.md", "\n## Lint pack checklist\n\n- [ ] lint is clean\n")
+    manifest = {"schema": 1, "id": "lint-pack", "version": "1.0.0", "nuhut": ">=1.0.0",
+                "description": "Lint rules", "overrides": None, "provides": {
+                    "hook_rules": [{"id": "no-curl", "file": "rules/no_curl.py",
+                                    "tools": ["Bash"]}],
+                    "overlays": [{"target": "templates/plan.md", "mode": "append",
+                                  "file": "overlays/plan.md"}]}}
+    write(src, "nuhut-extension.json", json.dumps(manifest, indent=2))
+    subprocess.call(["git", "init", "-q", src])
+    subprocess.call(git + ["add", "-A"], cwd=src)
+    subprocess.call(git + ["commit", "-qm", "v1"], cwd=src)
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=src).decode().strip()
+
+    rc, o, e = sdlc("ext", "validate", src)
+    check("ext validate passes a good extension", rc == 0, o + e)
+    rc, o, e = sdlc("ext", "add", src)
+    check("ext add exits 0", rc == 0, (o + e)[-600:])
+    check("ext add prints the id, version and every executable entry point",
+          "lint-pack" in o and "1.0.0" in o and "rules/no_curl.py" in o, o[-600:])
+    check("ext add says code is disabled until the charter allows it",
+          "code is disabled until the charter row Extensions allowed lists `lint-pack`" in o
+          and "config --allow-extension lint-pack" in o, o[-600:])
+    inst = os.path.join(d, ".ai-sdlc", "local", "extensions", "lint-pack")
+    data = json.loads(read(d, ".ai-sdlc/manifest.json") or "{}")
+    rec = (data.get("extensions") or {}).get("lint-pack") or {}
+    check("the install lands in .ai-sdlc/local/extensions/<id>/",
+          os.path.isfile(os.path.join(inst, "rules", "no_curl.py")))
+    check("manifest.json records source, commit and file hashes under extensions",
+          rec.get("commit") == head and rec.get("source") == src
+          and rec.get("files", {}).get("rules/no_curl.py") == installer.sha256_file(
+              Path(inst) / "rules" / "no_curl.py"), json.dumps(rec)[:400])
+    check("the extension's files are not kit-managed files",
+          not any(k.startswith(".ai-sdlc/local/") for k in data.get("files", {})))
+    rc, o, e = sdlc("ext", "list")
+    row = [ln for ln in o.splitlines() if "lint-pack" in ln]
+    check("ext list shows the extension as code-blocked with its commit",
+          row and "code-blocked" in row[0] and head[:7] in row[0], o[-600:])
+    check("ext list shows built-ins", any("codex" in ln and "built-in" in ln
+                                          for ln in o.splitlines()), o[-600:])
+    out = bash("curl https://example.com")
+    check("a blocked extension's hook rule does not run", "deny" not in out, out)
+    found = ext_findings()
+    check("doctor warns about the blocked extension",
+          any("lint-pack" in f["message"] and "Extensions allowed" in f["message"]
+              for f in found), json.dumps(found)[:600])
+
+    rc, o, e = sdlc("config", "--allow-extension", "lint-pack")
+    check("config --allow-extension writes the charter row",
+          rc == 0 and re.search(r"\*\*Extensions allowed\*\*\s*\|[^\n]*lint-pack",
+                                read(d, "docs/project/charter.md")), o + e)
+    rc, o, e = sdlc("ext", "list")
+    row = [ln for ln in o.splitlines() if "lint-pack" in ln]
+    check("ext list shows code-enabled once allowed", row and "code-enabled" in row[0], o[-600:])
+    out = bash("curl https://example.com")
+    check("an allowed extension's hook rule denies", "deny" in out and "lint-pack" in out, out)
+    out = bash("ls -la")
+    check("an allowed extension's hook rule lets other calls through", "deny" not in out, out)
+
+    before = json.loads(read(d, ".ai-sdlc/manifest.json"))["extensions"]
+    code, out = run([d, "--upgrade"])
+    check("install.py --upgrade exits 0 with an extension installed", code == 0, out[-600:])
+    after = json.loads(read(d, ".ai-sdlc/manifest.json") or "{}")
+    check("--upgrade copies the extensions key through unchanged",
+          after.get("extensions") == before, json.dumps(after.get("extensions"))[:400])
+    check("--upgrade leaves the extension's files on disk",
+          os.path.isfile(os.path.join(inst, "rules", "no_curl.py"))
+          and installer.sha256_file(Path(inst) / "rules" / "no_curl.py")
+          == before["lint-pack"]["files"]["rules/no_curl.py"])
+    check("--upgrade applies the template overlay",
+          "Lint pack checklist" in read(d, "docs/templates/plan.md"))
+    check("the installer manifest records the overlays applied",
+          (after.get("overlays") or {}).get("docs/templates/plan.md") == ["lint-pack@1.0.0"],
+          json.dumps(after.get("overlays")))
+    code, out = run([d, "--upgrade"])
+    check("a second --upgrade does not report the overlaid template as edited",
+          code == 0 and "modified" not in out, out[-600:])
+
+    with open(os.path.join(inst, "rules", "no_curl.py"), "a") as fh:
+        fh.write("# edited\n")
+    out = bash("ls -la")
+    check("an edited hook_rules file is refused and the calls it judges are denied",
+          "deny" in out and "lint-pack" in out and "ext update" in out, out)
+    out = fire("approval-gate.sh", {"tool_name": "Write",
+                                    "tool_input": {"file_path": "notes.txt", "content": "x"}})
+    check("calls the broken rule would not judge still run", "deny" not in out, out)
+    out = fire("protected-paths.sh", {"tool_name": "Write", "tool_input": {
+        "file_path": ".ai-sdlc/local/extensions/lint-pack/rules/no_curl.py"}})
+    check("an agent Write to .ai-sdlc/local/extensions is denied", "deny" in out, out)
+
+    write(src, "rules/no_curl.py", rule + "# v2\n")
+    subprocess.call(git + ["commit", "-qam", "v2"], cwd=src)
+    head2 = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=src).decode().strip()
+    rc, o, e = sdlc("ext", "update", "lint-pack")
+    check("ext update prints the old and new sha and the changed files",
+          rc == 0 and head[:12] in o and head2[:12] in o and "rules/no_curl.py" in o,
+          (o + e)[-600:])
+    check("ext update backs up the locally edited file", "backup" in o.lower(), o[-600:])
+    rec = json.loads(read(d, ".ai-sdlc/manifest.json"))["extensions"]["lint-pack"]
+    check("ext update re-pins the hashes",
+          rec["commit"] == head2 and rec["files"]["rules/no_curl.py"] == installer.sha256_file(
+              Path(inst) / "rules" / "no_curl.py"))
+    out = bash("ls -la")
+    check("after ext update the rule runs again", "deny" not in out, out)
+
+    for bad in ("-x", "ext::sh -c x", "file:///etc", "http://example.com/x.git"):
+        try:
+            _ext.parse_source(bad)
+            refused = False
+        except ValueError:
+            refused = True
+        check("source %r is refused" % bad, refused)
+    rc, o, e = sdlc("ext", "add", "file:///etc")
+    check("ext add file:///etc exits non-zero", rc != 0 and "Traceback" not in e, o + e)
+    check("git@host:path, ssh:// and https URLs are accepted as git sources",
+          _ext.parse_source("git@github.com:o/r.git")[0] == "git"
+          and _ext.parse_source("https://github.com/o/r.git")[0] == "git"
+          and _ext.parse_source("ssh://git@github.com/o/r.git")[0] == "git")
+
+    bad_src = tempfile.mkdtemp(prefix="sdlc-extbad-")
+    write(bad_src, "nuhut-extension.json", json.dumps(dict(manifest, id="bad-path", provides={
+        "overlays": [{"target": "templates/plan.md", "mode": "append", "file": "../x.md"}],
+        "agents": [{"id": "x", "review": "x {prompt}"}]})))
+    rc, o, e = sdlc("ext", "validate", bad_src)
+    check("ext validate exits 1 on a '..' path, naming the field",
+          rc == 1 and "provides.overlays[0].file" in o + e, o + e)
+    check("ext validate gives field-level type messages",
+          "provides.agents[0].review: expected list of strings" in o + e, o + e)
+    sym_src = tempfile.mkdtemp(prefix="sdlc-extsym-")
+    out_dir = tempfile.mkdtemp(prefix="sdlc-extout-")
+    write(out_dir, "evil.py", rule)
+    os.makedirs(os.path.join(sym_src, "rules"))
+    os.symlink(os.path.join(out_dir, "evil.py"), os.path.join(sym_src, "rules", "no_curl.py"))
+    write(sym_src, "nuhut-extension.json", json.dumps(dict(manifest, id="sym-pack")))
+    rc, o, e = sdlc("ext", "add", sym_src)
+    check("a symlink escaping the extension dir is refused",
+          rc != 0 and "escapes" in o + e
+          and not os.path.isdir(os.path.join(d, ".ai-sdlc", "local", "extensions", "sym-pack")),
+          o + e)
+
+    write(d, ".ai-sdlc/local/extensions/codex-local/nuhut-extension.json", json.dumps({
+        "schema": 1, "id": "codex-local", "version": "1.0.0", "nuhut": ">=1.0.0",
+        "overrides": "codex", "provides": {"agents": [{
+            "id": "codex", "family": "openai", "review": ["evil", "{prompt}"],
+            "build": ["evil", "{prompt}"]}]}}))
+    r = registry.load(d, kit=None, version=installer.VERSION, warn=False, use_cache=False)
+    check("an override of codex without an allow-list entry is ignored",
+          r.agents()["codex"]["review"][0] == "codex")
+    found = ext_findings()
+    check("doctor notes the ignored override",
+          any("codex-local" in f["where"] + f["message"] and "Extensions allowed" in f["message"]
+              for f in found), json.dumps(found)[:600])
+    shutil.rmtree(os.path.join(d, ".ai-sdlc", "local", "extensions", "codex-local"))
+
+    cat_dir = tempfile.mkdtemp(prefix="sdlc-catalog-")
+    catalog = os.path.join(cat_dir, "catalog.json")
+    with open(catalog, "w") as fh:
+        json.dump([{"id": "good-pack", "url": "https://example.com/good.git", "ref": "v1",
+                    "description": "Good things"},
+                   {"id": "bad-pack", "url": "file:///etc", "ref": "main",
+                    "description": "Bad things"}], fh)
+    rc, o, e = sdlc("ext", "search", "good", NUHUT_CATALOG_URL=catalog)
+    check("ext search finds a catalog entry by term",
+          rc == 0 and "good-pack" in o and "bad-pack" not in o, o + e)
+    rc, o, e = sdlc("ext", "search", NUHUT_CATALOG_URL=catalog)
+    check("ext search marks a catalog entry that fails the URL rules",
+          "bad-pack" in o and "refused" in o, o + e)
+    for bad in ("http://example.com/c.json", "file:///etc/passwd"):
+        try:
+            _net.fetch(bad)
+            refused = False
+        except ValueError:
+            refused = True
+        check("net.fetch refuses %s" % bad.split(":")[0], refused)
+    handler = _net.SafeRedirect()
+    try:
+        req = _net.urllib_request.Request("https://example.com/c.json")
+        handler.redirect_request(req, None, 302, "Found", {}, "https://evil.example.net/x")
+        refused = False
+    except Exception:
+        refused = True
+    check("net's redirect handler refuses a host change", refused)
+
+    rc, o, e = sdlc("ext", "remove", "lint-pack")
+    data = json.loads(read(d, ".ai-sdlc/manifest.json"))
+    check("ext remove deletes the files and the manifest record",
+          rc == 0 and not os.path.isdir(inst) and "lint-pack" not in data.get("extensions", {}),
+          o + e)
+    for p in (d, src, bad_src, sym_src, out_dir, cat_dir):
+        shutil.rmtree(p, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -5672,7 +5917,7 @@ def main():
                  test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
                  test_installer_python_floor_and_finish_errors,
                  test_extension_registry,
-                 test_tool_support_in_extensions,
+                 test_tool_support_in_extensions, test_extension_cli,
                  test_hotfix_fast_path):
         test()
     print("")

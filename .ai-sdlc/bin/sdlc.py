@@ -1825,6 +1825,25 @@ def evidence_matches(project, item, rows=None, commits=None):
 
 # ---------------------------------------------------------------- extensions
 
+def allowed_extensions(project):
+    """The extension ids the charter's Extensions allowed row names, read from the
+    default branch (a branch that adds an id has no effect until it merges)."""
+    text, _ = trusted_text(project, project.charter_path)
+    try:
+        return runtime_module("registry").parse_allowed(labelled(text or "", "Extensions allowed"))
+    except Exception:  # no registry: nothing is allowed
+        return frozenset()
+
+
+def extension_lifecycle(project, event, *args):
+    """[(extension id, message)] from the built-in and allowed extensions' <event> hooks;
+    [] when the registry is missing."""
+    reg, _ = load_registry(project)
+    if reg is None:
+        return []
+    return runtime_module("registry").run_lifecycle(reg, event, *args)
+
+
 def load_registry(project):
     """(registry, None), or (None, reason) when the v5 tables apply: no built-in
     extension directory exists, or registry.py cannot be imported."""
@@ -1833,7 +1852,8 @@ def load_registry(project):
     except Exception as exc:  # a broken or missing registry.py must not break the CLI
         return None, "registry.py cannot be imported (%s)" % exc.__class__.__name__
     try:
-        reg = reg_mod.load(project.root, version=(project.manifest or {}).get("kit_version"))
+        reg = reg_mod.load(project.root, version=(project.manifest or {}).get("kit_version"),
+                           allowed=allowed_extensions(project))
     except Exception as exc:
         return None, "the registry failed to load (%s)" % exc.__class__.__name__
     if reg.missing:
@@ -1977,7 +1997,20 @@ def check_extensions(project, out):
     for item in reg.warnings:
         out.add("warn", "extensions", item["path"], "%s: %s" % (item["field"], item["message"]))
     for note in reg.notes:
-        out.add("warn", "extensions", note["path"], note["message"])
+        out.add("warn", "extensions", note["path"], note["message"],
+                fix="Allow it with `sdlc.py config --allow-extension %s` (it takes effect once "
+                    "merged to the default branch), or `sdlc.py ext remove %s`"
+                    % (note["id"], note["id"]) if note.get("blocked") else None,
+                who="human" if note.get("blocked") else None)
+    reg_mod = runtime_module("registry")
+    for ext_id in sorted(reg.extensions):
+        ext = reg.extensions[ext_id]
+        if ext["source"] == reg_mod.BUILTIN or reg.status(ext_id) != "code-enabled":
+            continue
+        for field, what in reg_mod.executable_entries(ext["manifest"]):
+            out.add("info", "extensions", ext["rel"], "%s %s %s" % (ext_id, field, what))
+    for item in reg_mod.run_doctor(reg, project.root):
+        out.add(item["level"], "extensions", item["where"], item["message"])
 
 
 # ---------------------------------------------------------------- review
@@ -3692,6 +3725,20 @@ def configure_kit(project, changes):
             text = _set_check_row(text, stage_clean, str(cmd))
             applied.append("checks.%s=%s" % (stage_clean, cmd))
 
+    if changes.get("allow_extension"):
+        reg_mod = runtime_module("registry")
+        cell = labelled(text, "Extensions allowed") or ""
+        have = sorted(reg_mod.parse_allowed(cell))
+        for ext_id in changes["allow_extension"]:
+            if not reg_mod.ID_RE.match(str(ext_id)):
+                return None, "--allow-extension %r is not an extension id" % ext_id
+            if ext_id not in have:
+                have.append(ext_id)
+        text = _set_charter_row(text, "Extensions allowed",
+                                ", ".join("`%s`" % i for i in have))
+        applied.append("Extensions allowed=%s (takes effect once this charter change is on "
+                       "the default branch)" % ", ".join(have))
+
     charter_full = project.path(project.charter_path)
     charter_dir = os.path.dirname(charter_full)
     if charter_dir:
@@ -4152,7 +4199,11 @@ EXAMPLES = {
                "review ACME-12 --role architect --by gemini --stage design"],
     "bite": ["bite npm test", "bite --restore"],
     "config": ["config                   # show the constraints", "config --effort Lean --independent-review tier1",
-               "config --specs on", "config --slop-filter strict", "config --set-check unit='npm test'"],
+               "config --specs on", "config --slop-filter strict", "config --set-check unit='npm test'",
+               "config --allow-extension lint-pack   # let an extension's code run once merged"],
+    "ext": ["ext list", "ext add https://github.com/<owner>/<repo>.git --ref v1.0.0",
+            "ext add ../my-extension      # a local directory", "ext update lint-pack --dry-run",
+            "ext remove lint-pack", "ext search lint", "ext validate ../my-extension"],
     "fix": ["fix all", "fix shared-skills", "fix wire-pointer", "fix migrate-shards --apply",
             "fix rotate-worklog          # preview", "fix normalise-status --apply",
             "fix link-evidence --apply"],
@@ -4337,7 +4388,18 @@ def main(argv):
     cfg.add_argument("--discovered-defects", dest="discovered_defects",
                      choices=("Parked", "Auto-Ready (bite)", "parked", "auto-ready-bite", "auto"),
                      help="set Discovered defects triage policy: Parked or Auto-Ready (bite)")
+    cfg.add_argument("--allow-extension", dest="allow_extension", action="append", default=[],
+                     metavar="ID", help="add an extension id to the charter's Extensions allowed "
+                     "row, so its code runs once the change is on the default branch")
     cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
+    ex = sub.add_parser("ext", help="project extensions: list, add, update, remove, search the "
+                                    "catalog, validate a manifest")
+    ex.add_argument("action", choices=("list", "add", "update", "remove", "search", "validate"))
+    ex.add_argument("target", nargs="?", help="add: a git URL or local directory; update and "
+                    "remove: an extension id; search: a term; validate: a directory")
+    ex.add_argument("--ref", help="add or update: the branch, tag or commit to install")
+    ex.add_argument("--dry-run", action="store_true", help="update: print what would change")
+    ex.add_argument("--json", action="store_true", help="list: print JSON")
     fx = sub.add_parser("fix", help="run safe mechanical repairs on kit setup")
     fx.add_argument("action", nargs="?", default="all",
                     choices=("all", "sync-profile", "wire-pointer", "shared-skills", "restore-bite",
@@ -5085,6 +5147,8 @@ def main(argv):
             return 1 if result["missing"] or result["broad"] else 0
         gaps = result["unplanned"] or result["untouched"] or result["broad"]
         return 1 if opts.strict and gaps else 0
+    if opts.command == "ext":
+        return runtime_module("ext").main(sys.modules[__name__], project, opts)
     if opts.command == "config":
         changes = {}
         if opts.effort:
@@ -5115,6 +5179,8 @@ def main(argv):
                 k, v = item_kv.split("=", 1)
                 chk_map[k.strip()] = v.strip()
             changes["checks"] = chk_map
+        if opts.allow_extension:
+            changes["allow_extension"] = opts.allow_extension
         if changes:
             res, err = configure_kit(project, changes)
             if err:
