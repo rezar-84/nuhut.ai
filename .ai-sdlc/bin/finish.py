@@ -7,6 +7,7 @@ import fnmatch
 import json
 import os
 import re
+import sys
 
 import shards
 
@@ -103,16 +104,66 @@ def move_row(project, item, status, extra):
 
 # ---------------------------------------------------------------- finish
 
+def _runs(rows):
+    """[(run name, its rows)] in ledger order; a row with no run name is a run alone."""
+    runs, index = [], {}
+    for n, row in enumerate(rows):
+        key = row.get("run") or ("#%d" % n)
+        if key not in index:
+            index[key] = len(runs)
+            runs.append((row.get("run") or "", []))
+        runs[index[key]][1].append(row)
+    return runs
+
+
+def required_stages(rt, project):
+    """Charter stages that have a command: a full verify run covers every one."""
+    return [stage for stage in rt.STAGES
+            if rt.charter_commands(project.charter).get(stage, "") not in ("", "absent")]
+
+
 def verify_state(rt, project, item, commits):
-    """('pass' | 'fail' | 'none', run name, its rows): the latest verify run behind the item."""
+    """(state, run name, its rows, detail) for the latest verify run behind the item.
+    state is 'pass', 'fail', 'none', 'partial' (the latest run left charter stages out)
+    or 'stale' (the latest run predates the item's newest code commit). Only a full run,
+    clean on the newest code commit or a descendant of it, or dirty on its parent,
+    passes; detail says what a partial or stale run lacks."""
     all_rows = rt.evidence_matches(project, item, None, commits)
     rows = [r for r in all_rows if r.get("stage") != "bite"]
     if not rows:
-        return "none", "", []
-    last = rows[-1].get("run") or ""
-    run = [r for r in rows if (r.get("run") or "") == last] if last else rows[-1:]
-    failed = [r for r in run if "fail" in str(r.get("result", ""))]
-    return ("fail" if failed else "pass"), last, run
+        return "none", "", [], ""
+    need = required_stages(rt, project)
+    newest, parent = rt.newest_code_commit(project, item, commits)
+    latest = None
+    for name, run in reversed(_runs(rows)):
+        covered = set(r.get("stage") for r in run)
+        missing = [s for s in need if s not in covered]
+        selected = next((r.get("selected") for r in run if r.get("selected")), None)
+        commit = run[-1].get("commit") or ""
+        dirty = any(r.get("dirty") for r in run)
+        fresh = (dirty and commit == parent and bool(parent)) or \
+            (not dirty and rt.is_ancestor(project, newest, commit))
+        # The newest run that is neither partial nor stale decides; the newest run of all
+        # names what is wrong when none qualifies.
+        if latest is None and missing:
+            ran = sorted(covered, key=lambda s: rt.STAGES.index(s) if s in rt.STAGES else 99)
+            latest = ("partial", name, run, "latest run %s covered %s only; missing: %s. Run "
+                      "`sdlc.py verify --item %s` with no --stage"
+                      % (name or "?", ", ".join(ran) or "nothing", ", ".join(missing), item))
+        elif latest is None and selected:
+            latest = ("partial", name, run, "latest run %s ran with --stage %s. Run "
+                      "`sdlc.py verify --item %s` with no --stage"
+                      % (name or "?", ",".join(selected), item))
+        elif latest is None and not fresh:
+            latest = ("stale", name, run, "latest run %s is on %s%s; the item's newest commit "
+                      "is %s. Run `sdlc.py verify --item %s`"
+                      % (name or "?", commit[:7], " (dirty)" if dirty else "",
+                         (newest or "")[:7], item))
+        if selected or missing or not fresh:
+            continue
+        failed = [r for r in run if "fail" in str(r.get("result", ""))]
+        return ("fail" if failed else "pass"), name, run, ""
+    return latest
 
 
 def bite_state(rt, project, item, commits):
@@ -185,8 +236,68 @@ def resolve_effort(rt, project, item, cells):
     return effort if state == "decided" else "Normal"
 
 
-def waivers(rt, project, item):
-    return [r for r in rt.ledger(project) if r.get("waived_by") and r.get("item") == item]
+def waiver_approvers(rt, project):
+    """([(name as written, handle)], source, people registry): who may waive verify. The
+    names come from the charter's Approvers row as it stands on the default branch
+    (`rt.trusted_text`), so a branch that adds a name gains nothing until it merges.
+    With a people.json registry each name resolves to its handle (None when unknown).
+    A placeholder row gives an empty list, which refuses every waiver."""
+    names, source = rt.approver_names(project)
+    registry = rt.people(project)
+    return [(n, rt.resolve_person(registry, n)) for n in names], source, registry
+
+
+def runner_identity(project, registry, rt):
+    """(raw, handle) for the person running this command: NUHUT_USER, else git's
+    user.name, resolved through people.json when there is one. NUHUT_USER is an honour
+    system value: any process, an agent's included, can set it."""
+    raw = (os.environ.get("NUHUT_USER") or "").strip() or \
+        project.git("config", "user.name").strip()
+    return raw, rt.resolve_person(registry, raw)
+
+
+def waivers(rt, project, item, handles=None, registry=None):
+    """(waivers that count, a line for each that no longer does). A recorded waiver
+    counts only while the person who gave it is still in Approvers."""
+    if handles is None:
+        approvers, _, registry = waiver_approvers(rt, project)
+        handles = set(h for _, h in approvers if h)
+    kept, dropped = [], []
+    for row in rt.ledger(project):
+        if not row.get("waived_by") or row.get("item") != item:
+            continue
+        if rt.resolve_person(registry or {}, row["waived_by"]) in handles:
+            kept.append(row)
+        else:
+            dropped.append("waiver by %s on %s no longer counts: %s is not in Approvers"
+                           % (row["waived_by"], (row.get("time") or "?")[:10], row["waived_by"]))
+    return kept, dropped
+
+
+def _interactive():
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def check_waiver(rt, project, by, approvers, source, registry, interactive):
+    """None when <by> may waive verify here, else the reason it may not."""
+    charter = project.charter_path
+    if not approvers:
+        return ("the charter's Approvers row is blank, so every waiver is refused: fill "
+                "**Approvers** in %s on the default branch with the people who may waive"
+                % charter)
+    handle = rt.resolve_person(registry, by)
+    if handle is None or handle not in set(h for _, h in approvers if h):
+        return ("%s is not in the charter's Approvers row (%s, read from %s): a waiver must "
+                "name an approver. Add them to **Approvers** in %s on the default branch"
+                % (by, ", ".join(n for n, _ in approvers), source, charter))
+    raw, runner = runner_identity(project, registry, rt)
+    if not interactive and runner != handle:
+        return ("an agent cannot waive for %s; ask %s to run it (this process runs as %r, "
+                "from NUHUT_USER or git user.name)" % (by, by, raw or "nobody"))
+    return None
 
 
 def worklog_entry(project, item):
@@ -398,8 +509,9 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
         owing.append(line)
         out.append("OWED " + line)
     if not commits:
-        return out + ["build    no commit names %s yet: commit the work with the ID in the "
-                      "message, then run finish again" % item], 1
+        return out + ["build    no commit carries a `Work-Item: %s` trailer yet: commit the "
+                      "work with one (`%s trailers %s` prints it), then run finish again"
+                      % (item, SDLC, item)], 1
     out.append("build    %d commit(s)" % len(commits))
     if project.git("status", "--porcelain", "--untracked-files=no").strip():
         out.append("note     uncommitted changes are not part of what finish records")
@@ -419,7 +531,11 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
                    % (sync["behind_default"], sync["default_ref"], SDLC))
 
     run = verify_state(rt, project, item, commits)
-    waived = waivers(rt, project, item)
+    approvers, source, registry = waiver_approvers(rt, project)
+    waived, dropped = waivers(rt, project, item, set(h for _, h in approvers if h), registry)
+    if owed["Verify"] and run[0] != "pass":
+        for line in dropped:
+            out.append("verify   note: " + line)
     if not owed["Verify"]:
         out.append("verify   not owed at Tier 3")
     elif run[0] == "pass":
@@ -431,27 +547,38 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
         out.append("verify   Not run, waived by %s: %s" % (waived[-1]["waived_by"],
                                                          waived[-1].get("reason", "")))
     elif waive_by:
+        refused = None if tier == "1" or not (reason or "").strip() else check_waiver(
+            rt, project, waive_by, approvers, source, registry, _interactive())
         if tier == "1":
             owe("verify   a Tier 1 item cannot be waived: run `%s verify --item %s`"
                          % (SDLC, item))
         elif not (reason or "").strip():
             owe("verify   a waiver needs --reason saying why the checks cannot run")
+        elif refused:
+            owe("verify   " + refused)
         else:
+            raw, runner = runner_identity(project, registry, rt)
             row = {"time": datetime.datetime.now(datetime.timezone.utc).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"), "item": item, "stage": "all",
                 "commit": commits[0][0], "result": "Not run (waived)",
-                "waived_by": waive_by, "reason": reason.strip()}
+                "waived_by": waive_by, "waived_as": runner or raw or "unknown",
+                "reason": reason.strip()}
             if not dry_run:
                 rt.ledger_append(project, [row])
             waived = [row]
             out.append("verify   Not run, waived by %s: %s (recorded in the ledger; never "
                        "counts as Verified)" % (waive_by, reason.strip()))
+    elif run[0] in ("partial", "stale") and already:
+        out.append("verify   %s (already %s, so not blocking)" % (run[3], column))
+    elif run[0] in ("partial", "stale"):
+        owe("verify   " + run[3])
     elif already:
         out.append("verify   no verify run on record (already %s, so not blocking)" % column)
     else:
         owe("verify   no verify run covers %s: run `%s verify --item %s`. When the "
-                     "checks cannot run here: `%s finish %s --waive verify --by <name> "
-                     "--reason \"...\"` (not at Tier 1)" % (item, SDLC, item, SDLC, item))
+                     "checks cannot run here, an approver from the charter's Approvers row "
+                     "runs `%s finish %s --waive verify --by <their name> --reason \"...\"` "
+                     "(not at Tier 1)" % (item, SDLC, item, SDLC, item))
 
     result, error = rt.plan_check(project, item)
     if result:

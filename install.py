@@ -4691,7 +4691,17 @@ def upgrade(target, o):
             notes.append("The kit's charter has rows this one lacks and no neighbour to "
                          "place them by: %s. Copy them from %s." % (", ".join(unplaced),
                          SRC / "template" / "docs" / "project" / "charter.md"))
-    stale_commands = [r for r in unadopted if r.startswith(".claude/commands/")]
+        approvers = re.search(r"^\|\s*\*\*Approvers\*\*\s*\|([^|\n]*)\|",
+                              extra.get(charter_rel) or (target / charter_rel).read_text(
+                                  encoding="utf-8", errors="replace"), re.M)
+        if not approvers or not re.sub(r"_\([^)]*\)_", "", approvers.group(1)).strip():
+            notes.append("The charter's Approvers row is blank. Since 6.0 `sdlc.py finish "
+                         "--waive verify --by <name>` accepts only a name from that row as it "
+                         "stands on the default branch, so every waiver is refused until it "
+                         "is filled: edit **Approvers** in %s (`sdlc.py config` shows the "
+                         "charter's constraints). See docs/install.md, \"Upgrading to 6.0\"."
+                         % charter_rel)
+    stale_commands =[r for r in unadopted if r.startswith(".claude/commands/")]
     stale_hooks = [r for r in unadopted if r.startswith(".claude/hooks/")]
     stale_shared = [r for r in unadopted if r.startswith(".agents/skills/")]
     if stale_shared:

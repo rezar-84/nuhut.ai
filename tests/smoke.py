@@ -3876,7 +3876,7 @@ def test_lifecycle_gaps():
     commit("chore: records")
     for message in ("fix(LCX-1): typo", "feat(LCX-2): fast path", "feat(LCX-3): hand tested",
                     "feat(LCX-11): invoices", "feat(LCX-12): capture", "feat(LCX-20): one",
-                    "feat(LCX-21): two", "feat: batch (LCX-30..32)"):
+                    "feat(LCX-21): two\n\nWork-Item: LCX-21", "feat: batch (LCX-30..32)"):
         write(d, "src/%s.txt" % message.split(":")[0].replace("(", "-").rstrip(")"), message)
         commit(message)
 
@@ -3940,14 +3940,21 @@ def test_finish():
 
     def sdlc(*args, **kw):
         p = subprocess.Popen([sys.executable, script] + list(args), cwd=d, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             env=dict(os.environ, **(kw.get("env") or {})))
         o, e = p.communicate((kw.get("stdin") or "").encode("utf-8"))
         return p.returncode, o.decode("utf-8", "replace"), e.decode("utf-8", "replace")
 
     def commit(message):
+        # Only a Work-Item trailer attributes a commit to an item (6.0).
+        scoped = re.match(r"^[a-z]+\((FIN-[0-9]+)\):", message)
+        if scoped:
+            message += "\n\nWork-Item: %s" % scoped.group(1)
         subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
         subprocess.call(git + ["commit", "-qm", message], cwd=d, stdout=subprocess.DEVNULL)
 
+    write(d, "docs/project/charter.md", re.sub(r"(?m)^\| \*\*Approvers\*\* \|[^\n]*$",
+                                               "| **Approvers** | Sam |", read(d, "docs/project/charter.md")))
     settings = json.loads(read(d, ".claude/settings.json") or "{}")
     check("a Claude Code install registers the finish guard on SessionStart and Stop",
           all(any("guard " in h.get("command", "") for e in settings.get("hooks", {}).get(ev, [])
@@ -3971,6 +3978,10 @@ def test_finish():
           code == 2 and "FIN-1" in err and "FIN-3" in err and "FIN-2" not in err, err)
     code, out, err = sdlc("guard", "stop", stdin='{"session_id": "t1"}')
     check("the guard reminds once per item", code == 0, err)
+    # A later commit, so the verify runs below are not clean runs on FIN-4's own commit
+    # (which would verify FIN-4 and leave nothing to waive).
+    write(d, "src/later.txt", "later")
+    commit("chore: later work")
 
     code, out, err = sdlc("finish", "FIN-1")
     check("finish refuses without a verify run and names the command",
@@ -4048,7 +4059,8 @@ def test_finish():
     check("a finished Tier 1 item is Parked for the human approval, not Done",
           code == 0 and re.search(r"\| FIN-3 \|[^\n]*\| Parked \|", backlog[backlog.index("## Parked"):]), out)
 
-    code, out, err = sdlc("finish", "FIN-4", "--waive", "verify", "--by", "Sam", "--reason", "no runner here")
+    code, out, err = sdlc("finish", "FIN-4", "--waive", "verify", "--by", "Sam", "--reason", "no runner here",
+                          env={"NUHUT_USER": "Sam"})
     ledger = read(d, "docs/project/evidence-ledger.jsonl")
     sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
     import sdlc as rt
@@ -4156,6 +4168,178 @@ def test_finish():
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
     check("fix unlock-tests succeeds for a direct human CLI run",
           p_ok.returncode == 0 and "locked_again.py" not in read(d, ".ai-sdlc/test-lock.txt"), p_ok.stdout)
+
+
+def test_finish_evidence_binding():
+    print("finish: verify evidence binds to the item's newest code commit; waivers need an approver")
+    d = tempfile.mkdtemp(prefix="sdlc-evb-")
+    subprocess.call(["git", "init", "-q", "-b", "main", d])
+    run([d, "EVB", "-y"])
+    for key, value in (("user.name", "tester"), ("user.email", "t@t"), ("commit.gpgsign", "false")):
+        subprocess.call(["git", "config", key, value], cwd=d)
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import sdlc as rt
+
+    def sdlc(*args, **kw):
+        env = dict(os.environ)
+        env.pop("NUHUT_USER", None)
+        env.update(kw.get("env") or {})
+        p = subprocess.Popen([sys.executable, script] + list(args), cwd=d, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+        o, _ = p.communicate()
+        return p.returncode, o.decode("utf-8", "replace")
+
+    def commit(message, item=None):
+        subprocess.call(["git", "add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+        if item:
+            message += "\n\nWork-Item: %s\nAgent: tester" % item
+        subprocess.call(["git", "commit", "-qm", message], cwd=d, stdout=subprocess.DEVNULL)
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=d).decode().strip()
+
+    def shas(item):
+        return [sha for sha, _, _ in rt.item_commits(rt.Project(d), item)]
+
+    def ledger_rows():
+        rows = []
+        for line in (read(d, "docs/project/evidence-ledger.jsonl") or "").splitlines():
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                pass
+        return rows
+
+    sdlc("config", "--set-check", "unit=true")
+    sdlc("config", "--set-check", "build=true")
+    charter = read(d, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| \*\*Default branch\*\* \|[^\n]*$", "| **Default branch** | `main` |", charter)
+    charter = re.sub(r"(?m)^\| \*\*Approvers\*\* \|[^\n]*$", "| **Approvers** | Sam |", charter)
+    write(d, "docs/project/charter.md", charter)
+    backlog = read(d, "docs/project/backlog.md")
+    i = backlog.index("## Now")
+    j = backlog.index("\n", backlog.index("| --- ", i)) + 1
+    rows = ["| EVB-%d | %s | 2 | qa | | In progress |" % (n, t) for n, t in (
+        (1, "Bound change"), (2, "Other change"), (3, "Waived change"), (5, "Legacy change"))]
+    write(d, "docs/project/backlog.md", backlog[:j] + "\n".join(rows) + "\n" + backlog[j:])
+    commit("chore: records")
+    subprocess.call(["git", "switch", "-q", "-c", "work"], cwd=d)
+
+    # A tagged run made on unrelated work, before the item's commits, does not float onto it.
+    write(d, "src/other.txt", "other\n")
+    sdlc("verify", "--item", "EVB-1")
+    other = commit("feat(EVB-2): other change\n\nfollows up EVB-1 and fixes EVB-1's typo", "EVB-2")
+    write(d, "src/a.txt", "1\n")
+    first = commit("feat(EVB-1): bound change", "EVB-1")
+    check("a commit whose body mentions an item but whose trailer names another is not the item's",
+          other not in shas("EVB-1") and first in shas("EVB-1"), str(shas("EVB-1")))
+    check("a Work-Item trailer followed by a Co-Authored-By paragraph still attributes the commit",
+          rt.trailers("feat: x\n\nbody\n\nWork-Item: EVB-1\nAgent: a\n\nCo-Authored-By: b <b@b>")
+          .get("Work-Item") == "EVB-1"
+          and not rt.trailers("feat: x\n\nWork-Item: EVB-1 is next\nand more prose\n\nCo-Authored-By: b")
+          .get("Work-Item"), "")
+    code, out = sdlc("finish", "EVB-1", "--dry-run")
+    check("a tagged run on unrelated, earlier work does not verify the item",
+          code == 1 and "OWED verify" in out and "verify   pass" not in out, out)
+
+    # A --stage run never satisfies finish, and the ledger says which stages ran.
+    sdlc("verify", "--stage", "unit", "--item", "EVB-1")
+    staged = [r for r in ledger_rows() if r.get("selected")]
+    check("a --stage run records the selected stages in the ledger",
+          staged and staged[-1].get("selected") == ["unit"], str(ledger_rows()[-2:]))
+    code, out = sdlc("finish", "EVB-1", "--dry-run")
+    check("finish names a partial run and the missing stages",
+          code == 1 and "covered unit only; missing: build" in out and "with no --stage" in out, out)
+
+    # A full run on the item's first commit is stale once a later commit changes code.
+    sdlc("verify", "--item", "EVB-1")
+    write(d, "src/a.txt", "2\n")
+    second = commit("feat(EVB-1): second step", "EVB-1")
+    code, out = sdlc("finish", "EVB-1", "--dry-run")
+    check("finish names a stale run, its commit and the item's newest commit",
+          code == 1 and ("is on %s; the item's newest commit is %s" % (first[:7], second[:7])) in out, out)
+
+    # Verify, commit the code, then commit the ledger and the worklog separately: still fresh.
+    write(d, "src/a.txt", "3\n")
+    sdlc("verify", "--item", "EVB-1")
+    commit("feat(EVB-1): third step", "EVB-1")
+    commit("chore(EVB-1): verify ledger", "EVB-1")
+    code, out = sdlc("finish", "EVB-1", "--dry-run")
+    check("a dirty run on the parent of the newest code commit, then a records-only commit, passes",
+          "verify   pass" in out, out)
+    worklog = read(d, "docs/project/worklog.md")
+    entry = ("## EVB-1 — Bound change\n\n**Status:** Done\n\n### Verified\n\n- `checks.unit` — "
+             "Verified: pass\n\n### Why\n\nnone.\n")
+    marker = worklog.index("\n", worklog.index("New entries go here")) + 1 \
+        if "New entries go here" in worklog else len(worklog)
+    write(d, "docs/project/worklog.md", worklog[:marker] + "\n" + entry + worklog[marker:])
+    commit("chore(EVB-1): worklog", "EVB-1")
+    code, out = sdlc("finish", "EVB-1")
+    check("finish passes after the ledger and worklog are committed on their own",
+          code == 0 and "verify   pass" in out, out)
+    commit("chore(EVB-1): close", "EVB-1")
+
+    code, out = sdlc("doctor", "--json")
+    before = set((f["check"], f["where"], f["message"]) for f in json.loads(out)) if out.strip().startswith("[") else None
+    write(d, "src/b.txt", "unrelated\n")
+    commit("feat(EVB-2): unrelated later change", "EVB-2")
+    code, out = sdlc("doctor", "--json")
+    after = set((f["check"], f["where"], f["message"]) for f in json.loads(out)) if out.strip().startswith("[") else None
+    check("doctor after finish and an unrelated commit reports no new finding",
+          before is not None and after is not None and not (after - before), str(after - (before or set()))[:600])
+
+    # Waivers: only a charter approver, read from the default branch, run by that approver.
+    write(d, "src/c.txt", "3\n")
+    commit("feat(EVB-3): waived change", "EVB-3")
+    code, out = sdlc("finish", "EVB-3", "--waive", "verify", "--by", "claude-code", "--reason", "x",
+                     env={"NUHUT_USER": "claude-code"})
+    check("a waiver by someone not in Approvers is refused and writes nothing",
+          code == 1 and "Approvers" in out and not [r for r in ledger_rows() if r.get("waived_by")], out)
+    code, out = sdlc("finish", "EVB-3", "--waive", "verify", "--by", "Sam", "--reason", "x",
+                     env={"NUHUT_USER": "claude-code"})
+    check("with no TTY, a waiver for Sam run as claude-code is refused",
+          code == 1 and "cannot waive for Sam" in out and not [r for r in ledger_rows() if r.get("waived_by")], out)
+    write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
+        "| **Approvers** | Sam |", "| **Approvers** | Sam, claude-code |"))
+    commit("chore(EVB-3): add an approver on the branch", "EVB-3")
+    code, out = sdlc("finish", "EVB-3", "--waive", "verify", "--by", "claude-code", "--reason", "x",
+                     env={"NUHUT_USER": "claude-code"})
+    check("an Approvers row edited only on the branch does not authorise a waiver",
+          code == 1 and not [r for r in ledger_rows() if r.get("waived_by")], out)
+    code, out = sdlc("finish", "EVB-3", "--waive", "verify", "--by", "Sam", "--reason", "no runner",
+                     env={"NUHUT_USER": "Sam"})
+    waived = [r for r in ledger_rows() if r.get("waived_by")]
+    check("a waiver by an approver, run as that approver, is recorded with who ran it",
+          "waived by Sam" in out and waived and waived[-1].get("waived_by") == "Sam"
+          and waived[-1].get("waived_as"), out + str(waived))
+    commit("chore(EVB-3): waiver records", "EVB-3")
+    subprocess.call(["git", "switch", "-q", "main"], cwd=d)
+    write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
+        "| **Approvers** | Sam |", "| **Approvers** | Pat |"))
+    commit("chore: Pat approves now")
+    subprocess.call(["git", "switch", "-q", "work"], cwd=d)
+    code, out = sdlc("finish", "EVB-3", "--dry-run")
+    when = (waived[-1].get("time") or "")[:10] if waived else "?"
+    check("finish names a waiver that no longer counts",
+          code == 1 and ("waiver by Sam on %s no longer counts: Sam is not in Approvers" % when) in out, out)
+
+    # Items whose commits carry no Work-Item trailer lost attribution: doctor says so.
+    write(d, "src/e.txt", "5\n")
+    commit("feat(EVB-5): legacy change without a trailer")
+    code, out = sdlc("doctor", "--json")
+    lost = [f for f in json.loads(out) if "lost commit attribution" in f.get("message", "")] \
+        if out.strip().startswith("[") else []
+    check("doctor reports items that lost commit attribution",
+          lost and lost[0].get("level") == "info" and "sdlc.py trailers" in lost[0]["message"], out[-600:])
+
+    fresh = tempfile.mkdtemp(prefix="sdlc-evb-upgrade-")
+    subprocess.call(["git", "init", "-q", fresh])
+    run([fresh, "UPG", "-y"])
+    code, out = run([fresh, "--upgrade"])
+    check("an upgrade says a blank Approvers row now refuses every waiver",
+          code == 0 and "Approvers row is blank" in out, out[-800:])
+    code, out = run([d, "--upgrade"])
+    check("an upgrade with Approvers filled says nothing about it",
+          "Approvers row is blank" not in out, out[-800:])
 
 
 def test_shards_and_parallel_worktrees():
@@ -4607,7 +4791,7 @@ def main():
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
                  test_git_hooks,
-                 test_runtime, test_view, test_lifecycle_gaps, test_finish, test_kit_value_benchmark, test_kit_value_checks,
+                 test_runtime, test_view, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_kit_value_benchmark, test_kit_value_checks,
                  test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
                  test_domain_detection,

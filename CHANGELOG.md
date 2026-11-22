@@ -4,6 +4,13 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+### Upgrading to 6.0
+
+- **Commits are attributed by trailer only.** Items committed without a `Work-Item:` trailer lose their commits; `doctor` reports how many. Fix: commit further work with the trailer (`sdlc.py trailers <ID>`).
+- **Only an approver can waive verify.** `finish --waive verify --by <name>` must name someone in the charter's **Approvers** row on the default branch. Fix: list the people who may waive there and merge it.
+- **A placeholder Approvers row refuses every waiver.** Fix: fill the row; `--upgrade` prints a notice while it is blank.
+
+- **`finish` binds verify evidence to the item (NUHT-012).** It passes Verify only on a full run (every charter stage with a command, no `--stage`) made clean on the item's newest code commit or a descendant of it, or dirty on that commit's parent. Records-only commits do not make a run stale, and uncommitted records or `.ai-sdlc/` state do not make a run dirty. A partial run and a stale run each get their own message. `verify --stage` rows record `selected`. `evidence_matches` no longer counts a tagged run on the tag alone: the run must be clean with one of the item's commits in its history, and the answer does not depend on HEAD. Commits are attributed only by the `Work-Item` trailer, which is now also read from a trailer paragraph followed by a separate `Co-Authored-By:` paragraph. A waiver must name an approver from the charter's Approvers row read from the default branch (new `trusted_text` helper), records `waived_as` (`NUHUT_USER`, else `git config user.name`), is refused with no terminal when that identity is not the approver, and stops counting when the approver leaves the row. `doctor` gains an info finding for items that lost commit attribution and warns on an approver that `people.json` does not know; its cache version is bumped.
 - **The kit installed in this repository now carries the released version.** The 5.0.0 release left `.ai-sdlc/manifest.json`, `profile.json` and the `AGENTS.md` version line at 4.0.0. `tools/semver.py bump` now restamps them and re-hashes the managed `AGENTS.md` region; `semver.py restamp` repairs them by hand; `validate.py` fails when they disagree with `VERSION` (NUHT-011).
 
 ## 5.0.0 — 2026-11-21
