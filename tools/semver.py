@@ -4,7 +4,7 @@
 Commit subjects follow Conventional Commits, as the kit's history already does. Only the
 types in RELEASE_TYPES release: `feat` is a minor bump; `fix`, `perf`, `refactor` and
 `revert` are a patch. A `!` after any type, or a `BREAKING CHANGE:` line in the footer
-(the body's last paragraph), is a major one. Every other type (docs, chore, test, ci,
+(the body's trailing footer block), is a major one. Every other type (docs, chore, test, ci,
 style, build, ...) and any subject that is not a Conventional Commit releases nothing. A
 subject may carry several types (`docs,feat(kit): ...`); the largest wins. The release
 commit this script writes (`chore(release): vX.Y.Z`) is never counted.
@@ -71,10 +71,33 @@ def commits_since(root, base):
     return out
 
 
+FOOTER_LINE = re.compile(r"^(BREAKING[ -]CHANGE|[A-Za-z][A-Za-z0-9-]*)(: | #)")
+
+
+def _footer_only(paragraph):
+    """True when every line of <paragraph> is a footer line (`Token: value`, `Token #value`)
+    or an indented continuation of one, as git trailers are. A paragraph that starts with
+    a token and goes on in prose is body text."""
+    lines = [line for line in paragraph.splitlines() if line.strip()]
+    return bool(lines) and FOOTER_LINE.match(lines[0]) is not None and all(
+        FOOTER_LINE.match(line) or line[:1] in (" ", "\t") for line in lines)
+
+
 def footer(body):
-    """The body's last paragraph, where Conventional Commit footers and git trailers live."""
+    """The footer block, where Conventional Commit footers and git trailers live: the
+    body's last paragraph, plus, when that paragraph is all footer lines, the paragraphs
+    just before it that are too. A harness often appends `Co-Authored-By:` as a paragraph
+    of its own after the other footers, and that must not hide `BREAKING CHANGE:`."""
     paragraphs = [p for p in re.split(r"\n[ \t]*\n", (body or "").strip()) if p.strip()]
-    return paragraphs[-1] if paragraphs else ""
+    if not paragraphs:
+        return ""
+    block = [paragraphs[-1]]
+    if _footer_only(paragraphs[-1]):
+        for para in reversed(paragraphs[:-1]):
+            if not _footer_only(para):
+                break
+            block.insert(0, para)
+    return "\n".join(block)
 
 
 def level_of(subject, body):

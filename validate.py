@@ -474,6 +474,44 @@ def self_install_version(errors, version):
                           "restamp" % (rel, stamp, version))
 
 
+def release_matches_changelog(errors, version):
+    """CHANGELOG's Unreleased section and the docs' example extension ranges must agree
+    with the version the release job would compute (tools/semver.py next). An
+    "Upgrading to N.0" heading with no commit that makes a major would ship as a minor.
+    Skipped without full git history (an archive, a shallow CI checkout)."""
+    import subprocess
+    try:
+        shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=str(ROOT),
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 universal_newlines=True)
+        if shallow.returncode != 0 or shallow.stdout.strip() != "false":
+            return
+        sys.path.insert(0, str(ROOT / "tools"))
+        import semver as _semver                       # noqa: E402
+        nxt = _semver.plan(str(ROOT))["next"]
+    except (OSError, SystemExit, subprocess.SubprocessError, ValueError):
+        return
+    finally:
+        if sys.path and sys.path[0] == str(ROOT / "tools"):
+            sys.path.pop(0)
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    unreleased = text.split("## Unreleased", 1)[-1].split("\n## ", 1)[0]
+    for major in re.findall(r"(?m)^### Upgrading to ([0-9]+)\.0\b", unreleased):
+        if nxt.split(".")[0] != major:
+            errors.append("CHANGELOG.md Unreleased says \"Upgrading to %s.0\" but the next "
+                          "release computes to %s: land a commit with a `BREAKING CHANGE:` "
+                          "footer (or `type!:`), or retitle the section" % (major, nxt))
+    import registry as _registry                       # noqa: E402  (optional/runtime)
+    for rel in ("docs/extensions.md", "handbook/project/adr/0003-extension-system.md"):
+        path = ROOT / rel
+        if not path.is_file():
+            continue
+        for spec in re.findall(r'"nuhut":\s*"(>=[^"]+)"', path.read_text(encoding="utf-8")):
+            if not _registry.version_ok(spec, nxt):
+                errors.append("%s: the example range %r refuses the next release %s, so the "
+                              "example does not install" % (rel, spec, nxt))
+
+
 def main():
     if sys.argv[1:] == ["--reading-lists"]:
         print_reading_lists()
@@ -546,6 +584,7 @@ def main():
             errors.append("%s: id: %r does not match its directory" % (rel, data.get("id")))
         if isinstance(data, dict) and data.get("nuhut") != "builtin":
             errors.append("%s: nuhut: a built-in extension says \"builtin\"" % rel)
+    release_matches_changelog(errors, version)
     # The kit's own Claude Code plugin is generated from core's `package` block (NUHT-019).
     core_path = ROOT / "optional" / "extensions" / "core" / _registry.MANIFEST
     plugin_path = ROOT / ".claude-plugin" / "plugin.json"

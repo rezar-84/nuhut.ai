@@ -30,6 +30,18 @@ class LevelOf(unittest.TestCase):
     def test_breaking_must_start_a_line(self):
         self.assertEqual(semver.level_of("fix: x", "this is not a BREAKING CHANGE: note"), "patch")
 
+    def test_breaking_footer_before_a_trailer_paragraph_is_major(self):
+        # This repo's commits often end with a Co-Authored-By paragraph after the
+        # Work-Item/Agent/Model block; the footer is that whole trailing block.
+        body = "Body.\n\nBREAKING CHANGE: api gone\n\nCo-Authored-By: A <a@example.com>"
+        self.assertEqual(semver.level_of("feat: x", body), "major")
+        body = "Body.\n\nBREAKING CHANGE: gone\n\nWork-Item: NUHT-1\nAgent: x\n\nCo-Authored-By: A <a@b>"
+        self.assertEqual(semver.level_of("fix: x", body), "major")
+
+    def test_breaking_in_a_body_paragraph_is_not_a_footer(self):
+        # A paragraph that starts with the token but is followed by prose is body text.
+        self.assertEqual(semver.level_of("fix: x", "BREAKING CHANGE: para\n\nmore text"), "patch")
+
     def test_multiple_types(self):
         self.assertEqual(semver.level_of("fix, feat: both", ""), "minor")
 
