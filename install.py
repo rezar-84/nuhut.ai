@@ -73,7 +73,8 @@ RETIRED_STATE = "dashboard-state.js"
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
-                 "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py")
+                 "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py",
+                 "registry.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -1103,7 +1104,7 @@ from detect import *  # noqa: E402,F401,F403  (detect(), Detected, Repo, DEPLOY_
 # now also read AGENTS.md. So AGENTS.md stays the single source of truth and each of
 # these is a pointer to it — never a copy, which would drift within a release.
 # (relative path, header written when the file is created)
-HARNESS_POINTERS = (
+V5_HARNESS_POINTERS = (
     ("CLAUDE.md", "# Project instructions\n\n"),                     # Claude Code
     ("GEMINI.md", "# Project instructions\n\n"),                     # Gemini CLI
     ("AGENT.md", "# Project instructions\n\n"),                      # Amp
@@ -1119,9 +1120,9 @@ HARNESS_POINTERS = (
 
 # Tools whose own instruction file *is* AGENTS.md need no pointer at all: OpenAI Codex,
 # Jules, Zed, Factory, Cursor 1.x, Google Antigravity and others read it directly.
-HARNESS_NATIVE = ("codex", "jules", "zed", "factory", "opencode", "antigravity")
+V5_HARNESS_NATIVE = ("codex", "jules", "zed", "factory", "opencode", "antigravity")
 
-HARNESS_ALIASES = {
+V5_HARNESS_ALIASES = {
     "claude": ("CLAUDE.md",),
     "gemini": ("GEMINI.md",),
     "amp": ("AGENT.md",),
@@ -1133,17 +1134,17 @@ HARNESS_ALIASES = {
     "aider": ("CONVENTIONS.md",),
 }
 
-HARNESS_TITLES = {
+V5_HARNESS_TITLES = {
     "claude": "Claude Code", "cursor": "Cursor", "copilot": "GitHub Copilot",
     "gemini": "Gemini CLI", "windsurf": "Windsurf", "cline": "Cline", "roo": "Roo Code",
     "amp": "Amp", "aider": "Aider",
 }
 # The order the guided setup offers them in, most used first.
-HARNESS_ORDER = ("claude", "cursor", "copilot", "gemini", "windsurf", "cline", "roo",
+V5_HARNESS_ORDER = ("claude", "cursor", "copilot", "gemini", "windsurf", "cline", "roo",
                  "amp", "aider")
 # Files or directories that show a tool is already used here. Detection only pre-ticks
 # the question; the answer decides.
-HARNESS_MARKERS = {
+V5_HARNESS_MARKERS = {
     "claude": ("CLAUDE.md", ".claude"),
     "cursor": (".cursor", ".cursorrules"),
     "copilot": (".github/copilot-instructions.md", ".github/instructions"),
@@ -2114,7 +2115,7 @@ SLOP_KEYS = {"o": "Off", "n": "On", "s": "Strict"}
 # Presets set four charter rows together. An explicit flag always wins over the preset,
 # whatever the order on the command line. Presets apply to new installs only: --upgrade
 # keeps whatever the project's charter already says.
-PRESETS = {
+V5_PRESETS = {
     "solo": {"effort_mode": "lean", "decision_style": "guide", "dev_method": "item",
              "tier_rules": "standard"},
     "team": {"effort_mode": "normal", "decision_style": "guide", "dev_method": "item",
@@ -2122,11 +2123,35 @@ PRESETS = {
     "regulated": {"effort_mode": "normal", "decision_style": "ask", "dev_method": "item",
                   "tier_rules": "strict"},
 }
-PRESET_HELP = {
+V5_PRESET_HELP = {
     "solo": "one person moving fast: lean effort, the agent recommends and you decide",
     "team": "several people, normal depth -- the kit's own defaults",
     "regulated": "audited or high-stakes work: every material choice asked, strict tiers",
 }
+
+
+# Since 6.0 the kit's built-in extensions (optional/extensions/*/nuhut-extension.json,
+# read by optional/runtime/registry.py) are the source of the harness and preset tables.
+# The V5_ tables above are the fallback for a kit without them, and tests/smoke.py checks
+# that both agree until NUHT-017 removes the constants.
+def _registry_tables():
+    try:
+        import registry
+    except ImportError:
+        return None
+    reg = registry.load(None, kit=SRC)
+    return None if reg.missing else registry.install_tables(reg)
+
+
+_TABLES = _registry_tables() or {}
+HARNESS_POINTERS = _TABLES.get("HARNESS_POINTERS", V5_HARNESS_POINTERS)
+HARNESS_NATIVE = _TABLES.get("HARNESS_NATIVE", V5_HARNESS_NATIVE)
+HARNESS_ALIASES = _TABLES.get("HARNESS_ALIASES", V5_HARNESS_ALIASES)
+HARNESS_TITLES = _TABLES.get("HARNESS_TITLES", V5_HARNESS_TITLES)
+HARNESS_ORDER = _TABLES.get("HARNESS_ORDER", V5_HARNESS_ORDER)
+HARNESS_MARKERS = _TABLES.get("HARNESS_MARKERS", V5_HARNESS_MARKERS)
+PRESETS = _TABLES.get("PRESETS", V5_PRESETS)
+PRESET_HELP = _TABLES.get("PRESET_HELP", V5_PRESET_HELP)
 
 # Menus for the guided setup: (stored value, name, what it means, recommended). The stored
 # values are the ones the charter writers already read, so a menu changes only the asking.
@@ -3049,7 +3074,24 @@ def managed_source_texts(target, docs, ctx, profile="full", shared_skills=False)
     for name in RUNTIME_FILES:
         planned[".ai-sdlc/bin/" + name] = substitute(
             (SRC / "optional" / "runtime" / name).read_text(encoding="utf-8"), ctx)
+    for src, rel in extension_sources():
+        planned[rel] = substitute(src.read_text(encoding="utf-8"), ctx)
     return planned
+
+
+EXTENSIONS_REL = ".ai-sdlc/extensions"
+
+
+def extension_sources():
+    """The kit's built-in extensions as (source file, installed path) pairs. They install
+    into .ai-sdlc/extensions/ as kit-managed files; .ai-sdlc/local/extensions/ holds the
+    project's own and is never written by the installer."""
+    base = SRC / "optional" / "extensions"
+    if not base.is_dir():
+        return []
+    return [(path, "%s/%s" % (EXTENSIONS_REL, path.relative_to(base).as_posix()))
+            for path in sorted(base.rglob("*")) if path.is_file()
+            and "__pycache__" not in path.parts]
 
 
 # The loop's entry points, as skills for tools that list skills where Claude Code lists
@@ -3209,7 +3251,7 @@ def is_managed_rel(rel, docs):
     prefixes = ((str(docs), "process"), (str(docs), "roles"), (str(docs), "templates"),
                 (str(docs), "platforms"), (".claude", "skills"), (".claude", "commands"),
                 (".claude", "hooks"), (".ai-sdlc", "bin"), (".ai-sdlc", "git-hooks"),
-                (".agents", "skills"))
+                (".ai-sdlc", "extensions"), (".agents", "skills"))
     return path.parts in ((str(docs), "README.md"), (str(docs), "CARD.md"),
                           ) + tuple((str(docs), name) for name in RETIRED_DOCS) or any(
         path.parts[:2] == prefix for prefix in prefixes)
@@ -3510,6 +3552,7 @@ class Installer(object):
         candidates = [self.target / "AGENTS.md", self.target / "CLAUDE.md",
                       self.target / MANIFEST_REL]
         candidates.extend(self.target / ".ai-sdlc" / "bin" / name for name in RUNTIME_FILES)
+        candidates.extend(self.target / rel for _, rel in extension_sources())
         candidates.extend(self.target / self.docs / path.relative_to(SRC / "template" / "docs")
                           for path in self.doc_sources())
         if w.a.get("commands", True):
@@ -3543,6 +3586,8 @@ class Installer(object):
         for name in RUNTIME_FILES:
             self.install_file(SRC / "optional" / "runtime" / name,
                               self.target / ".ai-sdlc" / "bin" / name)
+        for path, rel in extension_sources():
+            self.install_file(path, self.target / rel)
         for path in self.doc_sources():
             self.install_file(path, self.target / self.docs
                               / path.relative_to(SRC / "template" / "docs"))

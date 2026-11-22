@@ -504,6 +504,32 @@ def main():
         elif "{{" in runtime.read_text(encoding="utf-8"):
             errors.append("optional/runtime/%s contains a double brace, which the installer "
                           "would substitute; spell it '[{][{]'" % name)
+    # Built-in extensions: schema-valid, named after their directory, and always in range.
+    import registry as _registry                       # noqa: E402  (optional/runtime)
+    ext_paths = sorted((ROOT / "optional" / "extensions").glob("*/" + _registry.MANIFEST))
+    if not ext_paths:
+        errors.append("optional/extensions/ has no built-in extension manifests")
+    for path in ext_paths:
+        rel = path.relative_to(ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        if "{{" in text:
+            errors.append("%s contains a double brace, which the installer would substitute" % rel)
+        try:
+            data = json.loads(text)
+        except ValueError as exc:
+            errors.append("%s is not valid JSON: %s" % (rel, exc))
+            continue
+        problems, warnings = _registry.validate(data)
+        for field, message in problems + warnings:
+            errors.append("%s: %s: %s" % (rel, field, message))
+        if isinstance(data, dict) and data.get("id") != path.parent.name:
+            errors.append("%s: id: %r does not match its directory" % (rel, data.get("id")))
+        if isinstance(data, dict) and data.get("nuhut") != "builtin":
+            errors.append("%s: nuhut: a built-in extension says \"builtin\"" % rel)
+    reg = _registry.load(None, kit=str(ROOT), warn=False, use_cache=False)
+    for note in reg.notes:
+        errors.append("%s: %s" % (note["path"], note["message"]))
+
     for rel in ("optional/runtime/sdlc.py", "benchmarks/effort-modes/score.py",
                 "benchmarks/effort-modes/measure.py",
                 "benchmarks/kit-value/score.py", "benchmarks/kit-value/measure.py"):

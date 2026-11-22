@@ -1126,7 +1126,7 @@ def _doctor_input_digest(project, today):
     single_files = [
         "AGENTS.md", ".gitignore", ".git/info/exclude",
         ".ai-sdlc/profile.json", ".ai-sdlc/manifest.json",
-        ".ai-sdlc/bite/active.json", ".ai-sdlc/bin/hooks.py",
+        ".ai-sdlc/bite/active.json", ".ai-sdlc/bin/hooks.py", ".ai-sdlc/bin/registry.py",
         ".claude/settings.json",
     ] + list(POINTER_FILES)
     for rel in single_files:
@@ -1144,6 +1144,7 @@ def _doctor_input_digest(project, today):
     scan_dirs = [
         project.docs, ".cursor/rules", ".claude/hooks",
         ".claude/commands", ".claude/skills", ".agents/skills",
+        ".ai-sdlc/extensions", ".ai-sdlc/local/extensions",
     ]
     for rel_dir in scan_dirs:
         top = project.path(rel_dir)
@@ -1218,6 +1219,7 @@ def doctor(project, today=None, use_cache=True):
         check_placeholders(project, out)
         check_pointer(project, out)
         check_harness_parity(project, out)
+        check_extensions(project, out)
         check_charter(project, out)
         check_staleness(project, out, today)
         check_stack_versions(project, out, today)
@@ -1861,8 +1863,73 @@ def evidence_matches(project, item, rows=None, commits=None):
             and descends(row.get("commit"))))]
 
 
+# ---------------------------------------------------------------- extensions
+
+def load_registry(project):
+    """(registry, None), or (None, reason) when the v5 tables apply: no built-in
+    extension directory exists, or registry.py cannot be imported."""
+    try:
+        reg_mod = runtime_module("registry")
+    except Exception as exc:  # a broken or missing registry.py must not break the CLI
+        return None, "registry.py cannot be imported (%s)" % exc.__class__.__name__
+    try:
+        reg = reg_mod.load(project.root, version=(project.manifest or {}).get("kit_version"))
+    except Exception as exc:
+        return None, "the registry failed to load (%s)" % exc.__class__.__name__
+    if reg.missing:
+        return None, "no .ai-sdlc/extensions/ directory"
+    return reg, None
+
+
+def agent_table(project, kind):
+    """{id: (argv, model_flag)} for kind "review" or "build", from the registry, or the
+    v5 table when the registry is missing."""
+    reg, _ = load_registry(project)
+    if reg is None:
+        return REVIEW_HARNESSES if kind == "review" else runtime_module("dispatch").BUILD_HARNESSES
+    return runtime_module("registry").agent_table(reg, kind)
+
+
+def agent_family(project, harness):
+    """The model family an agent CLI runs by default, for the independence label."""
+    reg, _ = load_registry(project)
+    rec = reg.agents().get(harness) if reg is not None else None
+    if rec and rec.get("family"):
+        return rec["family"]
+    return {"claude": "claude", "codex": "openai", "gemini": "gemini"}.get(harness, "")
+
+
+def broken_agent(project, by):
+    """The error for agent <by> when the extension that would provide it failed to load."""
+    reg, _ = load_registry(project)
+    err = reg.broken.get(by) if reg is not None else None
+    if not err:
+        return None
+    return ("the %s extension is invalid and was skipped: %s: %s: %s. Run `sdlc.py doctor`, "
+            "then restore it with `install.sh <this project> --upgrade` or fix the file"
+            % (by, err["path"], err["field"], err["message"]))
+
+
+def check_extensions(project, out):
+    reg, why = load_registry(project)
+    if reg is None:
+        out.add("warn", "extensions", ".ai-sdlc/extensions",
+                "registry missing, using v5 tables: %s" % why,
+                fix="Restore the built-in extensions: install.sh <this project> --upgrade")
+        return
+    for err in reg.errors:
+        out.add("fail", "extensions", err["path"],
+                "%s: %s; the extension is skipped" % (err["field"], err["message"]))
+    for item in reg.warnings:
+        out.add("warn", "extensions", item["path"], "%s: %s" % (item["field"], item["message"]))
+    for note in reg.notes:
+        out.add("warn", "extensions", note["path"], note["message"])
+
+
 # ---------------------------------------------------------------- review
 
+# The v5 table: the fallback when the registry is missing. The built-in extensions in
+# .ai-sdlc/extensions/ are the source; tests/smoke.py checks that the two agree.
 REVIEW_HARNESSES = {
     "claude": (["claude", "-p", "{prompt}", "--output-format", "text"], "--model"),
     "codex": (["codex", "exec", "{prompt}"], "--model"),
@@ -1921,14 +1988,18 @@ def review(project, item, role, by, model=None, stage="ship", base=None, timeout
         command, harness = by[4:].strip(), "cmd"
         if not command:
             return None, None, "--by cmd: needs a command"
-    elif by in REVIEW_HARNESSES:
+    elif broken_agent(project, by):
+        return None, None, broken_agent(project, by)
+    elif by in agent_table(project, "review"):
         command, harness = None, by
-        if shutil.which(REVIEW_HARNESSES[by][0][0]) is None:
+        exe = agent_table(project, "review")[by][0][0]
+        if shutil.which(exe) is None:
             return None, None, ("%s is not installed (no `%s` on PATH); install it, or use "
                                 "--by cmd:<command> with a reviewer that reads the prompt on "
-                                "stdin" % (by, REVIEW_HARNESSES[by][0][0]))
+                                "stdin" % (by, exe))
     else:
-        return None, None, "--by must be claude, codex, gemini or cmd:<command>"
+        return None, None, "--by must be %s or cmd:<command>" % ", ".join(
+            sorted(agent_table(project, "review")))
     diff, error = item_diff(project, item, base)
     if error:
         return None, None, error
@@ -1939,7 +2010,7 @@ def review(project, item, role, by, model=None, stage="ship", base=None, timeout
             command, cwd=project.root, timeout=timeout, shell=True, input_text=prompt
         )
     else:
-        args, flag = REVIEW_HARNESSES[by]
+        args, flag = agent_table(project, "review")[by]
         args = [part.replace("{prompt}", prompt) for part in args]
         if model:
             args += [flag, model]
@@ -1959,8 +2030,7 @@ def review(project, item, role, by, model=None, stage="ship", base=None, timeout
         reviewer_model = model or (m.group(1) if m else "unknown")
     author_agent, author_model = item_author(project, item)
     family_reviewer = model_family(reviewer_model if reviewer_model != "unknown (the harness default)"
-                                   else {"claude": "claude", "codex": "openai",
-                                         "gemini": "gemini"}.get(harness, ""))
+                                   else agent_family(project, harness))
     family_author = model_family(author_model or author_agent or "")
     independent = (family_reviewer not in ("unknown",) and family_author != "unknown"
                    and family_reviewer != family_author)
