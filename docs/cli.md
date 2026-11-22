@@ -48,7 +48,8 @@ was refused, `2` a usage error.
 | **`sync`** | `--fetch`, `--strict`, `--json` | Where the checkout stands: ahead of or behind its upstream and the default branch, an unfinished merge or rebase, unpushed work, with the next command for each. Changes nothing; `--fetch` runs `git fetch --prune` first. Exit 1 on a `STOP` line; `--strict` also on a branch behind the default branch. Rules: `process/05-change-control.md`, "Staying in step with the remote". |
 | **`trailers <ID>`** | `--agent`, `--model` | Prints the `Work-Item`, `Agent` and `Model` commit trailers, from flags, `AI_SDLC_AGENT` / `AI_SDLC_MODEL`, or what the harness exposes. |
 | **`review <ID>`** | `--role`, `--by claude\|codex\|gemini\|cmd:<command>`, `--model`, `--stage design\|ship\|retro` | Sends one role's playbook, the item's diff, the relevant charter rows and the tier to another harness, headless, and saves the review with the reviewer's and author's identity, labelled independent or self-check. |
-| **`config`** | `--effort`, `--independent-review`, `--tier-rules`, `--decision-style`, `--dev-method`, `--specs`, `--slop-filter`, `--discovered-defects`, `--reviewer`, `--token-saving`, `--set-check`, `--json` | Inspects or atomically updates kit constraints in `docs/project/charter.md` and syncs `.ai-sdlc/profile.json`. `--token-saving on` switches to `Lean` effort, `Independent review required for: none`, `Standard` tier rules, and compact tier budgets in one step. |
+| **`config`** | `--effort`, `--independent-review`, `--tier-rules`, `--decision-style`, `--dev-method`, `--specs`, `--slop-filter`, `--discovered-defects`, `--reviewer`, `--token-saving`, `--set-check`, `--allow-extension ID`, `--json` | Inspects or atomically updates kit constraints in `docs/project/charter.md` and syncs `.ai-sdlc/profile.json`. `--token-saving on` switches to `Lean` effort, `Independent review required for: none`, `Standard` tier rules, and compact tier budgets in one step. `--allow-extension <id>` adds the id to the charter's **Extensions allowed** row; it takes effect once that change is on the default branch. |
+| **`ext`** | `list`, `add <git-url\|path> [--ref REF]`, `update <id> [--ref REF] [--dry-run]`, `remove <id>`, `search [term]`, `validate <path>`, `--json` (list) | Project extensions in `.ai-sdlc/local/extensions/<id>/`, recorded with their source, commit and file hashes in `.ai-sdlc/manifest.json` under `extensions`. `add` prints what the extension brings (data, and every executable entry point with its path) before it writes; `update` prints the old and new commit and the changed files, backs up files edited here, and re-pins the hashes; `search` reads the catalog (`catalog.json`, or `NUHUT_CATALOG_URL`). Code runs only for ids the charter's **Extensions allowed** row lists. Guide: [extensions](extensions.md). |
 | **`fix`** | `<sync-profile\|wire-pointer\|shared-skills\|restore-bite\|unlock-tests\|all>`, `<rotate-worklog\|normalise-status\|link-evidence\|migrate-shards> [--apply]`, `--json` | Repairs safe, non-destructive setup drift: syncs `.ai-sdlc/profile.json` from the charter, restores missing `AGENTS.md` pointer lines (`CLAUDE.md`, `.cursor/rules/`, etc.), materialises or syncs cross-tool skills under `.agents/skills/` from `.claude/commands/` and `.claude/skills/`, restores interrupted `bite` backups, and clears stale test locks. Never overwrites user-modified files.<br>Four record repairs preview what they would change until you add `--apply`:<br>- `migrate-shards` moves 4.x `backlog.md`, `worklog.md`, and `evidence-ledger.jsonl` records into per-item and per-run shards (`items/`, `worklog/`, `ledger/`)<br>- `rotate-worklog` moves the oldest entries into `worklog-archive/<year>-part<N>.md`<br>- `normalise-status` rewrites a status the board already reads as a kit status (`Completed (merged 8acbc4a)` → `Done`), keeping the note in the Task cell<br>- `link-evidence` adds ledger rows for verify runs kept on disk that never reached the ledger<br>None of them invents evidence. |
 
 Guides for the bigger commands: [the viewer](viewer.md) (`view`, `lens`, `audit`),
@@ -65,11 +66,15 @@ built-ins: `core`, `claude`, `codex`, `gemini`, `cursor`, refreshed by `--upgrad
 installer reads the same built-ins for its `--harness` tables and presets.
 
 - A project extension can add harness and preset records. It replaces a built-in record
-  only when its manifest says `"overrides": "<built-in id>"`, and then only that
-  built-in's records, by id. Without `overrides`, a record that collides with a built-in
+  only when its manifest says `"overrides": "<built-in id>"` and **Extensions allowed**
+  lists it, and then only that built-in's records, by id. Without `overrides`, a record that collides with a built-in
   is ignored and `doctor` says why.
-- Agent argv and check commands from a project extension are refused for now, with a
-  `doctor` note. NUHT-018 adds the **Extensions allowed** charter row that enables them.
+- Executable contributions from a project extension (agent argv, check commands, hook
+  rules, doctor checks, lifecycle hooks) load only when the charter's **Extensions
+  allowed** row lists its id on the default branch, and only while its files match the
+  hashes `ext add` pinned. An override of a built-in needs that row too. Otherwise
+  `doctor` warns once per extension and says how to allow it. See
+  [extensions](extensions.md).
 - A manifest with a schema newer than 1, a `nuhut` range that excludes the running
   version, or a field of the wrong type is skipped. The runtime prints one stderr line
   naming the file and field, and `doctor` reports it at fail level. An unknown key under

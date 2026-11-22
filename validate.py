@@ -529,6 +529,29 @@ def main():
     reg = _registry.load(None, kit=str(ROOT), warn=False, use_cache=False)
     for note in reg.notes:
         errors.append("%s: %s" % (note["path"], note["message"]))
+    # The extension catalog (`sdlc.py ext search`): every entry passes the same URL rules
+    # as `ext add`, and VERSION satisfies every non-built-in range it lists.
+    import ext as _ext                                 # noqa: E402  (optional/runtime)
+    try:
+        catalog = json.loads((ROOT / "catalog.json").read_text(encoding="utf-8"))
+    except (IOError, OSError, ValueError) as exc:
+        catalog = None
+        errors.append("catalog.json is missing or not valid JSON: %s" % exc)
+    if catalog is not None and not isinstance(catalog, list):
+        errors.append("catalog.json: expected a list of {id, url, ref, description}")
+    for n, entry in enumerate(catalog if isinstance(catalog, list) else []):
+        problem = _ext.check_entry(_registry, entry, None)
+        if problem:
+            errors.append("catalog.json[%d]: %s" % (n, problem))
+            continue
+        spec = entry.get("nuhut")
+        if spec and spec != "builtin":
+            try:
+                if not _registry.version_ok(spec, version):
+                    errors.append("catalog.json[%d] %s: nuhut %s excludes VERSION %s"
+                                  % (n, entry["id"], spec, version))
+            except ValueError as exc:
+                errors.append("catalog.json[%d] %s: nuhut: %s" % (n, entry["id"], exc))
 
     for rel in ("optional/runtime/sdlc.py", "benchmarks/effort-modes/score.py",
                 "benchmarks/effort-modes/measure.py",
