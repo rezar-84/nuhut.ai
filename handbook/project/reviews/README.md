@@ -32,3 +32,4 @@ these, not after.
 | NUHT-002 | ship | 2026-11-15 | Pass (re-review: Block, fixed) |
 | NUHT-003 | design | 2026-11-13 | see file |
 | NUHT-003 | ship | 2026-11-13 | Pass |
+| NUHT-016 | design | 2026-11-22 | Pass with fixes (self-check; see file) |
