@@ -9,6 +9,7 @@ markdown commands that call this.
     python3 .ai-sdlc/bin/sdlc.py doctor [--json] [--strict]
     python3 .ai-sdlc/bin/sdlc.py verify [--stage unit,lint] [--timeout 1800]
     python3 .ai-sdlc/bin/sdlc.py plan-check ACME-12 [--base main] [--json] [--strict]
+    python3 .ai-sdlc/bin/sdlc.py approvals ACME-12 [--json]
     python3 .ai-sdlc/bin/sdlc.py ci-check [--base main] [--head REF|event] [--charter-ref REF] [--json]
     python3 .ai-sdlc/bin/sdlc.py view [--no-open] [--json] [--serve [--port 8765]]
     python3 .ai-sdlc/bin/sdlc.py metrics [--json]
@@ -4604,6 +4605,7 @@ Records and checks
   doctor              audit the records: stale rows, unproven Verified claims, gaps   doctor --strict
   verify              run the charter's checks in order and keep the evidence        verify --item ACME-12
   finish <ID>         close an item: evidence, review, worklog draft, status          finish ACME-12
+  approvals <ID>      merge approvals from the item branch's GitHub PR reviews       approvals ACME-12
   bite <test cmd>     do the tests fail without the change and pass with it?          bite npm test
   plan-check <ID>     does the branch's diff match the plan's Files that change?     plan-check ACME-12
   ci-check            PR range: trailers, ledger record, Tier 1 review, tier floor    ci-check --base main
@@ -4656,6 +4658,8 @@ EXAMPLES = {
                "verify --stage lint,unit", "verify --timeout 900"],
     "finish": ["finish ACME-12", "finish ACME-12 --dry-run",
                "finish ACME-12 --waive verify --by Sam --reason \"no staging DB here\""],
+    "approvals": ["approvals ACME-12        # exit 0 when the tier's approvals are on the PR head",
+                  "approvals ACME-12 --json"],
     "guard": ["guard start              # SessionStart hook (reads the hook JSON on stdin)",
               "guard stop               # Stop hook"],
     "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict",
@@ -4759,6 +4763,20 @@ def _cmd_doctor(project, opts, parser):
         print_findings(items, opts.all)
     return 1 if opts.strict and any(i["level"] == "fail" and not i.get("accepted")
                                     for i in items) else 0
+
+
+def _cmd_approvals(project, opts, parser):
+    """approvals: who approved an item's merge, from its PR reviews or the charter."""
+    res = runtime_module("finish").approvals(sys.modules[__name__], project, opts.item)
+    if res is None:
+        sys.stderr.write("approvals: %s is not in the backlog\n" % opts.item)
+        return 2
+    if opts.json:
+        print(json.dumps(res, indent=2))
+    else:
+        print("%s · Tier %s" % (opts.item, res["tier"] or "?"))
+        print("\n".join(runtime_module("finish").approval_lines(res)))
+    return 0 if res["met"] else 1
 
 
 def _cmd_finish(project, opts, parser):
@@ -5660,8 +5678,8 @@ def register_command(name, handler, help="", configure=None, verb=None, core=Fal
 
 
 for _name, _handler in (
-        ("status", _cmd_status),
-        ("doctor", _cmd_doctor), ("finish", _cmd_finish), ("guard", _cmd_finish),
+        ("status", _cmd_status), ("doctor", _cmd_doctor), ("approvals", _cmd_approvals),
+        ("finish", _cmd_finish), ("guard", _cmd_finish),
         ("sync", _cmd_sync), ("slop", _cmd_slop), ("spec", _cmd_spec),
         ("next-id", _cmd_next_id), ("render", _cmd_render), ("item", _cmd_item),
         ("hotfix", _cmd_hotfix), ("dispatch", _cmd_dispatch), ("deploy", _cmd_deploy),
@@ -5722,6 +5740,10 @@ def build_parser():
     fin.add_argument("--from-json", dest="from_json", help="JSON file (or '-' for stdin) supplying worklog fields")
     fin.add_argument("--dry-run", action="store_true", help="say what it would do; write nothing")
     fin.add_argument("--json", action="store_true", help="print result as JSON")
+    apr = sub.add_parser("approvals", help="who approved an item's merge: the item branch's "
+                         "GitHub PR reviews on its head (gh), else the charter's Approvers")
+    apr.add_argument("item", help="work item ID")
+    apr.add_argument("--json", action="store_true", help="print the result as JSON")
     gd = sub.add_parser("guard", help="the finish guard, run by the agent tool's session hooks")
     gd.add_argument("event", choices=("start", "stop"))
     chk = sub.add_parser("plan-check", help="compare a Tier 1 plan's file list with the "

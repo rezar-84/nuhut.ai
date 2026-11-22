@@ -7,6 +7,8 @@ import fnmatch
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 
 import shards
@@ -310,6 +312,250 @@ def check_waiver(rt, project, by, approvers, source, registry, interactive):
     return None
 
 
+# ---------------------------------------------------------------- approvals (NUHT-024)
+#
+# A merge approval is read from the item branch's GitHub PR reviews. Everything gh prints
+# is untrusted data: it is parsed as JSON, logins are checked against GitHub's own pattern
+# before they are printed or stored, and nothing from it is run or rendered as markup.
+# The AI_SDLC_APPROVAL environment variable is never read here: any process can set it.
+
+GH_LOGIN = re.compile(r"^[A-Za-z0-9-]{1,39}$")
+GH_REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+GH_SHA = re.compile(r"^[0-9a-f]{40}$")
+GH_TIME = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$")
+GH_TIMEOUT = 20
+PR_FIELDS = ("reviews,number,headRefOid,author,state,headRepositoryOwner,headRepository,"
+             "isCrossRepository,baseRefName")
+ITEM_BRANCH = re.compile(r"^(?:[\w.-]+/)?([A-Z][A-Z0-9]*-[0-9]+)(?:-|$)")
+SOLO_HINT = "see process/05 Approvals"
+
+
+def _safe(text):
+    """A handle or name as it may go into a backlog cell or a worklog line."""
+    return re.sub(r"[|\r\n`]", "", str(text or "")).strip()
+
+
+def item_branch(rt, project, item):
+    """The local branch that holds <item>: the current one when it names the item, else
+    the first local branch that does (claims' rule). '' when there is none."""
+    current = project.git("rev-parse", "--abbrev-ref", "HEAD").strip()
+    m = ITEM_BRANCH.match(current)
+    if m and m.group(1) == item:
+        return current
+    try:
+        return rt.runtime_module("claims")._existing_item_branch(project, item) or ""
+    except EXPECTED_HELPER_ERRORS:
+        return ""
+    except Exception as exc:             # noqa: BLE001 -- reported, not swallowed
+        report_unexpected("finding the branch of %s" % item, exc)
+        return ""
+
+
+def _gh_json(run, argv, cwd):
+    """(parsed JSON, None) or (None, note naming why not). Never raises."""
+    try:
+        proc = run(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                   stderr=subprocess.PIPE, universal_newlines=True, timeout=GH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None, "gh-timeout (no answer in %d s)" % GH_TIMEOUT
+    except (OSError, ValueError):
+        return None, "gh-failed (gh could not be run)"
+    if proc.returncode != 0:
+        return None, "gh-failed (gh exited %d: not signed in, or no PR for the branch)" % proc.returncode
+    try:
+        return json.loads(proc.stdout or ""), None
+    except ValueError:
+        return None, "gh-invalid-json (gh printed something that is not JSON)"
+
+
+def _gh_login(author):
+    """(login, is_bot) from a gh author object; login is None when it is not a valid
+    GitHub login. A bot keeps its `[bot]` suffix."""
+    raw = author.get("login") if isinstance(author, dict) else None
+    if not isinstance(raw, str):
+        return None, False
+    bot = raw.endswith("[bot]") or (isinstance(author, dict) and author.get("is_bot") is True)
+    core = raw[:-len("[bot]")] if raw.endswith("[bot]") else raw
+    if not GH_LOGIN.match(core):
+        return None, bot
+    return raw, bot
+
+
+def _item_tier(rt, project, item):
+    for row_id, _, cells in rt.backlog_rows(project.records("backlog.md"), project.prefix,
+                                            getattr(project, "legacy_prefixes", None)):
+        if row_id == item:
+            return rt.tier_of(cells[2] if len(cells) > 2 else "")
+    return None
+
+
+def _is_ancestor(project, older, newer):
+    return bool(older and newer) and project.git("merge-base", older, newer).strip() == older
+
+
+def approvals(rt, project, item, tier=None, run=None):
+    """Who approved <item>'s merge: {"item", "tier", "required", "listed", "source",
+    "approvers", "ignored", "met", "pr", "head", "branch", "note", "charter"}, or None when the item
+    is not in the backlog. source is "github" when the item branch's own PR was read,
+    else "charter" (the Approvers names, which never meet the count). Never raises on a
+    gh or git failure; the reason goes in note."""
+    run = run or subprocess.run
+    if tier is None:
+        tier = _item_tier(rt, project, item)
+        if tier is None:
+            return None
+    required = 2 if tier == "1" else 1
+    names, _ = rt.approver_names(project)
+    registry = rt.people(project)
+    charter = []
+    for name in names:
+        handle = _safe(rt.resolve_person(registry, name) or rt.person_key(name))
+        if handle and handle not in charter:
+            charter.append(handle)
+    result = {"item": item, "tier": tier, "required": required, "listed": len(charter),
+              "source": "charter", "approvers": [], "ignored": [], "met": False, "pr": None,
+              "head": "", "branch": "", "note": "", "charter": list(charter)}
+
+    def fallback(note):
+        result.update(source="charter", note=note, met=False, approvers=[
+            {"handle": h, "login": "", "source": "charter", "commit": "", "at": ""}
+            for h in charter])
+        return result
+
+    branch = item_branch(rt, project, item)
+    if not branch or branch.startswith("-"):
+        return fallback("no-branch (no local branch names %s)" % item)
+    result["branch"] = branch
+    local = project.git("rev-parse", "--verify", "--quiet", branch + "^{commit}").strip()
+    gh = shutil.which("gh")
+    if not gh:
+        return fallback("no-gh (gh is not on PATH)")
+    repo, note = _gh_json(run, [gh, "repo", "view", "--json", "nameWithOwner"], project.root)
+    if note:
+        return fallback(note)
+    name = repo.get("nameWithOwner") if isinstance(repo, dict) else None
+    if not isinstance(name, str) or not GH_REPO.match(name):
+        return fallback("gh-invalid-json (no repository name)")
+    data, note = _gh_json(run, [gh, "pr", "view", branch, "--repo", name, "--json", PR_FIELDS],
+                          project.root)
+    if note:
+        return fallback(note)
+    if not isinstance(data, dict):
+        return fallback("gh-invalid-json (the PR is not a JSON object)")
+    head = data.get("headRefOid")
+    if not isinstance(head, str) or not GH_SHA.match(head):
+        return fallback("gh-invalid-json (the PR has no head commit)")
+    number = data.get("number")
+    result["pr"] = number if isinstance(number, int) and not isinstance(number, bool) else None
+    state = data.get("state")
+    if data.get("isCrossRepository") is not False:
+        return fallback("pr-mismatch (pr is from another repository)")
+    if state not in ("OPEN", "MERGED"):
+        return fallback("pr-mismatch (pr is %s)" % (state.lower() if isinstance(state, str)
+                                                     and state.isalpha() else "not open"))
+    if head != local:
+        ok = False
+        if state == "MERGED":
+            commits = rt.item_commits(project, item)
+            ok = bool(commits) and _is_ancestor(project, head, rt.trusted_ref(project) or "") \
+                and _is_ancestor(project, commits[0][0], head)
+        if not ok:
+            return fallback("pr-mismatch (pr head differs from local)")
+    result["head"] = head
+
+    author, _ = _gh_login(data.get("author"))
+    author_key = (author or "").lower()
+    # Mapping a login is security-bearing: people.json counts only as the default branch
+    # has it. A registry that exists only on this branch maps nobody.
+    _, people_source = rt.trusted_text(project, os.path.join(project.docs, rt.PEOPLE_REL))
+    mapping_trusted = people_source != "working-tree" or not rt.trusted_ref(project)
+    author_handle = rt.handle_for_github(project, author) if author and mapping_trusted else None
+    latest = {}
+    reviews = data.get("reviews")
+    for review in reviews if isinstance(reviews, list) else []:
+        if not isinstance(review, dict):
+            continue
+        rstate = review.get("state")
+        if rstate in ("COMMENTED", "PENDING"):
+            continue                     # a comment does not change a reviewer's verdict
+        login, bot = _gh_login(review.get("author"))
+        if login is None:
+            result["ignored"].append({"login": "(invalid)", "reason": "invalid-login"})
+            continue
+        at = review.get("submittedAt")
+        at = at if isinstance(at, str) and GH_TIME.match(at) else ""
+        commit = review.get("commit")
+        oid = commit.get("oid") if isinstance(commit, dict) else None
+        key = login.lower()
+        if key not in latest or at >= latest[key]["at"]:
+            latest[key] = {"login": login, "bot": bot, "state": rstate, "oid": oid, "at": at}
+    counted = []
+    for key in sorted(latest):
+        r = latest[key]
+        handle = rt.handle_for_github(project, r["login"]) if mapping_trusted else None
+        if r["bot"]:
+            reason = "bot"
+        elif key == author_key or (handle and handle == author_handle):
+            reason = "self-approval"
+        elif r["state"] == "CHANGES_REQUESTED":
+            reason = "changes-requested"
+        elif r["state"] == "DISMISSED":
+            reason = "dismissed"
+        elif r["state"] != "APPROVED":
+            reason = "not-approved"
+        elif r["oid"] != head:
+            reason = "stale"
+        elif not handle:
+            reason = "unmapped"
+        elif handle in [c["handle"] for c in counted]:
+            reason = "duplicate"
+        else:
+            reason = None
+        if reason:
+            result["ignored"].append({"login": r["login"], "reason": reason})
+        else:
+            counted.append({"handle": _safe(handle), "login": r["login"], "source": "github",
+                            "commit": head, "at": r["at"]})
+    result.update(source="github", approvers=counted, met=len(counted) >= required)
+    return result
+
+
+def approval_count(res):
+    return len([a for a in res["approvers"] if a["source"] == "github"])
+
+
+def approval_lines(res):
+    """The `approval` lines finish and `sdlc.py approvals` print."""
+    n, req = approval_count(res), res["required"]
+    where = (" on %s" % res["head"][:7]) if res["head"] else ""
+    where += (" (PR #%d)" % res["pr"]) if res["pr"] and res["source"] == "github" else ""
+    lines = []
+    if res["source"] == "github":
+        lines.append("approval %d of %d%s: %s" % (n, req, where, ", ".join(
+            "%s (github)" % a["handle"] for a in res["approvers"]) or "no approval counts yet"))
+    else:
+        lines.append("approval %d of %d (charter fallback: %s): charter: %s"
+                     % (n, req, res["note"], ", ".join(a["handle"] for a in res["approvers"])
+                        or "no Approvers named"))
+    if res["ignored"]:
+        lines.append("approval ignored: %s" % ", ".join(
+            "%s %s" % (i["login"], i["reason"]) for i in res["ignored"]))
+    if not res["met"] and res["listed"] < req:
+        lines.append("approval %d of %d: this project lists %d approver%s; %s"
+                     % (n, req, res["listed"], "" if res["listed"] == 1 else "s", SOLO_HINT))
+    return lines
+
+
+def approval_waiting(res):
+    """The Waiting-on text: the charter's Approvers still owed, as plain handles so
+    `status` can say "Waiting on you", then who approved already and from where, e.g.
+    "bob; approved: alice (github)"."""
+    got = ["%s (github)" % a["handle"] for a in res["approvers"] if a["source"] == "github"]
+    have = set(a["handle"] for a in res["approvers"] if a["source"] == "github")
+    rest = [h for h in (res.get("charter") or []) if h not in have]
+    return (", ".join(rest) or "the owner") + ("; approved: " + ", ".join(got) if got else "")
+
+
 def worklog_entry(project, item):
     """The text of the worklog entry headed by <item> (shard first, then worklog/archive), or ''."""
     shard_text = shards.load_worklog_shard(project, item)
@@ -397,7 +643,8 @@ def _replace_worklog_todos(project, item, notes):
     return True
 
 
-def draft_entry(rt, project, item, title, tier, effort, status, commits, run, waived, today, notes=None):
+def draft_entry(rt, project, item, title, tier, effort, status, commits, run, waived, today, notes=None,
+                approved=None):
     """The worklog entry for <item>: what git and the ledger know, filled; what only the
     agent knows, filled from <notes> when provided or marked TODO(finish) otherwise."""
     notes = notes or {}
@@ -474,6 +721,7 @@ def draft_entry(rt, project, item, title, tier, effort, status, commits, run, wa
         "## %s — %s" % (item, title), "",
         "**Date:** %s **Tier:** %s **Effort:** %s" % (today, tier or "?", effort),
         "**Status:** %s" % status,
+    ] + (["**Approved:** %s" % approved] if approved else []) + [
         "**Branch/commits:** `%s` / `%s..%s`" % (branch, shas[-1][:7], shas[0][:7]), "",
         "### What changed", "", subjects, "",
         "Files: " + (", ".join("`%s`" % f for f in files[:12]) +
@@ -639,7 +887,11 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
             % (n, project.docs, name))
 
     needs_human_gate = (tier == "1") or (tier == "2" and str(t_rules).lower() == "strict")
-    final = "Parked" if needs_human_gate else "Done"
+    approval = None
+    if needs_human_gate and column != "Done":
+        approval = approvals(rt, project, item, tier=tier)
+        out.extend(approval_lines(approval))
+    final = "Done" if approval and approval["met"] else ("Parked" if needs_human_gate else "Done")
     entry = worklog_entry(project, item)
     if entry and TODO in entry and _has_notes(notes) and not dry_run:
         if _replace_worklog_todos(project, item, notes):
@@ -655,7 +907,8 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     elif owed["Log"]:
         block, needs_agent = draft_entry(rt, project, item, title, tier, effort,
                                          status if already else final, commits, run, waived,
-                                         today, notes=notes)
+                                         today, notes=notes,
+                                         approved=approval_waiting(approval) if approval else None)
         if not dry_run:
             insert_worklog(project, block, item=item)
         if needs_agent:
@@ -674,9 +927,20 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
 
     if owing:
         return out + ["", "not finished: %d thing(s) owed (OWED above)" % len(owing)], 1
-    if already:
+    if already and column == "Parked" and approval and approval["met"] \
+            and not (run[0] == "pass" or (waived and tier != "1")):
+        out.append("approval note: approved, but no passing verify run covers the newest "
+                   "commit, so it stays Parked: `%s verify --item %s`" % (SDLC, item))
         return out + ["status   already %s" % status], 0
-    if needs_human_gate:
+    if already and not (column == "Parked" and approval and approval["met"]):
+        return out + ["status   already %s" % status], 0
+    parked = final == "Parked"
+    if parked and approval:
+        extra = [approval_waiting(approval), "merge approval (Tier %s): %d of %d%s"
+                 % (tier, approval_count(approval), approval["required"],
+                    (" on %s" % approval["head"][:7]) if approval["head"] else
+                    " (charter fallback)"), today]
+    elif parked:
         approvers = plain(rt.labelled(project.charter, "Approvers") or "") or "the owner"
         extra = [approvers, "merge approval (Tier %s)" % tier, today]
     else:
@@ -695,7 +959,9 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
             sh["updated"] = today
             if hotfix:
                 sh["retro_review"] = "done" if retro else "owed"
-            if needs_human_gate:
+            if approval:
+                sh["approvers"] = approval["approvers"]
+            if parked:
                 sh["waiting_on"] = extra[0]
                 sh["park_reason"] = extra[1]
             else:
@@ -720,7 +986,7 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
             report_unexpected("releasing the claim on %s" % item, exc)
     out.append("status   %s %s%s" % ("would set" if dry_run else "set", final,
                                      " (waiting on %s for the merge approval)" % extra[0]
-                                     if needs_human_gate else ""))
+                                     if parked else ""))
     return out, 0
 
 

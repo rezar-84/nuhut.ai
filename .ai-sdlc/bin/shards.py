@@ -64,6 +64,7 @@ STATUS_ALIASES = {
 
 ITEM_TYPES = ("feat", "fix", "defect", "chore", "docs", "refactor", "test")
 EFFORT_MODES = ("", "Lean", "Normal", "Beast")
+APPROVER_FIELDS = ("handle", "login", "source", "commit", "at")
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*-[0-9]+$")
 INLINE_TOUCH_RE = re.compile(r"(?:^|\b)touch\s*:\s*([^|;\n]+)", re.I)
 INLINE_EFFORT_RE = re.compile(r"(?:^|\beffort\s*:\s*)(Lean|Normal|Beast)\b", re.I)
@@ -233,6 +234,12 @@ def normalize_item(data, today=None):
     approvers = data.get("approvers") or []
     if isinstance(approvers, str):
         approvers = [a.strip() for a in approvers.split(",") if a.strip()]
+    # A name (before 6.0) or an approval record {"handle", "login", "source", "commit",
+    # "at"} (NUHT-024); anything else is dropped.
+    approvers = [a if isinstance(a, str) else
+                 dict((k, str(a.get(k) or "")) for k in APPROVER_FIELDS)
+                 for a in (approvers if isinstance(approvers, list) else [])
+                 if isinstance(a, str) or (isinstance(a, dict) and a.get("handle"))]
 
     out = {
         "id": raw_id,
