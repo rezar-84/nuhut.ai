@@ -4958,7 +4958,7 @@ def test_hotfix_fast_path():
     for n in (1, 3):
         write(d, "src/f%d.txt" % n, str(n))
         subprocess.call(["git", "add", "-A"], cwd=d)
-        subprocess.call(git + ["commit", "-qm", "fix(HFX-00%d): stop the bleed" % n], cwd=d)
+        subprocess.call(git + ["commit", "-qm", "fix(HFX-00%d): stop the bleed\n\nWork-Item: HFX-00%d" % (n, n)], cwd=d)
         sdlc("verify", "--item", "HFX-00%d" % n)
 
     rc, out, err = sdlc("finish", "HFX-003")
