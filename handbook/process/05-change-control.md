@@ -294,5 +294,14 @@ that the defect is gone. Editing it to pass is the S1 in `roles/qa.md`.
   first minutes. Diagnose from a stable state.
 - A hotfix still gets an ID, a test that reproduces the failure, and a worklog entry —
   written immediately after the fire is out, not "later".
+- Mark it with `sdlc.py hotfix <ID>` (the same as `sdlc.py item set <ID> --hotfix`). The
+  tier stays; the item records `hotfix: true` and the time. `finish` then skips the
+  pre-merge review, keeps every other gate (verify, escalations, Tier 1's human approval)
+  and records the retroactive review as owed.
+- The retroactive review is a file, `project/reviews/<ID>-retro-<role>.md`
+  (`sdlc.py review <ID> --role <role> --by <harness> --stage retro`), written within the
+  charter's **Retroactive review within** (default 2 days). After that, `sdlc.py doctor`
+  fails the hotfix until the file exists.
 - Any S0/S1 incident produces a postmortem (`templates/postmortem.md`) focused on the
-  system that allowed it, not on who typed it.
+  system that allowed it, not on who typed it. It names its follow-up item IDs and the
+  regression test; `doctor` fails a follow-up ID that is not in the backlog.

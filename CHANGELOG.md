@@ -4,6 +4,7 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+- **Hotfix fast path.** `sdlc.py item set <ID> --hotfix`, or its shortcut `sdlc.py hotfix <ID>`, marks an item a hotfix: the tier stays, and the item records `hotfix: true` and the time. `finish` then closes it without the pre-merge review and records the retroactive review as owed; every other gate still applies. `doctor` fails a hotfix with no `reviews/<ID>-retro-<role>.md` after the charter's new **Retroactive review within** row (default 2 days), and `review --stage retro` writes that file. The postmortem template gains **Hotfix item**, **Follow-up items** and **Regression test** fields; `doctor` fails a follow-up ID that is not a work item and warns when no regression test is named. Doctor's cache version is bumped (NUHT-028).
 - **The kit installed in this repository now carries the released version.** The 5.0.0 release left `.ai-sdlc/manifest.json`, `profile.json` and the `AGENTS.md` version line at 4.0.0. `tools/semver.py bump` now restamps them and re-hashes the managed `AGENTS.md` region; `semver.py restamp` repairs them by hand; `validate.py` fails when they disagree with `VERSION` (NUHT-011).
 
 ## 5.0.0 — 2026-11-21
