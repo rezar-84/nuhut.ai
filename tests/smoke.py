@@ -4996,6 +4996,88 @@ def test_benchmarks_harnesses_and_effort_modes():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_installer_python_floor_and_finish_errors():
+    print("install.sh: Python 3.8 floor and honest message; finish reports unexpected failures")
+    with open(os.path.join(ROOT, "install.sh")) as fh:
+        sh = fh.read()
+    check("install.sh accepts Python 3.8 or newer, not 3.6",
+          "sys.version_info >= (3, 8)" in sh and "(3, 6)" not in sh, sh[:600])
+    # Run install.sh with only a too-old interpreter on PATH: both candidates fail the check.
+    fake = tempfile.mkdtemp(prefix="sdlc-oldpy-")
+    for name in ("python3", "python"):
+        path = os.path.join(fake, name)
+        with open(path, "w") as fh:
+            fh.write("#!/bin/sh\nexit 1\n")
+        os.chmod(path, 0o755)
+    for tool in ("dirname", "cat"):
+        found = shutil.which(tool)
+        if found:
+            os.symlink(found, os.path.join(fake, tool))
+    p = subprocess.Popen(["/bin/bash", os.path.join(ROOT, "install.sh")], cwd=fake,
+                         env={"PATH": fake}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = p.communicate()
+    err = err.decode("utf-8", "replace")
+    check("install.sh without a usable Python exits 1 and asks for 3.8 or newer",
+          p.returncode == 1 and "Python 3.8 or newer" in err, err)
+    check("install.sh no longer claims nothing the kit installs needs Python",
+          "Nothing the kit installs needs Python" not in err and ".ai-sdlc/bin" in err, err)
+    check("install.sh points to docs/install.md \"Manual install\", not the README",
+          "docs/install.md" in err and "Manual install" in err and "README" not in err, err)
+    shutil.rmtree(fake, ignore_errors=True)
+
+    d = tempfile.mkdtemp(prefix="sdlc-finerr-")
+    subprocess.call(["git", "init", "-q", d])
+    run([d, "FER", "-y"])
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=tester"]
+    backlog = read(d, "docs/project/backlog.md")
+    i = backlog.index("## Now")
+    j = backlog.index("\n", backlog.index("| --- ", i)) + 1
+    rows = ["| FER-%d | Typo %d | 3 | qa | | In progress |" % (n, n) for n in (1, 2)]
+    write(d, "docs/project/backlog.md", backlog[:j] + "\n".join(rows) + "\n" + backlog[j:])
+    for n in (1, 2):
+        write(d, "src/f%d.txt" % n, str(n))
+        subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+        subprocess.call(git + ["commit", "-qm", "fix(FER-%d): typo" % n], cwd=d,
+                        stdout=subprocess.DEVNULL)
+    # Drive finish() in-process with the sync and claims helpers replaced by stubs that raise.
+    driver = (
+        "import sys, types\n"
+        "sys.path.insert(0, '.ai-sdlc/bin')\n"
+        "sys.dont_write_bytecode = True\n"
+        "import sdlc\n"
+        "exc = {'unexpected': RuntimeError, 'expected': OSError}[sys.argv[2]]\n"
+        "def boom(*a, **k):\n"
+        "    raise exc('simulated failure')\n"
+        "real = sdlc.runtime_module\n"
+        "def patched(name):\n"
+        "    if name in ('sync', 'claims'):\n"
+        "        return types.SimpleNamespace(state=boom, release=boom)\n"
+        "    return real(name)\n"
+        "sdlc.runtime_module = patched\n"
+        "fin = real('finish')\n"
+        "lines, code = fin.finish(sdlc, sdlc.Project('.'), sys.argv[1])\n"
+        "print('\\n'.join(lines))\n"
+        "sys.exit(code)\n")
+
+    def finish_with(item, kind):
+        p = subprocess.Popen([sys.executable, "-c", driver, item, kind], cwd=d,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        o, e = p.communicate()
+        return p.returncode, o.decode("utf-8", "replace"), e.decode("utf-8", "replace")
+
+    code, out, err = finish_with("FER-1", "unexpected")
+    check("finish still completes when the sync and claims helpers fail unexpectedly",
+          code == 0 and "set Done" in out, out + err)
+    check("finish reports an unexpected sync-state failure to stderr with its type",
+          "sync state" in err and "RuntimeError" in err and "simulated failure" in err, err)
+    check("finish reports an unexpected claim-release failure to stderr with its type",
+          "claim" in err and "FER-1" in err and err.count("RuntimeError") >= 2, err)
+    code, out, err = finish_with("FER-2", "expected")
+    check("an expected OSError from sync or claims stays quiet",
+          code == 0 and "set Done" in out and not err.strip(), out + err)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -5014,7 +5096,8 @@ def main():
                  test_deploy_platforms, test_upgrade_ownership, test_review_fixes,
                  test_epics, test_decision_and_stack, test_semver, test_release_workflow, test_lens, test_claims, test_specs, test_slop_filter, test_sync, test_repair_and_uninstall, test_upgrade_to_41, test_demo_project,
                  test_shards_and_parallel_worktrees, test_distributed_git_refs, test_json_and_doctor_cache,
-                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes):
+                 test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
+                 test_installer_python_floor_and_finish_errors):
         test()
     print("")
     if failures:
