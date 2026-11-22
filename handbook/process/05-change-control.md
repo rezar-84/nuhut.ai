@@ -283,6 +283,13 @@ The test comes first, and the fixer does not get to rewrite it.
    to be wrong, stop and say so; changing it is a human decision, like releasing the lock.
 5. After verification, a human removes the lock line.
 
+The hooks are best-effort. The shell check reads each command for its write targets (a
+redirect, `tee`, `sed -i`, `cp`/`mv`, `git checkout --` and the like) and cannot see
+through a variable or a script; with `--git-hooks`, `pre-commit` refuses a commit that
+changes a path locked or protected at `HEAD`, so a lock is released by committing the
+line's removal first. `AI_SDLC_APPROVAL` is a local guardrail, not a verified approval:
+any process, an agent included, can set it, so it records intent and proves nothing.
+
 A test that existed before the fix and that the fixer could not change is the evidence
 that the defect is gone. Editing it to pass is the S1 in `roles/qa.md`.
 

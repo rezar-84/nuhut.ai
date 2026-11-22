@@ -939,6 +939,152 @@ def test_hooks():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_shell_write_guards():
+    print("NUHT-013: shell writes to locked and protected paths, trust anchors, commit backstop")
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-shellguard-"))
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "SWG", "-y", "--hooks", "--git-hooks"])
+    check("exit 0", code == 0, out[-300:])
+    write(d, "tests/locked_test.py", "def test_x():\n    assert 1\n")
+    write(d, "gen/out.json", "{}\n")
+    with open(os.path.join(d, ".ai-sdlc", "test-lock.txt"), "a") as fh:
+        fh.write("tests/locked_test.py\n")
+    with open(os.path.join(d, ".ai-sdlc", "protected.txt"), "a") as fh:
+        fh.write("gen/*.json\n")
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    subprocess.call(git + ["commit", "-qm", "SWG-1 init", "--no-verify"], cwd=d)
+
+    base_env = dict(os.environ, CLAUDE_PROJECT_DIR=d)
+    base_env.pop("AI_SDLC_APPROVAL", None)
+
+    def fire(script, payload, cwd=None, **extra):
+        env = dict(base_env, **extra)
+        p = subprocess.Popen(["sh", os.path.join(d, ".claude", "hooks", script)],
+                             cwd=cwd or d, env=env, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        o, _ = p.communicate(json.dumps(payload).encode())
+        return o.decode("utf-8", "replace")
+
+    def shell(cmd, script="approval-gate.sh", cwd=None):
+        return fire(script, {"tool_name": "Bash", "tool_input": {"command": cmd}}, cwd=cwd)
+
+    denied = (
+        "sed -i 's/1/0/' tests/locked_test.py",
+        "sed -i '' -e 's/1/0/' tests/locked_test.py",
+        "perl -pi -e 's/1/0/' tests/locked_test.py",
+        "echo x > tests/locked_test.py",
+        "echo x >> ./tests/locked_test.py",
+        "printf x 2>/dev/null >| tests/locked_test.py",
+        "echo x | tee -a tests/locked_test.py",
+        "cp /tmp/x tests/locked_test.py",
+        "mv /tmp/x tests/locked_test.py",
+        "mv tests/locked_test.py /tmp/gone.py",
+        "cp /tmp/locked_test.py tests/",
+        "install -m 644 /tmp/x tests/locked_test.py",
+        "truncate -s 0 tests/locked_test.py",
+        "git checkout -- tests/locked_test.py",
+        "git checkout HEAD~1 -- tests/locked_test.py",
+        "git restore --source HEAD tests/locked_test.py",
+        "dd if=/dev/null of=tests/locked_test.py",
+        "python3 -c \"open('tests/locked_test.py','w').write('')\"",
+        "bash -c 'echo > tests/locked_test.py'",
+        "sh -c 'cat tests/locked_test.py'",
+        "eval 'echo > tests/locked_test.py'",
+        "cd tests && echo x > locked_test.py",
+        "echo x > %s/tests/locked_test.py" % d,
+        "echo x > tests/../tests/locked_test.py",
+        "true\necho x > tests/locked_test.py",
+        "echo 'unbalanced > tests/locked_test.py",
+        "echo {} > gen/out.json",
+        "sed -i 's/a/b/' gen/out.json",
+        "echo x > .ai-sdlc/local/extensions/x",
+        "cp /tmp/m .ai-sdlc/manifest.json",
+        "echo '[]' > docs/project/people.json",
+        ": > .ai-sdlc/test-lock.txt",
+        "sed -i '1d' .ai-sdlc/protected.txt",
+    )
+    for cmd in denied:
+        out = shell(cmd)
+        check("shell write denied: %s" % cmd.replace("\n", "\\n").replace(d, "<root>"),
+              '"permissionDecision":"deny"' in out, out)
+    allowed = (
+        "cat tests/locked_test.py > /tmp/x",
+        "grep foo tests/locked_test.py | tee out.txt",
+        "cp tests/locked_test.py /tmp/",
+        "sed -n 1p tests/locked_test.py",
+        "python3 -m pytest tests/locked_test.py 2>&1",
+        "cat .ai-sdlc/protected.txt 2>&1 | head",
+        "echo 'tests/new_repro.py' >> .ai-sdlc/test-lock.txt",
+        "git checkout main",
+        "echo x > tests/other_test.py",
+        "cat gen/out.json > /tmp/copy.json",
+    )
+    for cmd in allowed:
+        out = shell(cmd)
+        check("shell read allowed: %s" % cmd, "deny" not in out, out)
+    out = shell("sed -i 's/1/0/' tests/locked_test.py", script="test-lock.sh")
+    check("test-lock inspects a Bash payload", '"permissionDecision":"deny"' in out, out)
+    out = shell("echo {} > gen/out.json", script="protected-paths.sh")
+    check("protected-paths inspects a Bash payload", '"permissionDecision":"deny"' in out, out)
+    out = shell("cat tests/locked_test.py > /tmp/x", script="test-lock.sh")
+    check("test-lock lets a Bash read through", "deny" not in out, out)
+
+    for tool, rel in (("Edit", ".ai-sdlc/local/extensions/x"),
+                      ("Write", ".ai-sdlc/local/extensions/x"),
+                      ("Write", ".ai-sdlc/extensions/lint/extension.json"),
+                      ("Edit", ".ai-sdlc/manifest.json"),
+                      ("Write", "docs/project/people.json")):
+        out = fire("protected-paths.sh", {"tool_name": tool, "tool_input": {"file_path": rel}})
+        check("agent %s to the trust anchor %s is denied" % (tool, rel),
+              '"permissionDecision":"deny"' in out, out)
+    out = fire("protected-paths.sh", {"tool_name": "Edit",
+                                      "tool_input": {"file_path": "docs/project/charter.md"}})
+    check("the charter is not a trust anchor", "deny" not in out, out)
+
+    # The commit backstop: evasions the command parser cannot see are refused by git.
+    def commit(message, **extra):
+        p = subprocess.Popen(git + ["commit", "-q", "-m", message], cwd=d,
+                             env=dict(base_env, **extra),
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        o = p.communicate()[0].decode("utf-8", "replace")
+        return p.returncode, o
+
+    subprocess.call(["sh", "-c", "f=tests/locked_test.py; : > $f"], cwd=d)
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    code, out = commit("SWG-2 indirection")
+    check("the pre-commit backstop refuses a locked test changed through a variable",
+          code != 0 and "tests/locked_test.py" in out and "nuhut:" in out, out)
+    subprocess.call(git + ["checkout", "-q", "HEAD", "--", "tests/locked_test.py"], cwd=d)
+    subprocess.call([sys.executable, "-c", "open('tests/locked_test.py','w').write('x')"], cwd=d)
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    code, out = commit("SWG-2 python")
+    check("the pre-commit backstop refuses a locked test changed by python3 -c",
+          code != 0 and "tests/locked_test.py" in out, out)
+    code, out = commit("SWG-2 approved", AI_SDLC_APPROVAL="CHG-1")
+    check("AI_SDLC_APPROVAL lets the commit through", code == 0, out)
+    write(d, "gen/out.json", '{"a": 1}\n')
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    code, out = commit("SWG-3 protected")
+    check("the pre-commit backstop refuses a protected path", code != 0 and "gen/out.json" in out, out)
+    subprocess.call(git + ["reset", "-q", "--hard", "HEAD"], cwd=d)
+    write(d, "tests/new_repro.py", "def test_y():\n    assert 0\n")
+    with open(os.path.join(d, ".ai-sdlc", "test-lock.txt"), "a") as fh:
+        fh.write("tests/new_repro.py\n")
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    code, out = commit("SWG-4 new lock")
+    check("a new reproducing test committed with its lock passes", code == 0, out)
+    lock = read(d, ".ai-sdlc/test-lock.txt").replace("tests/locked_test.py\n", "")
+    write(d, ".ai-sdlc/test-lock.txt", lock)
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    commit("SWG-5 release lock", AI_SDLC_APPROVAL="CHG-2")
+    write(d, "tests/locked_test.py", "def test_x():\n    assert 2\n")
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    code, out = commit("SWG-6 after unlock")
+    check("a test whose lock release is committed may change", code == 0, out)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_git_hooks():
     print("opt-in git hooks, for every harness")
     git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
@@ -4790,7 +4936,7 @@ def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
                  test_stack_adapters, test_harness_wiring, test_profiles, test_hooks,
-                 test_git_hooks,
+                 test_git_hooks, test_shell_write_guards,
                  test_runtime, test_view, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_kit_value_benchmark, test_kit_value_checks,
                  test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
