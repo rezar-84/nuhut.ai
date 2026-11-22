@@ -269,7 +269,23 @@ def normalize_item(data, today=None):
         retro = str(data.get("retro_review") or "").strip()
         if retro:
             out["retro_review"] = retro
+    # The linked tracker issue number (NUHT-030, the github-issues extension), written only
+    # once an item has one.
+    issue = issue_number(data.get("issue"))
+    if issue:
+        out["issue"] = issue
     return out
+
+
+def issue_number(value):
+    """A positive issue number from an int or a digit string (an optional leading #), or
+    None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    m = re.match(r"^\s*#?(\d{1,9})\s*$", str(value or ""))
+    return int(m.group(1)) or None if m else None
 
 
 def is_hotfix(data):
@@ -983,7 +999,7 @@ def migrate_shards(rt, project, apply=False):
 
 MERGE_DRIVER_NAME = "nuhut-shard"
 # A governance field both sides changed differently is a human decision, never a merge.
-MERGE_CONFLICT_FIELDS = ("approvers", "waivers", "status", "hotfix", "owner")
+MERGE_CONFLICT_FIELDS = ("approvers", "waivers", "status", "hotfix", "owner", "issue")
 # Append-only history: the union keeps every entry either side recorded.
 MERGE_HISTORY_FIELDS = ("history",)
 # An 'updated' stamp further ahead of this machine's clock than this is ignored.

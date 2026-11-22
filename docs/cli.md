@@ -17,6 +17,7 @@ Grouped the way `sdlc.py --help` groups them:
 | Specs | `spec` |
 | Writing | `slop` |
 | Setup | `config`, `fix`, `notify` |
+| Extension commands | `issues pull`, `issues push` (the `github-issues` built-in) |
 
 Global options: `--root <dir>` runs against another project; `--selftest` checks the
 runtime itself. Exit codes: `0` success, `1` a check failed (with `--strict`) or an action
@@ -109,6 +110,20 @@ with `verb=` (for example `rollout start` and `rollout list`). The handler is ca
 `handler(project, opts, parser)` and returns the exit code; `configure(subparser)` adds its
 flags. A name that a core command already uses, or that another extension took, is refused
 with `ValueError`. Registered commands appear under "Extension commands" in `sdlc.py --help`.
+
+An extension adds commands through a `commands` record in its manifest,
+`{"id": "<name>", "file": "<file>.py"}`. The file defines `register(add, runtime)` and calls
+`add(handler, help=..., configure=..., verb=...)` for the one name its record gives.
+`sdlc.py` loads these files only when the command line names something other than a core
+command, so core commands and the merge driver never import extension code. A project
+extension's commands load only when **Extensions allowed** lists it and its pinned hashes
+match. A record named like a core command is ignored with a warning, and the core command
+keeps running. See [extensions.md](extensions.md#add-a-command).
+
+| Command | Key Flags | Description |
+| --- | --- | --- |
+| **`issues pull`** | `--state open\|closed\|all`, `--label L`, `--limit N`, `--repo OWNER/NAME`, `--dry-run`, `--json` | From the `github-issues` built-in extension. Reads issues with `gh issue list --json number,title,labels,url` and parks each issue that no item maps to as a new **Parked** item (`waiting_on: backlog owner`), with the issue number in the shard's `issue` field. A `bug` label makes it a `defect`. An issue titled `<ID>: ...` links that item instead. The issue body is never read. Titles are cut to one plain line with no `\|` or control characters. Needs `gh` installed and logged in; exits `1` with the install hint when it is missing. Guide: [extensions](extensions.md#github-issues). |
+| **`issues push`** | `<ID>...` or `--all`, `--repo OWNER/NAME`, `--dry-run`, `--json` | Opens a GitHub issue (`gh issue create`) titled `<ID>: <title>` for each item you name, or with `--all` for every item that is not Done or Dropped and has no issue, and stores the number on the shard. With neither it lists the candidates and exits `2`. The issue body carries only the ID, type, tier and status. An item that already has an issue is skipped. |
 
 ## Slash commands (Claude Code) and loop skills (other tools)
 

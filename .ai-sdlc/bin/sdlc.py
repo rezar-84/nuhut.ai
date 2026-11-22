@@ -5808,6 +5808,90 @@ for _name, _handler in (
 del _name, _handler
 register_command("merge-shard", _cmd_merge_shard, core=True).needs_project = False
 
+_EXT_COMMANDS_DONE = set()   # (extension id, command name) already registered in this process
+
+
+def register_extension_commands(reg):
+    """Register the `commands` entry points of <reg>'s extensions in COMMANDS; returns
+    the names registered. A record {"id": "<name>", "file": "<file>.py"} gives the one
+    command name the extension may use. The file defines register(add, runtime) and calls
+    add(handler, help="", configure=None, verb=None) for a plain command or for each verb
+    of a group; runtime is this module. Code loads through reg.load_code, so a project
+    extension's commands stay off until Extensions allowed lists it and its pinned hashes
+    match. A name a core command uses, or one another extension took, is refused with a
+    stderr warning; nothing here can stop a core command from running."""
+    names = []
+    for ext_id, rec in reg.code_records("commands"):
+        name = rec.get("id")
+        key = (ext_id, name)
+        if key in _EXT_COMMANDS_DONE:
+            continue
+        have = COMMANDS.get(name)
+        if have is not None and have.core:
+            sys.stderr.write("extension %s: command %r is a core sdlc.py command; the "
+                             "extension's command is ignored\n" % (ext_id, name))
+            continue
+        module, why = reg.load_code(ext_id, rec.get("file") or "")
+        if module is None:
+            continue           # blocked or broken: ext list and doctor report it
+        hook = getattr(module, "register", None)
+        if not callable(hook):
+            sys.stderr.write("extension %s: %s defines no register(add, runtime); command %r "
+                             "is ignored\n" % (ext_id, rec.get("file"), name))
+            continue
+
+        def add(handler, help="", configure=None, verb=None, _name=name):
+            return register_command(_name, handler, help=help, configure=configure, verb=verb)
+
+        try:
+            hook(add, sys.modules[__name__])
+        except Exception as exc:  # an extension's own bug must not break the CLI
+            if have is None:
+                COMMANDS.pop(name, None)
+            else:
+                COMMANDS[name] = have
+            sys.stderr.write("extension %s: command %r is ignored (%s: %s)\n"
+                             % (ext_id, name, exc.__class__.__name__, exc))
+            continue
+        _EXT_COMMANDS_DONE.add(key)
+        if name in COMMANDS:
+            names.append(name)
+    return names
+
+
+def _peek_command(argv):
+    """(the subcommand argv names or None, the --root value or None), without argparse."""
+    root, i = None, 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--root" and i + 1 < len(argv):
+            root, i = argv[i + 1], i + 2
+            continue
+        if arg.startswith("--root="):
+            root = arg.split("=", 1)[1]
+        elif not arg.startswith("-"):
+            return arg, root
+        i += 1
+    return None, root
+
+
+def _load_extension_commands(argv):
+    """Register extension commands unless argv names a core command, so core commands
+    (and git's merge driver) never import extension code. Never raises."""
+    name, root = _peek_command(argv)
+    have = COMMANDS.get(name) if name else None
+    if have is not None and have.core:
+        return
+    try:
+        project = Project(root or default_root())
+        reg, _ = load_registry(project)
+        if reg is not None:
+            register_extension_commands(reg)
+    except Exception as exc:  # a missing project or a broken registry leaves core commands
+        if name:
+            sys.stderr.write("extension commands are not available (%s)\n"
+                             % exc.__class__.__name__)
+
 
 def build_parser():
     """The argparse tree: every core subcommand, then each registered extension command."""
@@ -6208,6 +6292,7 @@ def main(argv):
     if argv == ["--selftest"]:
         selftest()
         return 0
+    _load_extension_commands(argv)
     parser = build_parser()
     opts = parser.parse_args(argv)
     if not opts.command:
