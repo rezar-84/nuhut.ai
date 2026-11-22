@@ -813,6 +813,8 @@ def release(project, item, remove_worktree=False, agent=None, force=False,
             record = remote_rec
 
     if not record:
+        if item not in shards.merged_items(project):
+            return None, shards.not_found(project, item, "is not in the backlog")
         return None, "%s is not claimed" % item
 
     if not force:

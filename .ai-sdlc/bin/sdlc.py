@@ -2562,7 +2562,7 @@ def mark_hotfix(project, item_id, today=None):
     today = today or datetime.date.today().isoformat()
     cur = _shards_mod.merged_items(project).get(item_id)
     if not cur:
-        return None, "%s not found" % item_id, 2
+        return None, _shards_mod.not_found(project, item_id), 2
     updated = dict(cur)
     if not _shards_mod.is_hotfix(cur) or not cur.get("hotfix_at"):
         updated["hotfix"] = True
@@ -4794,11 +4794,11 @@ EXAMPLES = {
             "fix rotate-worklog          # preview", "fix normalise-status --apply",
             "fix link-evidence --apply"],
     "item": ["item add --title \"Fix empty input\" --type defect --tier 2 --touch src/parser.py",
-             "item set ACME-012 --status Ready --effort Lean",
-             "item set ACME-012 --hotfix  # finish skips the pre-merge review; a retro review is owed",
-             "item list --status Ready --json", "item show ACME-012 --json"],
-    "hotfix": ["hotfix ACME-012          # the same as item set ACME-012 --hotfix",
-               "review ACME-012 --role qa --by codex --stage retro  # the retroactive review"],
+             "item set ACME-12 --status Ready --effort Lean",
+             "item set ACME-12 --hotfix  # finish skips the pre-merge review; a retro review is owed",
+             "item list --status Ready --json", "item show ACME-12 --json"],
+    "hotfix": ["hotfix ACME-12           # the same as item set ACME-12 --hotfix",
+               "review ACME-12 --role qa --by codex --stage retro  # the retroactive review"],
     "next-id": ["next-id", "next-id --sync-refs --json", "next-id --kind adr"],
     "render": ["render", "render --check"],
     "merge-shard": ["merge-shard BASE OURS THEIRS   # what git runs; set it up with: fix merge-driver"],
@@ -5425,13 +5425,17 @@ def _cmd_claims(project, opts, parser):
                                                           ("\n" + tail) if tail else ""))
             return 1
         return 0
+    deprecated = None
     if opts.command == "release":
-        # The claim command's old name. Same stdout, JSON and exit codes; one note on
-        # stderr that repeats the caller's own arguments under the new name.
+        # The claim command's old name. Same stdout and exit codes; one note that repeats
+        # the caller's own arguments under the new name: on stderr, or with --json as a
+        # "deprecated" field, so a caller that merges the streams still parses the JSON.
         rest = list(getattr(opts, "_argv", None) or [])
         if "release" in rest:
             rest = rest[rest.index("release") + 1:]
-        sys.stderr.write("release: deprecated, use: sdlc.py unclaim %s\n" % " ".join(rest))
+        deprecated = "use: sdlc.py unclaim %s" % " ".join(rest)
+        if not getattr(opts, "json", False):
+            sys.stderr.write("release: deprecated, %s\n" % deprecated)
     if opts.command in ("release", "unclaim"):
         record, error = claims_mod.release(
             project, opts.item, opts.remove_worktree,
@@ -5444,7 +5448,10 @@ def _cmd_claims(project, opts, parser):
             return 1
         down = record.pop("teardown_result", None)
         if getattr(opts, "json", False):
-            print(json.dumps({"released": record["id"], "record": record, "teardown": down}, indent=2))
+            doc = {"released": record["id"], "record": record, "teardown": down}
+            if deprecated:
+                doc["deprecated"] = deprecated
+            print(json.dumps(doc, indent=2))
         else:
             print("released %s (was %s)" % (record["id"], record.get("agent", "?")))
             if down and down["ok"]:

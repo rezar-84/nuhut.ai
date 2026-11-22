@@ -7072,10 +7072,19 @@ def test_unclaim_alias():
     got = json.loads(out or "{}") if code == 0 else {}
     check("release still frees a claim with the same JSON",
           got.get("released") == "UNC-1" and "record" in got, out + err)
-    check("release prints one deprecation line that repeats the arguments",
-          err.strip() == "release: deprecated, use: sdlc.py unclaim UNC-1 --agent a --json", err)
+    check("release --json keeps stderr clear and carries the deprecation in the JSON",
+          not err.strip() and got.get("deprecated") == "use: sdlc.py unclaim UNC-1 --agent a --json",
+          err + out)
     code, out, err = sdlc("release", "UNC-1", "--agent", "a")
     check("release keeps its exit code on a refusal", code == 1 and "deprecated" in err, out + err)
+    check("release prints one deprecation line that repeats the arguments",
+          "release: deprecated, use: sdlc.py unclaim UNC-1 --agent a" in err, err)
+    code, out, err = sdlc("unclaim", "UNC-001", "--agent", "a")
+    check("unclaim of an ID that is not in the backlog says so and names the near match",
+          code == 1 and "UNC-001 is not in the backlog; did you mean UNC-1?" in err, out + err)
+    code, out, err = sdlc("hotfix", "UNC-001")
+    check("hotfix of a mis-padded ID names the item it probably means",
+          code == 2 and "did you mean UNC-1?" in out + err, out + err)
     code, out, err = sdlc("unclaim", "-h")
     check("unclaim -h shows an example", code == 0 and "sdlc.py unclaim ACME-12" in out, out + err)
     code, out, err = sdlc("--help")

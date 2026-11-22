@@ -3817,7 +3817,8 @@ class Installer(object):
         if path.exists():
             try:
                 content = path.read_text(encoding="utf-8")
-            except (IOError, OSError):
+            except (IOError, OSError, UnicodeDecodeError):
+                print("  skip           .gitattributes is unreadable -- add '%s' by hand" % line)
                 return
         if any(existing.split() == line.split() for existing in content.splitlines()):
             self.skipped += 1

@@ -457,6 +457,26 @@ def parse_raw_backlog_items(raw_backlog, prefix="", legacy_prefixes=None):
     return out
 
 
+def near_id(known, item_id):
+    """The ID in <known> that <item_id> means when only the number's zero padding differs
+    (DEMO-1 for DEMO-001), else None."""
+    m = re.match(r"^([A-Za-z][A-Za-z0-9]*)-0*([0-9]+)$", str(item_id or ""))
+    if not m:
+        return None
+    for other in known:
+        o = re.match(r"^([A-Za-z][A-Za-z0-9]*)-0*([0-9]+)$", str(other))
+        if o and o.group(1).upper() == m.group(1).upper() and o.group(2) == m.group(2) \
+                and other != item_id:
+            return other
+    return None
+
+
+def not_found(project, item_id, what="not found"):
+    """"<ID> not found", with the ID it probably means when one differs only in padding."""
+    near = near_id(merged_items(project), item_id)
+    return "%s %s%s" % (item_id, what, "; did you mean %s?" % near if near else "")
+
+
 def merged_items(project, raw_backlog=None):
     """Return {id: item_dict} combining legacy backlog.md with items/*.json (shards win)."""
     if raw_backlog is None:
