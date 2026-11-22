@@ -5291,7 +5291,6 @@ def test_extension_registry():
     try:
         import registry
         import sdlc as _rt
-        import dispatch as _dispatch
     except ImportError as exc:
         check("optional/runtime/registry.py imports", False, str(exc))
         return
@@ -5304,23 +5303,59 @@ def test_extension_registry():
           all(e["manifest"].get("nuhut") == "builtin" and e["source"] == "built-in"
               for e in reg.extensions.values()))
     tables = registry.install_tables(reg)
-    for name in ("HARNESS_NATIVE", "HARNESS_ALIASES", "HARNESS_TITLES", "HARNESS_ORDER",
-                 "HARNESS_MARKERS", "PRESETS", "PRESET_HELP"):
+    # The v5 installer tables, frozen here since NUHT-017 removed them from install.py.
+    v5 = {
+        "HARNESS_NATIVE": ("codex", "jules", "zed", "factory", "opencode", "antigravity"),
+        "HARNESS_ALIASES": {
+            "claude": ("CLAUDE.md",), "gemini": ("GEMINI.md",), "amp": ("AGENT.md",),
+            "copilot": (".github/copilot-instructions.md",),
+            "cursor": (".cursor/rules/agents.mdc", ".cursorrules"),
+            "windsurf": (".windsurfrules",), "cline": (".clinerules",),
+            "roo": (".roo/rules/agents.md",), "aider": ("CONVENTIONS.md",)},
+        "HARNESS_TITLES": {
+            "claude": "Claude Code", "cursor": "Cursor", "copilot": "GitHub Copilot",
+            "gemini": "Gemini CLI", "windsurf": "Windsurf", "cline": "Cline",
+            "roo": "Roo Code", "amp": "Amp", "aider": "Aider"},
+        "HARNESS_ORDER": ("claude", "cursor", "copilot", "gemini", "windsurf", "cline", "roo",
+                          "amp", "aider"),
+        "HARNESS_MARKERS": {
+            "claude": ("CLAUDE.md", ".claude"), "cursor": (".cursor", ".cursorrules"),
+            "copilot": (".github/copilot-instructions.md", ".github/instructions"),
+            "gemini": ("GEMINI.md", ".gemini"), "windsurf": (".windsurfrules", ".windsurf"),
+            "cline": (".clinerules",), "roo": (".roo", ".roomodes"), "amp": ("AGENT.md",),
+            "aider": ("CONVENTIONS.md", ".aider.conf.yml")},
+        "PRESETS": {
+            "solo": {"effort_mode": "lean", "decision_style": "guide", "dev_method": "item",
+                     "tier_rules": "standard"},
+            "team": {"effort_mode": "normal", "decision_style": "guide", "dev_method": "item",
+                     "tier_rules": "standard"},
+            "regulated": {"effort_mode": "normal", "decision_style": "ask", "dev_method": "item",
+                          "tier_rules": "strict"}},
+        "PRESET_HELP": {
+            "solo": "one person moving fast: lean effort, the agent recommends and you decide",
+            "team": "several people, normal depth -- the kit's own defaults",
+            "regulated": "audited or high-stakes work: every material choice asked, strict tiers"},
+    }
+    v5_pointers = {
+        "CLAUDE.md": "# Project instructions\n\n", "GEMINI.md": "# Project instructions\n\n",
+        "AGENT.md": "# Project instructions\n\n",
+        ".github/copilot-instructions.md": "# Copilot instructions\n\n",
+        ".cursor/rules/agents.mdc": "---\ndescription: Operating contract for this repository\n"
+                                    "alwaysApply: true\n---\n\n",
+        ".cursorrules": "", ".windsurfrules": "", ".clinerules": "",
+        ".roo/rules/agents.md": "# Project instructions\n\n", "CONVENTIONS.md": "# Conventions\n\n"}
+    for name in sorted(v5):
         check("parity: the registry's %s equals the v5 table" % name,
-              tables[name] == getattr(installer, "V5_" + name, None),
-              "%r != %r" % (tables[name], getattr(installer, "V5_" + name, None)))
+              tables[name] == v5[name], "%r != %r" % (tables[name], v5[name]))
     check("parity: the registry's pointer files equal the v5 table",
-          dict(tables["HARNESS_POINTERS"]) == dict(getattr(installer, "V5_HARNESS_POINTERS", ()))
-          and len(tables["HARNESS_POINTERS"]) == len(getattr(installer, "V5_HARNESS_POINTERS", ())))
+          dict(tables["HARNESS_POINTERS"]) == v5_pointers
+          and len(tables["HARNESS_POINTERS"]) == len(v5_pointers))
     check("the installer reads its harness tables from the registry",
           installer.HARNESS_ORDER == tables["HARNESS_ORDER"]
           and installer.PRESETS == tables["PRESETS"])
-    check("parity: registry review argv equals REVIEW_HARNESSES",
-          registry.agent_table(reg, "review") == {
-              k: (list(v[0]), v[1]) for k, v in _rt.REVIEW_HARNESSES.items()})
-    check("parity: registry build argv equals BUILD_HARNESSES",
-          registry.agent_table(reg, "build") == {
-              k: (list(v[0]), v[1]) for k, v in _dispatch.BUILD_HARNESSES.items()})
+    check("parity: registry review and build argv equal the runtime's v5 fallback",
+          registry.agent_table(reg, "review") == _rt.v5_agent_table("review")
+          and registry.agent_table(reg, "build") == _rt.v5_agent_table("build"))
     hs = reg.harnesses()
     check("harness records carry hooks and lens fields",
           hs["claude"]["hooks"]["dialect"] == "claude"
@@ -5457,12 +5492,162 @@ def test_extension_registry():
     p = subprocess.run([sys.executable, "-c",
                         "import sys; sys.path.insert(0, sys.argv[1]); import sdlc, dispatch; "
                         "p = sdlc.Project(sys.argv[2]); "
-                        "print(sdlc.agent_table(p, 'review') == sdlc.REVIEW_HARNESSES and "
-                        "sdlc.agent_table(p, 'build') == dispatch.BUILD_HARNESSES)",
+                        "print(sdlc.agent_table(p, 'review') == sdlc.v5_agent_table('review') and "
+                        "sdlc.agent_table(p, 'build') == sdlc.v5_agent_table('build'))",
                         os.path.join(d, ".ai-sdlc", "bin"), d],
                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
     check("a missing registry directory uses the v5 tables", p.stdout.strip() == "True",
           p.stdout[-400:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_tool_support_in_extensions():
+    print("tool support from the extensions: one agents record, hook dialects, lens files")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    try:
+        import registry
+        import sdlc as _rt
+        import dispatch as _dispatch
+        import hooks as _hooks
+        import skillgen
+    except ImportError as exc:
+        check("optional/runtime/skillgen.py and the registry import", False, str(exc))
+        return
+    reg = registry.load(None, kit=ROOT, use_cache=False)
+    check("the per-tool tables are gone from the runtime and the installer",
+          not any(hasattr(_rt, n) for n in ("REVIEW_HARNESSES", "AGENT_ENV", "MODEL_ENV",
+                                            "POINTER_FILES"))
+          and not hasattr(_dispatch, "BUILD_HARNESSES")
+          and not any(hasattr(installer, "V5_" + n) for n in (
+              "HARNESS_POINTERS", "HARNESS_NATIVE", "HARNESS_ALIASES", "HARNESS_TITLES",
+              "HARNESS_ORDER", "HARNESS_MARKERS")))
+    agents = reg.agents()
+    check("one agents record per tool carries review, build, model flag, family and identity",
+          all(set(("review", "build", "model_flag", "family", "identity")) <= set(agents[a])
+              for a in ("claude", "codex", "gemini"))
+          and agents.get("cursor", {}).get("identity", {}).get("agent") == "cursor")
+    # The v5 values, frozen here: the move must not change them.
+    check("review and build argv are unchanged",
+          registry.agent_table(reg, "review") == {
+              "claude": (["claude", "-p", "{prompt}", "--output-format", "text"], "--model"),
+              "codex": (["codex", "exec", "{prompt}"], "--model"),
+              "gemini": (["gemini", "-p", "{prompt}"], "--model")}
+          and registry.agent_table(reg, "build") == {
+              "claude": (["claude", "-p", "{prompt}", "--permission-mode", "acceptEdits",
+                          "--output-format", "text"], "--model"),
+              "codex": (["codex", "exec", "--full-auto", "{prompt}"], "--model"),
+              "gemini": (["gemini", "-p", "{prompt}", "-y"], "--model")})
+    check("the review and build tables name the same tools",
+          set(registry.agent_table(reg, "review")) == set(registry.agent_table(reg, "build")))
+    try:
+        agent_env, model_env = registry.identity_env(reg)
+    except AttributeError as exc:
+        agent_env, model_env = (), str(exc)
+    check("AGENT_ENV and MODEL_ENV come from the agents records, in the v5 order",
+          agent_env == (("CLAUDECODE", "claude-code"), ("GEMINI_CLI", "gemini-cli"),
+                        ("CODEX_SANDBOX", "codex"), ("CODEX_HOME", "codex"),
+                        ("CURSOR_TRACE_ID", "cursor"), ("CURSOR_AGENT", "cursor"))
+          and model_env == ("AI_SDLC_MODEL", "ANTHROPIC_MODEL", "CLAUDE_CODE_MODEL",
+                            "GEMINI_MODEL", "OPENAI_MODEL", "CODEX_MODEL"),
+          repr((agent_env, model_env)))
+    try:
+        same = (_rt.v5_agent_table("review") == registry.agent_table(reg, "review")
+                and _rt.v5_agent_table("build") == registry.agent_table(reg, "build")
+                and _rt.V5_POINTER_FILES == registry.pointer_files(reg)
+                and _rt.v5_identity_env() == registry.identity_env(reg))
+    except AttributeError:
+        same = False
+    check("the v5 fallback agrees with the registry", same)
+    tables = registry.install_tables(reg)
+    check("the installer tables are unchanged",
+          tables["HARNESS_ORDER"] == ("claude", "cursor", "copilot", "gemini", "windsurf",
+                                      "cline", "roo", "amp", "aider")
+          and tables["HARNESS_NATIVE"] == ("codex", "jules", "zed", "factory", "opencode",
+                                           "antigravity")
+          and tables["HARNESS_ALIASES"]["cursor"] == (".cursor/rules/agents.mdc", ".cursorrules")
+          and installer.HARNESS_POINTERS == tables["HARNESS_POINTERS"])
+    cmd = os.path.join(ROOT, "optional", "claude-commands", "sdlc-plan.md")
+    with open(cmd, encoding="utf-8") as fh:
+        cmd_text = fh.read()
+    check("one command-to-skill helper serves the installer and the runtime",
+          _rt.command_to_skill_text is skillgen.command_to_skill_text
+          and installer.command_skill_text("sdlc-plan")
+          == skillgen.command_to_skill_text("sdlc-plan", cmd_text)
+          and installer.LOOP_SKILLS == _rt.LOOP_SKILLS == skillgen.LOOP_SKILLS)
+    hook_dialect = getattr(registry, "hook_dialect", lambda r, h: "missing")
+    check("hook dialects are chosen by name from the harness records",
+          hook_dialect(reg, "claude") == "claude"
+          and hook_dialect(reg, "gemini") == "gemini"
+          and hook_dialect(reg, "cursor") == "cursor"
+          and hook_dialect(reg, "codex") is None
+          and set(getattr(_hooks, "DIALECTS", ())) == {"claude", "gemini", "cursor"})
+
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-tools-"))
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "TLS", "-y", "--hooks", "--harness", "claude,gemini,cursor,copilot,codex"])
+    check("install exits 0", code == 0, out[-300:])
+    check("install says guards do not run for a tool with no hook dialect",
+          re.search(r"GitHub Copilot[^\n]*guards do not run for this tool", out)
+          and not re.search(r"Gemini CLI[^\n]*guards do not run", out), out[-1500:])
+    gem = json.loads(read(d, ".gemini/settings.json") or "{}")
+    cur = json.loads(read(d, ".cursor/hooks.json") or "{}")
+    check("gemini and cursor hooks are still written from their records",
+          len(gem.get("hooks", {}).get("BeforeTool", [])) == 6
+          and len(cur.get("hooks", {}).get("beforeShellExecution", [])) == 3)
+    bindir = os.path.join(d, ".ai-sdlc", "bin")
+    check("the helper ships with the runtime", os.path.isfile(os.path.join(bindir, "skillgen.py")))
+    # A project tool that reuses the gemini dialect, and one that tries to change claude's.
+    write(d, ".ai-sdlc/local/extensions/qwen/nuhut-extension.json", json.dumps({
+        "schema": 1, "id": "qwen", "version": "1.0.0", "nuhut": ">=1.0.0", "overrides": None,
+        "provides": {"harnesses": [{
+            "id": "qwen", "title": "Qwen Code", "pointer": None, "native": True, "markers": [],
+            "hooks": {"dialect": "gemini", "settings": ".qwen/settings.json",
+                      "events": {"pre_tool": "BeforeTool"}},
+            "lens": {"dirs": [".qwen"], "mcp": [".qwen/settings.json"]}}]}}))
+    write(d, ".ai-sdlc/local/extensions/claude-local/nuhut-extension.json", json.dumps({
+        "schema": 1, "id": "claude-local", "version": "1.0.0", "nuhut": ">=1.0.0",
+        "overrides": "claude", "provides": {"harnesses": [{
+            "id": "claude", "title": "Claude Code", "pointer": None, "native": True,
+            "markers": [], "hooks": {"dialect": "cursor", "settings": None, "events": {}},
+            "lens": {"dirs": [], "mcp": []}}]}}))
+    write(d, ".qwen/settings.json", json.dumps({"mcpServers": {"qwen-tool": {"command": "q"}}}))
+    deny = json.dumps({"tool_name": "Write", "tool_input": {
+        "file_path": os.path.join(d, ".ai-sdlc", "protected.txt"), "content": ""}})
+
+    def hook(harness):
+        p = subprocess.run([sys.executable, os.path.join(bindir, "hooks.py"), "run",
+                            "--harness", harness, "protected-paths"], cwd=d,
+                           input=deny, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           universal_newlines=True)
+        return p.stdout.strip()
+
+    check("a project tool with dialect gemini gets the gemini response shape",
+          hook("qwen").startswith('{"decision":"deny"'), hook("qwen"))
+    check("an override cannot change a built-in tool's hook dialect",
+          '"hookSpecificOutput"' in hook("claude"), hook("claude"))
+    p = subprocess.run([sys.executable, os.path.join(bindir, "sdlc.py"), "lens", "--json",
+                        "--area", "agents"], cwd=d, stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE, universal_newlines=True)
+    check("lens reads the MCP files a harness record names",
+          "qwen-tool" in p.stdout, (p.stdout + p.stderr)[-500:])
+    env = dict(os.environ, GEMINI_CLI="1", CODEX_HOME="/x")
+    for var in ("CLAUDECODE", "AI_SDLC_AGENT", "CODEX_SANDBOX"):
+        env.pop(var, None)
+    p = subprocess.run([sys.executable, os.path.join(bindir, "sdlc.py"), "trailers", "TLS-1"],
+                       cwd=d, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       universal_newlines=True)
+    check("trailers still detect the agent in the v5 order", "Agent: gemini-cli" in p.stdout,
+          p.stdout + p.stderr)
+    with open(os.path.join(bindir, "registry.py"), "w") as fh:
+        fh.write("raise RuntimeError('broken on purpose')\n")
+    p = subprocess.run([sys.executable, os.path.join(bindir, "sdlc.py"), "config", "--help"],
+                       cwd=d, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       universal_newlines=True)
+    check("a broken registry cannot break the CLI: argparse falls back to a static list",
+          p.returncode == 0 and "codex" in p.stdout and "Traceback" not in p.stderr,
+          (p.stdout + p.stderr)[-500:])
+    check("hooks keep their dialect when the registry is broken",
+          hook("gemini").startswith('{"decision":"deny"'), hook("gemini"))
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -5487,6 +5672,7 @@ def main():
                  test_dispatch_and_self_healing, test_benchmarks_harnesses_and_effort_modes,
                  test_installer_python_floor_and_finish_errors,
                  test_extension_registry,
+                 test_tool_support_in_extensions,
                  test_hotfix_fast_path):
         test()
     print("")

@@ -22,13 +22,9 @@ import time
 
 import shards
 
-# The v5 table: the fallback when the registry is missing. The built-in extensions in
-# .ai-sdlc/extensions/ are the source (sdlc.agent_table); tests/smoke.py checks parity.
-BUILD_HARNESSES = {
-    "claude": (["claude", "-p", "{prompt}", "--permission-mode", "acceptEdits", "--output-format", "text"], "--model"),
-    "codex": (["codex", "exec", "--full-auto", "{prompt}"], "--model"),
-    "gemini": (["gemini", "-p", "{prompt}", "-y"], "--model"),
-}
+# The builder and reviewer CLIs come from the agents records of the built-in extensions
+# through sdlc.agent_table(project, "build" | "review"): one record per tool, so the two
+# tables always name the same tools.
 
 MAX_DISPATCH_RUNS = 50
 
@@ -83,15 +79,14 @@ def _save_dispatch_run(rt, project, record):
 
 
 def _build_table(rt, project):
-    if hasattr(rt, "agent_table"):
-        return rt.agent_table(project, "build")
-    return BUILD_HARNESSES
+    return rt.agent_table(project, "build")
 
 
 def _validate_harness(spec, role_label="builder", table=None, broken=None):
-    table = BUILD_HARNESSES if table is None else table
+    table = table or {}
     if not spec:
-        return None, "--by is required unless --dry-run (claude, codex, gemini, or cmd:<command>)"
+        return None, "--by is required unless --dry-run (%s)" % ", ".join(
+            sorted(table) + ["or cmd:<command>"])
     if spec.startswith("cmd:"):
         cmd = spec[4:].strip()
         if not cmd:
@@ -324,7 +319,7 @@ def _run_builder_turn(rt, harness_kind, harness_cmd, model, prompt, wt_path, ite
             harness_cmd, cwd=wt_path, timeout=timeout, shell=True, input_text=prompt, env=env
         )
     else:
-        args_tpl, model_flag = (BUILD_HARNESSES if table is None else table)[harness_kind]
+        args_tpl, model_flag = (table or rt.v5_agent_table("build"))[harness_kind]
         args = [part.replace("{prompt}", prompt) for part in args_tpl]
         if model:
             args += [model_flag, model]
@@ -465,7 +460,10 @@ def run_dispatch(rt, project, opts):
 
     reviewer_spec = getattr(opts, "reviewer", None) or ""
     if reviewer_spec:
-        _, rev_err = _validate_harness(reviewer_spec, "reviewer", build_table, broken)
+        # The reviewer runs through rt.review(), which reads the review argv: check it
+        # against that table, not the builder's.
+        _, rev_err = _validate_harness(reviewer_spec, "reviewer",
+                                       rt.agent_table(project, "review"), broken)
         if rev_err:
             return {"error": rev_err}, 2
     reviewer_model = getattr(opts, "reviewer_model", None) or ""

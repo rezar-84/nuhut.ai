@@ -37,9 +37,9 @@
             ".claude"
           ],
           "mcp": [
-            ".mcp.json",
             ".claude/settings.json",
-            ".claude/settings.local.json"
+            ".claude/settings.local.json",
+            ".mcp.json"
           ]
         }
       }
@@ -47,6 +47,7 @@
     "agents": [
       {
         "id": "claude",
+        "order": 1,
         "family": "claude",
         "review": [
           "claude",
@@ -64,7 +65,17 @@
           "--output-format",
           "text"
         ],
-        "model_flag": "--model"
+        "model_flag": "--model",
+        "identity": {
+          "agent": "claude-code",
+          "env": [
+            "CLAUDECODE"
+          ],
+          "model_env": [
+            "ANTHROPIC_MODEL",
+            "CLAUDE_CODE_MODEL"
+          ]
+        }
       }
     ],
     "checks": [],

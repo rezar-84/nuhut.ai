@@ -22,7 +22,7 @@ What each layer of the kit needs from the tool:
 | Runtime (`doctor`, `verify`, `plan-check`, `view`, `metrics`) | yes | yes — it is a shell command |
 | Skills | `.claude/skills/` | `.agents/skills/`, the cross-client location of the [Agent Skills](https://agentskills.io) standard; installed when `--harness` names any tool other than claude, or added locally with `sdlc.py fix shared-skills` |
 | Loop commands (`sdlc-plan`, `-build`, `-verify`, `-review`, `-finish`, `-log`, `-doctor`) | `/` commands in `.claude/commands/` | skills of the same name in `.agents/skills/`, so they appear in a `/` menu that lists skills (Antigravity, Cursor, Codex, Gemini CLI, Copilot); `CARD.md` names what each runs on any tool |
-| Tool-call hooks (`--hooks`) | yes | Gemini CLI: all six rules; Cursor: the three shell rules; both through `.claude/hooks/adapter.sh`. Other tools: no |
+| Tool-call hooks (`--hooks`) | yes | Gemini CLI: all six rules; Cursor: the three shell rules; both through `.claude/hooks/adapter.sh`. Other tools: none; the installer prints "guards do not run for this tool" for each one it wires, and the git hooks still check their commits |
 | Git hooks (`--git-hooks`) | yes | yes — git runs them for every agent and every human |
 | CI (`--scaffold-ci`) | yes | yes — the doctor runs strictly before the quality commands |
 
@@ -36,6 +36,13 @@ To add cross-tool skills (`.agents/skills/`) to an existing Claude-only install 
 python3 .ai-sdlc/bin/sdlc.py fix shared-skills
 ```
 Or from the kit checkout: `./install.sh /path/to/project --upgrade --harness all`.
+
+Each tool is a harness record in a built-in extension (`optional/extensions/<id>/nuhut-extension.json`).
+Its `hooks.dialect` (`claude`, `gemini`, `cursor` or `null`) picks which of the hook formats the kit
+writes and answers in; the formats themselves live in the kit, so an extension can reuse one but
+cannot add one. `hooks.settings` and `hooks.events` name the settings file and the event names, and
+`lens.dirs` and `lens.mcp` the folders and MCP files `sdlc.py lens` reads. With `dialect: null`,
+guards do not run for this tool.
 
 **If nothing points at `AGENTS.md`, the kit is installed and inert** — and nothing about
 the repository looks wrong. The installer warns when it wires nothing, and

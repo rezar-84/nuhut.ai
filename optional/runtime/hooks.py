@@ -943,6 +943,89 @@ RULE_DISPATCH = {
 }
 
 
+# Hook dialects: how a tool hands a tool call to a hook and how it reads the answer. The
+# implementations live here, in core; a harness record in an extension picks one by name
+# (`hooks.dialect`), and an extension cannot ship a new one (ADR 0003).
+def _claude_payload(payload, ti):
+    return payload, ti
+
+
+def _cursor_payload(payload, ti):
+    # beforeShellExecution carries the command at the top level and no tool name.
+    if "command" in payload and "command" not in ti:
+        ti["command"] = payload["command"]
+    if not payload.get("tool_name"):
+        payload["tool_name"] = "Bash"
+    return payload, ti
+
+
+def _claude_verdict(clean):
+    if clean is None:
+        return ""
+    return json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": clean,
+            }
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _gemini_verdict(clean):
+    if clean is None:
+        return "{}"
+    return json.dumps({"decision": "deny", "reason": clean}, ensure_ascii=False,
+                      separators=(",", ":"))
+
+
+def _cursor_verdict(clean):
+    if clean is None:
+        return json.dumps({"permission": "allow"}, separators=(",", ":"))
+    return json.dumps({"permission": "deny", "agent_message": clean, "user_message": clean},
+                      ensure_ascii=False, separators=(",", ":"))
+
+
+# name -> (payload normaliser, verdict formatter)
+DIALECTS = {
+    "claude": (_claude_payload, _claude_verdict),
+    "gemini": (_claude_payload, _gemini_verdict),
+    "cursor": (_cursor_payload, _cursor_verdict),
+}
+DEFAULT_DIALECT = "claude"
+
+
+def dialect_for(harness, root=None):
+    """The dialect tool <harness> speaks, from its harness record in the extension
+    registry. A built-in tool keeps its built-in dialect even under an override. When the
+    registry is missing or broken, a tool named after a dialect uses that dialect, so the
+    guards keep answering in the shape the tool reads; anything else gets Claude's."""
+    name = harness if harness in DIALECTS else DEFAULT_DIALECT
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import registry
+        version = None
+        if root:
+            try:
+                with open(os.path.join(root, ".ai-sdlc", "manifest.json"), encoding="utf-8") as fh:
+                    version = (json.load(fh) or {}).get("kit_version")
+            except (IOError, OSError, ValueError, AttributeError):
+                version = None
+        reg = registry.load(root, version=version, warn=False)
+        if not reg.missing:
+            found = registry.hook_dialect(reg, harness)
+            if found in DIALECTS:
+                return found
+    except Exception:  # the guards must not depend on the registry loading
+        pass
+    return name
+
+
 def normalize_payload(raw_payload, harness):
     if not isinstance(raw_payload, dict):
         raise ValueError("payload must be a JSON object")
@@ -952,57 +1035,28 @@ def normalize_payload(raw_payload, harness):
         ti = {}
     else:
         ti = dict(ti)
-    if harness == "cursor":
-        if "command" in payload and "command" not in ti:
-            ti["command"] = payload["command"]
-        if not payload.get("tool_name"):
-            payload["tool_name"] = "Bash"
+    normalise = DIALECTS.get(harness, DIALECTS[DEFAULT_DIALECT])[0]
+    payload, ti = normalise(payload, ti)
     payload["tool_input"] = ti
     return payload
 
 
 def format_verdict(harness, deny_reason):
-    if deny_reason:
-        clean = " ".join(str(deny_reason).splitlines()).strip()
-        if harness == "cursor":
-            return json.dumps(
-                {"permission": "deny", "agent_message": clean, "user_message": clean},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-        if harness == "gemini":
-            return json.dumps(
-                {"decision": "deny", "reason": clean},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-        return json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": clean,
-                }
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-    if harness == "cursor":
-        return json.dumps({"permission": "allow"}, separators=(",", ":"))
-    if harness == "gemini":
-        return "{}"
-    return ""
+    """<harness> is a dialect name; an unknown name answers in Claude's shape."""
+    clean = " ".join(str(deny_reason).splitlines()).strip() if deny_reason else None
+    return DIALECTS.get(harness, DIALECTS[DEFAULT_DIALECT])[1](clean)
 
 
 def run_agent_hook(harness, rule):
     rule = re.sub(r"\.sh$", "", rule or "")
+    cwd = os.path.realpath(os.getcwd())
+    root = _project_root(cwd)
+    harness = dialect_for(harness, root)
     if rule not in RULE_DISPATCH:
         out = format_verdict(harness, None)
         if out:
             sys.stdout.write(out + "\n")
         return 0
-    cwd = os.path.realpath(os.getcwd())
-    root = _project_root(cwd)
     raw_stdin = sys.stdin.read()
     try:
         parsed = json.loads(raw_stdin) if raw_stdin.strip() else {}

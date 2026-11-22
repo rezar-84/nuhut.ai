@@ -22,6 +22,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 SKIP_DIRS = {".git", "node_modules", ".next", "dist", "build", "out", "coverage", ".venv", "venv",
              "__pycache__", ".turbo", ".cache", "vendor", "target", ".ai-sdlc", ".idea", ".vscode"}
@@ -597,6 +598,35 @@ def _mcp_from(data, path, source):
     return out
 
 
+# The v5 lists, for when the extension registry is missing or cannot be loaded:
+# (path, harness id, hook dialect, title), as registry.lens_files() returns them.
+V5_LENS_DIRS = ((".claude", "claude", "claude", "Claude Code"), (".cursor", "cursor", "cursor", "Cursor"),
+                (".gemini", "gemini", "gemini", "Gemini CLI"), (".windsurf", "windsurf", None, "Windsurf"),
+                (".clinerules", "cline", None, "Cline"), (".roo", "roo", None, "Roo Code"))
+V5_LENS_MCP = ((".claude/settings.json", "claude", "claude", "Claude Code"),
+               (".claude/settings.local.json", "claude", "claude", "Claude Code"),
+               (".mcp.json", "claude", "claude", "Claude Code"),
+               (".cursor/mcp.json", "cursor", "cursor", "Cursor"),
+               (".gemini/settings.json", "gemini", "gemini", "Gemini CLI"))
+
+
+def harness_lens_files(project):
+    """(tool dirs, MCP files) from the harness records' `lens` fields, or the v5 lists."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import registry
+        reg = registry.load(project.root, version=(getattr(project, "manifest", None) or {}).get("kit_version"),
+                            warn=False)
+        if not reg.missing:
+            dirs, mcp = registry.lens_files(reg)
+            return list(dirs), list(mcp)
+    except Exception:  # the lens must render without the registry
+        pass
+    return list(V5_LENS_DIRS), list(V5_LENS_MCP)
+
+
 def agents(project, kit, include_user=False):
     """Skills, commands, subagents, hooks, MCP servers, plugins and harness files: kit,
     project, user (only when asked) and other kits found in the repository."""
@@ -622,21 +652,21 @@ def agents(project, kit, include_user=False):
         items += _skills_in(project.path(rel), "project", owner_of)
     items += _md_items(project.path(".claude/commands"), "command", "project", owner_of)
     items += _md_items(project.path(".claude/agents"), "subagent", "project", owner_of)
-    for rel in (".claude/settings.json", ".claude/settings.local.json"):
-        if os.path.exists(project.path(rel)):
+    tool_dirs, mcp_files = harness_lens_files(project)
+    claude_dirs = tuple(d + "/" for d, _, dialect, _ in tool_dirs if dialect == "claude")
+    for rel, _, dialect, _ in mcp_files:
+        data = _json(project.path(rel))
+        if not data:
+            continue
+        # A Claude-dialect settings file also carries hooks and plugins.
+        if dialect == "claude" and rel.startswith(claude_dirs):
             items += _hooks_from_settings(project.path(rel), "project")
-            data = _json(project.path(rel)) or {}
             items += _mcp_from(data, project.path(rel), "project")
             for plugin, on in sorted((data.get("enabledPlugins") or {}).items()):
                 items.append({"kind": "plugin", "name": plugin, "description": "enabled" if on else "disabled",
                               "source": "project", "path": project.path(rel), "owner": ""})
-    items += _mcp_from(_json(project.path(".mcp.json")), project.path(".mcp.json"), "project")
-    gem = _json(project.path(".gemini/settings.json"))
-    if gem:
-        items += _mcp_from(gem, project.path(".gemini/settings.json"), "project")
-    cursor_mcp = _json(project.path(".cursor/mcp.json"))
-    if cursor_mcp:
-        items += _mcp_from(cursor_mcp, project.path(".cursor/mcp.json"), "project")
+            continue
+        items += _mcp_from(data, project.path(rel), "project")
     for rule in sorted(glob.glob(project.path(".cursor/rules/*.mdc"))):
         fm = _frontmatter(_read(rule, 20000))
         items.append({"kind": "rule", "name": os.path.basename(rule), "description": fm.get("description", ""),
@@ -647,8 +677,12 @@ def agents(project, kit, include_user=False):
                           "source": "project", "path": project.path(h["file"]),
                           "owner": "kit" if h.get("wired") else "project", "detail": {"wired": bool(h.get("wired"))}})
     other = []
-    for rel, label in ((".specify", "Spec Kit"), ("openspec", "OpenSpec"), (".sdlc", "sdlc skills (.sdlc)"),
-                       (".kiro", "Kiro"), (".windsurf", "Windsurf"), (".roo", "Roo"), (".clinerules", "Cline")):
+    # Other kits, then the directories of tools whose files this lens does not read
+    # itself (no hook dialect), from their harness records.
+    others = [(".specify", "Spec Kit"), ("openspec", "OpenSpec"), (".sdlc", "sdlc skills (.sdlc)"),
+              (".kiro", "Kiro")]
+    others += [(rel, title) for rel, _, dialect, title in tool_dirs if dialect is None]
+    for rel, label in others:
         if os.path.exists(project.path(rel)):
             count = sum(1 for _ in _walk(project.path(rel), max_depth=4)) if os.path.isdir(project.path(rel)) else 1
             other.append({"name": label, "path": rel, "files": count})

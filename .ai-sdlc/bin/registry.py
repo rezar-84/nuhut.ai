@@ -171,6 +171,19 @@ def _check_agent(errors, field, rec):
     flag = rec.get("model_flag")
     if flag is not None and not isinstance(flag, str):
         errors.append((field + ".model_flag", "expected null or a string"))
+    order = rec.get("order")
+    if order is not None and (isinstance(order, bool) or not isinstance(order, int)):
+        errors.append((field + ".order", "expected an integer"))
+    ident = rec.get("identity")
+    if ident is not None:
+        if not isinstance(ident, dict):
+            errors.append((field + ".identity", "expected an object"))
+        else:
+            if not isinstance(ident.get("agent", ""), str):
+                errors.append((field + ".identity.agent", "expected a string"))
+            for key in ("env", "model_env"):
+                if not _is_str_list(ident.get(key, [])):
+                    errors.append(("%s.identity.%s" % (field, key), "expected list of strings"))
 
 
 def _check_preset(errors, field, rec):
@@ -484,10 +497,95 @@ def install_tables(reg):
 
 
 def agent_table(reg, kind):
-    """{id: (argv, model_flag)} for kind "review" or "build", the shape of the v5
-    REVIEW_HARNESSES and BUILD_HARNESSES tables."""
+    """{id: (argv, model_flag)} for kind "review" or "build". Both kinds come from the
+    same agents record, so the reviewer and builder tables cannot disagree on a tool."""
+    return agent_table_of(reg.agents(), kind)
+
+
+def agent_table_of(agents, kind):
+    """agent_table() over a plain {id: record} mapping (the runtime's v5 fallback)."""
     out = {}
-    for aid, rec in reg.agents().items():
+    for aid, rec in agents.items():
         if rec.get(kind):
             out[aid] = (list(rec[kind]), rec.get("model_flag") or "--model")
     return out
+
+
+# The model variable any tool may set; the agents records add their own after it.
+MODEL_ENV_FIRST = ("AI_SDLC_MODEL",)
+
+
+def identity_env_of(agents):
+    """(agent_env, model_env) over a plain {id: record} mapping in priority order:
+    agent_env is ((variable, trailer agent name), ...), the first variable set wins;
+    model_env is the variables read for the model, in order."""
+    agent_env, model_env = [], list(MODEL_ENV_FIRST)
+    for rec in agents.values():
+        ident = rec.get("identity") or {}
+        for var in ident.get("env") or ():
+            agent_env.append((var, ident.get("agent") or rec["id"]))
+        for var in ident.get("model_env") or ():
+            if var not in model_env:
+                model_env.append(var)
+    return tuple(agent_env), tuple(model_env)
+
+
+def identity_env(reg):
+    """The v5 AGENT_ENV and MODEL_ENV, built from the agents records' `identity`."""
+    return identity_env_of(reg.agents())
+
+
+def pointer_files(reg, builtin_only=False):
+    """Every pointer file a harness record names, in harness order. builtin_only leaves out
+    records from project extensions, for callers that write to the files."""
+    out = []
+    for rec in reg.harnesses().values():
+        if builtin_only and rec.get("source") != BUILTIN:
+            continue
+        for ptr in rec.get("pointer") or ():
+            if ptr.get("path") and ptr["path"] not in out:
+                out.append(ptr["path"])
+    return tuple(out)
+
+
+def builtin_record(reg, kind, rec_id):
+    """The record <rec_id> of <kind> as a built-in extension declares it, ignoring any
+    override; None when no built-in declares it."""
+    for ext_id in sorted(reg.extensions):
+        ext = reg.extensions[ext_id]
+        if ext["source"] != BUILTIN:
+            continue
+        for rec in ext["manifest"].get("provides", {}).get(kind, []) or []:
+            if rec.get("id") == rec_id:
+                return rec
+    return None
+
+
+def hook_dialect(reg, harness):
+    """The hook dialect ("claude", "gemini", "cursor" or None) for tool <harness>. A
+    built-in tool keeps its built-in dialect even when a project extension overrides its
+    record: answering a tool in the wrong shape would let it ignore a deny. A tool only a
+    project extension adds uses that extension's dialect."""
+    rec = builtin_record(reg, "harnesses", harness) or reg.harnesses().get(harness)
+    if not rec:
+        return None
+    dialect = (rec.get("hooks") or {}).get("dialect")
+    return dialect if dialect in DIALECTS else None
+
+
+def lens_files(reg):
+    """(dirs, mcp): [(path, harness id, dialect, title)] for every tool directory and MCP
+    config file the harness records name, in harness order, each path once."""
+    dirs, mcp, seen_d, seen_m = [], [], set(), set()
+    for hid, rec in reg.harnesses().items():
+        lens = rec.get("lens") or {}
+        dialect = hook_dialect(reg, hid)
+        for rel in lens.get("dirs") or ():
+            if rel not in seen_d:
+                seen_d.add(rel)
+                dirs.append((rel, hid, dialect, rec.get("title") or hid))
+        for rel in lens.get("mcp") or ():
+            if rel not in seen_m:
+                seen_m.add(rel)
+                mcp.append((rel, hid, dialect, rec.get("title") or hid))
+    return dirs, mcp

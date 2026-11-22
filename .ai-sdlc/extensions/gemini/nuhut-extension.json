@@ -43,6 +43,7 @@
     "agents": [
       {
         "id": "gemini",
+        "order": 2,
         "family": "gemini",
         "review": [
           "gemini",
@@ -55,7 +56,16 @@
           "{prompt}",
           "-y"
         ],
-        "model_flag": "--model"
+        "model_flag": "--model",
+        "identity": {
+          "agent": "gemini-cli",
+          "env": [
+            "GEMINI_CLI"
+          ],
+          "model_env": [
+            "GEMINI_MODEL"
+          ]
+        }
       }
     ],
     "checks": [],
