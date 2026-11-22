@@ -435,7 +435,10 @@ def approvals(rt, project, item, tier=None, run=None):
         tier = _item_tier(rt, project, item)
         if tier is None:
             return None
-    required = 2 if tier == "1" else 1
+    # The rule finish's human gate applies: Tier 1 needs 2, Tier 2 under Strict tier
+    # rules needs 1, and nothing else needs an approval.
+    strict = str(rt.tier_rules(project)).lower() == "strict"
+    required = 2 if tier == "1" else (1 if tier == "2" and strict else 0)
     names, _ = rt.approver_names(project)
     registry = rt.people(project)
     charter = []
@@ -446,6 +449,11 @@ def approvals(rt, project, item, tier=None, run=None):
     result = {"item": item, "tier": tier, "required": required, "listed": len(charter),
               "source": "charter", "approvers": [], "ignored": [], "met": False, "pr": None,
               "head": "", "branch": "", "note": "", "charter": list(charter)}
+
+    if required == 0:
+        result.update(met=True, note="no approval required at Tier %s under %s tier rules"
+                      % (tier or "?", "Strict" if strict else "Standard"))
+        return result
 
     def fallback(note):
         result.update(source="charter", note=note, met=False, approvers=[
@@ -558,6 +566,8 @@ def approval_count(res):
 def approval_lines(res):
     """The `approval` lines finish and `sdlc.py approvals` print."""
     n, req = approval_count(res), res["required"]
+    if not req:
+        return ["approval " + res["note"]]
     where = (" on %s" % res["head"][:7]) if res["head"] else ""
     where += (" (PR #%d)" % res["pr"]) if res["pr"] and res["source"] == "github" else ""
     lines = []

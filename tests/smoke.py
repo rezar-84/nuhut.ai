@@ -7657,6 +7657,11 @@ def test_github_approvals():
           code == 0 and shard.get("status") == "Done" and shard.get("completed")
           and sorted((a.get("handle"), a.get("source"), a.get("commit")) for a in recs)
           == [("alice", "github", head()), ("bob", "github", head())], out + err + json.dumps(shard))
+    sdlc("item", "add", "--id", "APR-9", "--title", "Ordinary change", "--tier", "2", "--status", "Ready")
+    code, out, err = sdlc("approvals", "APR-9", "--json")
+    res = json.loads(out) if out.strip().startswith("{") else {}
+    check("approvals: a Tier 2 item under Standard tier rules needs none and exits 0",
+          code == 0 and res.get("required") == 0 and res.get("met") is True, out + err)
     shutil.rmtree(d, ignore_errors=True)
 
 
