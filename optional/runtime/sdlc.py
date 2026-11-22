@@ -1072,7 +1072,7 @@ def check_bite_leftover(project, out):
                 "`sdlc.py bite --restore`")
 
 
-DOCTOR_CACHE_VERSION = 4
+DOCTOR_CACHE_VERSION = 5
 
 
 def _doctor_input_digest(project, today):
@@ -1520,16 +1520,24 @@ def evidence_runs(project):
 TRAILER = re.compile(r"^([A-Z][A-Za-z-]+):[ \t]*(.+?)[ \t]*$")
 
 
+IDENTITY_TRAILERS = ("Work-Item", "Agent", "Model")
+
+
 def trailers(message):
-    """{key: value} from the trailer block: the last paragraph of a commit message, plus
-    the paragraphs just before it that hold nothing but trailer lines (a harness often
-    appends `Co-Authored-By:` as a paragraph of its own after `Work-Item:`)."""
+    """{key: value} from the trailer block: the last paragraph of a commit message. When
+    that paragraph names none of Work-Item, Agent and Model (a harness often appends
+    `Co-Authored-By:` as a paragraph of its own after `Work-Item:`), the paragraphs just
+    before it that hold nothing but trailer lines count too. A body paragraph that only
+    looks like trailers never adds to a last paragraph that already has them."""
     paragraphs = [p for p in re.split(r"\n\s*\n", message.strip()) if p.strip()]
     found = {}
     if len(paragraphs) < 2:
         return found
     blocks = [paragraphs[-1]]
-    for para in reversed(paragraphs[1:-1]):
+    last_keys = set(m.group(1) for m in (TRAILER.match(line.strip())
+                                         for line in paragraphs[-1].splitlines()) if m)
+    earlier = [] if last_keys & set(IDENTITY_TRAILERS) else paragraphs[1:-1]
+    for para in reversed(earlier):
         lines = [line for line in para.splitlines() if line.strip()]
         if not lines or not all(TRAILER.match(line.strip()) for line in lines):
             break
@@ -1626,9 +1634,15 @@ def mentioned_only(project):
     if not project.prefix:
         return []
     named, mentioned = set(), set()
+    shape = re.compile(r"(?i)^%s-([0-9]+)$" % re.escape(project.prefix))
     for _, _, body, tags in _parsed_commits(project):
-        if tags.get("Work-Item"):
-            named.add(tags["Work-Item"])
+        tag = tags.get("Work-Item")
+        if tag:
+            named.add(tag)
+            m = shape.match(tag.strip())
+            if m and tag.strip() != "%s-%s" % (project.prefix, m.group(1)):
+                # `Work-Item: acme-1` attributes nothing: the match is exact-case.
+                mentioned.add("%s-%s" % (project.prefix, m.group(1)))
         else:
             mentioned.update(ids_in(body, project.prefix))
     return sorted(mentioned - named, key=id_sort_key)
@@ -1697,19 +1711,30 @@ def is_ancestor(project, older, newer):
 # ---------------------------------------------------------------- trusted records
 
 def trusted_ref(project):
-    """The ref security-bearing records are read from: origin/<default> when it exists,
-    else <default>, else None. The default branch comes from the charter (or profile),
-    then from origin/HEAD."""
-    branch = default_branch(project)
-    if not branch:
+    """The ref security-bearing records are read from, or None: registry.trusted_ref,
+    which prefers origin/HEAD so that a branch cannot name itself the default branch."""
+    try:
+        return runtime_module("registry").trusted_ref(project.root, project.charter_path)
+    except Exception:  # no registry: the same order, inline
         head = project.git("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").strip()
-        branch = head[len("refs/remotes/origin/"):] if head.startswith("refs/remotes/origin/") else ""
-    if not branch or branch.startswith("-"):
+        if head.startswith("refs/remotes/origin/"):
+            return head
+        branch = default_branch(project)
+        if not branch or branch.startswith("-"):
+            return None
+        for ref in ("refs/remotes/origin/" + branch, "refs/heads/" + branch):
+            if project.git("rev-parse", "--verify", "--quiet", ref + "^{commit}").strip():
+                return ref
         return None
-    for ref in ("refs/remotes/origin/" + branch, "refs/heads/" + branch):
-        if project.git("rev-parse", "--verify", "--quiet", ref + "^{commit}").strip():
-            return ref
-    return None
+
+
+def show_at(project, ref, rel):
+    """<rel>'s text at <ref>, or None when it is not there. `ref:./rel` resolves against
+    the project root, which may be a subdirectory of the repository."""
+    rel = rel.replace(os.sep, "/").lstrip("/")
+    if not ref or not project.git("ls-tree", "--name-only", ref, "--", rel).strip():
+        return None
+    return project.git("show", "%s:./%s" % (ref, rel))
 
 
 def trusted_text(project, rel, ref=None):
@@ -1723,14 +1748,16 @@ def trusted_text(project, rel, ref=None):
     if ref is not None:
         ref = ref if ref and not str(ref).startswith("-") and \
             project.git("rev-parse", "--verify", "--quiet", ref + "^{commit}").strip() else None
-        if ref and project.git("ls-tree", "--name-only", ref, "--", rel).strip():
-            return project.git("show", "%s:%s" % (ref, rel)), ref
+        text = show_at(project, ref, rel)
+        if text is not None:
+            return text, ref
         return read(project.path(rel)), "working-tree"
     ref = trusted_ref(project)
-    if ref and project.git("ls-tree", "--name-only", ref, "--", rel).strip():
+    text = show_at(project, ref, rel)
+    if text is not None:
         source = ref[len("refs/remotes/"):] if ref.startswith("refs/remotes/") else \
             ref[len("refs/heads/"):]
-        return project.git("show", "%s:%s" % (ref, rel)), source
+        return text, source
     return read(project.path(rel)), "working-tree"
 
 
@@ -2640,19 +2667,32 @@ def claims_verified(entry):
                 re.search(r"(?i)\bverified:\s*(?!not run|absent|none\b|-|n/a)\S", body))
 
 
+UNATTRIBUTED_VERIFIED = (
+    "says Verified, but the evidence ledger has no `sdlc.py verify` run for this item: its "
+    "commits mention it without a `Work-Item:` trailer, so none is attributed to it. Commit "
+    "with the trailer (`sdlc.py trailers <ID>`) and run verify")
+
+
 def check_verified_claims(project, out):
     """A worklog entry that says Verified for an item must have a ledger row for one of
-    that item's commits. Only entries for items that have commits are judged."""
+    that item's commits. Entries for items with no commits are judged only when commit
+    messages mention the item without a Work-Item trailer naming it: that work exists
+    but nothing attributes it, so no ledger run can be matched to it."""
     prefix = project.prefix
     if not prefix:
         return
     rows = ledger(project)
+    unattributed = set(mentioned_only(project))
     checked_ids = set()
     for wl_id, wl_rel, wl_body in _shards_mod.load_worklog_shards(project):
         checked_ids.add(wl_id)
         if not re.fullmatch(r"%s-[0-9]+" % re.escape(prefix), wl_id):
             continue
-        if not claims_verified(wl_body) or not item_commits(project, wl_id):
+        if not claims_verified(wl_body):
+            continue
+        if not item_commits(project, wl_id):
+            if wl_id in unattributed:
+                out.add("warn", "evidence", "%s %s" % (wl_rel, wl_id), UNATTRIBUTED_VERIFIED)
             continue
         if not evidence_matches(project, wl_id, rows):
             out.add("warn", "evidence", "%s %s" % (wl_rel, wl_id),
@@ -2672,6 +2712,8 @@ def check_verified_claims(project, out):
         if item in checked_ids:
             continue
         if not item_commits(project, item):
+            if item in unattributed:
+                out.add("warn", "evidence", "%s %s" % (where, item), UNATTRIBUTED_VERIFIED)
             continue
         if not evidence_matches(project, item, rows):
             out.add("warn", "evidence", "%s %s" % (where, item),
@@ -3428,7 +3470,7 @@ def _ci_tier_at(project, ref, item):
 
 
 def _ci_charter_rows(project, ref):
-    text = project.git("show", "%s:%s" % (ref, project.charter_path.replace(os.sep, "/")))
+    text = show_at(project, ref, project.charter_path) or ""
     return dict((label, labelled(text, label)) for label in CI_SECURITY_ROWS)
 
 

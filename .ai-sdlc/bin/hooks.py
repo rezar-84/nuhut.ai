@@ -365,9 +365,27 @@ def check_work_item_message(root, text):
     if _has_legacy_id(root, docs_dir, text):
         return None
     return (
-        "work item ID: put %s-### in the commit message (or a Work-Item: trailer); "
-        "create the backlog item first if there is none." % prefix
+        "work item ID: add a `Work-Item: %s-###` trailer as the message's last paragraph "
+        "(`sdlc.py trailers <ID>` prints it); doctor and ci-check attribute commits only by "
+        "it. Create the backlog item first if there is none." % prefix
     )
+
+
+def attribution_warning(root, text):
+    """A warning for a commit message the guard accepts but nothing will attribute: no
+    exact-case `Work-Item: <PREFIX>-N` trailer, only an ID in the subject or body (the
+    3.x form) or a trailer in another case. None when the trailer is there."""
+    prefix, _ = _profile_info(root)
+    if not prefix:
+        return None
+    exact = re.compile(r"^[ \t]*Work-Item:[ \t]*%s-[0-9]+[ \t]*$" % re.escape(prefix), re.MULTILINE)
+    if exact.search(text or ""):
+        return None
+    found = re.search(r"(?i)(?:^|[^A-Za-z0-9])(%s-[0-9]+)" % re.escape(prefix), text or "")
+    shown = "%s-%s" % (prefix, found.group(1).split("-")[-1]) if found else "%s-###" % prefix
+    return ("warning: no `Work-Item: %s` trailer, so doctor, finish and ci-check will not "
+            "attribute this commit to the item (a mention in the subject or body does not "
+            "count since 6.0)" % shown)
 
 
 def eval_work_item_id(payload, cwd, root):
@@ -1196,6 +1214,9 @@ def run_git_commit_msg(msg_file):
     if reason:
         sys.stderr.write("nuhut: %s\n" % " ".join(reason.splitlines()))
         return 1
+    warning = attribution_warning(wt, msg)
+    if warning:
+        sys.stderr.write("nuhut: %s\n" % warning)
     return 0
 
 

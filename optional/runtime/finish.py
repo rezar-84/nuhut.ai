@@ -306,9 +306,40 @@ def check_waiver(rt, project, by, approvers, source, registry, interactive):
                 "name an approver. Add them to **Approvers** in %s on the default branch"
                 % (by, ", ".join(n for n, _ in approvers), source, charter))
     raw, runner = runner_identity(project, registry, rt)
+    agent = agent_environment(rt, project)
+    if not interactive and agent:
+        # git user.name is usually the human's own in the checkout an agent works in, and
+        # NUHUT_USER is whatever the process sets, so neither proves a person is here.
+        return ("an agent cannot waive for %s: this process runs under %s with no terminal. "
+                "Ask %s to run it in a terminal" % (by, agent, by))
     if not interactive and runner != handle:
         return ("an agent cannot waive for %s; ask %s to run it (this process runs as %r, "
                 "from NUHUT_USER or git user.name)" % (by, by, raw or "nobody"))
+    return None
+
+
+def agent_environment(rt, project):
+    """The agent tool whose environment variables this process carries (CLAUDECODE, ...),
+    or "" when none is detected. Best effort: a process can unset them."""
+    found = [k for k in getattr(rt, "AGENT_SESSION_ENVS", ()) if os.environ.get(k)]
+    try:
+        agent = rt.identity(project=project)[0]
+    except Exception:
+        agent = ""
+    if agent not in ("", "unknown", "human"):
+        return agent
+    return found[0] if found else ""
+
+
+def stored_waiver_refusal(rt, project, row, approvers, source, registry, interactive):
+    """None when a waiver row already in the ledger may close the item in this run, else
+    why not. The ledger is a plain file anyone can append to, so a recorded waiver is
+    held to the rule `--waive` is: an agent's run without a terminal cannot use one."""
+    refused = check_waiver(rt, project, row.get("waived_by") or "", approvers, source,
+                           registry, interactive)
+    if refused:
+        return "a waiver by %s is in the ledger, but it cannot close the item in this run: %s" % (
+            row.get("waived_by"), refused)
     return None
 
 
@@ -804,9 +835,15 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     elif run[0] == "fail":
         owe("verify   the latest run (%s) failed: fix it, then `%s verify --item %s`"
                      % (run[1], SDLC, item))
-    elif waived:
-        out.append("verify   Not run, waived by %s: %s" % (waived[-1]["waived_by"],
-                                                         waived[-1].get("reason", "")))
+    elif waived and not waive_by:
+        refused = stored_waiver_refusal(rt, project, waived[-1], approvers, source, registry,
+                                        _interactive())
+        if refused:
+            owe("verify   " + refused)
+            waived = []
+        else:
+            out.append("verify   Not run, waived by %s: %s" % (waived[-1]["waived_by"],
+                                                             waived[-1].get("reason", "")))
     elif waive_by:
         refused = None if tier == "1" or not (reason or "").strip() else check_waiver(
             rt, project, waive_by, approvers, source, registry, _interactive())

@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent
@@ -4877,9 +4878,9 @@ def upgrade(target, o):
             notes.append("The charter's Approvers row is blank. Since 6.0 `sdlc.py finish "
                          "--waive verify --by <name>` accepts only a name from that row as it "
                          "stands on the default branch, so every waiver is refused until it "
-                         "is filled: edit **Approvers** in %s (`sdlc.py config` shows the "
-                         "charter's constraints). See docs/install.md, \"Upgrading to 6.0\"."
-                         % charter_rel)
+                         "is filled: list the people who may waive in the charter's "
+                         "**Approvers** row and merge it. See docs/install.md, \"Upgrading "
+                         "to 6.0\".")
     stale_commands =[r for r in unadopted if r.startswith(".claude/commands/")]
     stale_hooks = [r for r in unadopted if r.startswith(".claude/hooks/")]
     stale_shared = [r for r in unadopted if r.startswith(".agents/skills/")]
@@ -4951,7 +4952,10 @@ def upgrade(target, o):
 
     existing = [rel for rel in affected if originals[rel] is not None]
     if existing:
-        stem = "v%s-to-v%s" % ((previous or {}).get("kit_version", "legacy"), VERSION)
+        was = (previous or {}).get("kit_version", "legacy")
+        # A refresh at the same version is named by its time, not as `vX-to-vX`.
+        stem = "v%s-to-v%s" % (was, VERSION) if was != VERSION else "v%s-refresh-%s" % (
+            VERSION, time.strftime("%Y%m%d-%H%M%S", time.gmtime()))
         backup_dir = target / ".ai-sdlc" / "backups" / stem
         suffix = 2
         while backup_dir.exists():

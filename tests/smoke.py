@@ -96,6 +96,20 @@ def drive(args, rules, timeout=60, mode="--full", plain=True, env=None):
     return p.returncode, ANSI.sub("", b"".join(log).decode("utf-8", "replace"))
 
 
+AGENT_ENV_VARS = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_PROJECT_DIR", "GEMINI_CLI",
+                  "GEMINI_PROJECT_DIR", "CODEX_SANDBOX", "CODEX_CI", "CODEX_HOME", "CURSOR_AGENT",
+                  "CURSOR_TRACE_ID", "CURSOR_PROJECT_DIR", "AIDER", "ANTIGRAVITY_AGENT",
+                  "AI_SDLC_AGENT", "NUHUT_DISPATCH_WORKER")
+
+
+def person_env(**extra):
+    """os.environ without the variables that mark an agent session, so a test runs the
+    way a person's terminal would whether or not the suite itself runs under an agent."""
+    env = dict((k, v) for k, v in os.environ.items() if k not in AGENT_ENV_VARS)
+    env.update(extra)
+    return env
+
+
 def check(name, condition, detail=""):
     if condition:
         print("  ok    %s" % name)
@@ -2180,6 +2194,11 @@ def test_separation():
     check("a Work-Item trailer that names no ID is refused", code != 0 and "names no ID" in out, out)
     code, out = commit("SEP-2 tidy")
     check("the 3.x form, the ID in the subject, still passes", code == 0, out)
+    check("... with a warning that nothing will attribute it", "Work-Item: SEP-2" in out
+          and "not attribute" in out, out)
+    code, out = commit("Tidy more")
+    check("the hook's refusal asks for the Work-Item trailer",
+          code != 0 and "Work-Item: SEP-###" in out and "in the commit message" not in out, out)
 
     # Trailers: parsing, and what `sdlc.py trailers` prints from flags and environment.
     sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
@@ -4464,7 +4483,7 @@ def test_finish():
     def sdlc(*args, **kw):
         p = subprocess.Popen([sys.executable, script] + list(args), cwd=d, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                             env=dict(os.environ, **(kw.get("env") or {})))
+                             env=person_env(**(kw.get("env") or {})))
         o, e = p.communicate((kw.get("stdin") or "").encode("utf-8"))
         return p.returncode, o.decode("utf-8", "replace"), e.decode("utf-8", "replace")
 
@@ -4705,7 +4724,7 @@ def test_finish_evidence_binding():
     import sdlc as rt
 
     def sdlc(*args, **kw):
-        env = dict(os.environ)
+        env = person_env()
         env.pop("NUHUT_USER", None)
         env.update(kw.get("env") or {})
         p = subprocess.Popen([sys.executable, script] + list(args), cwd=d, stdin=subprocess.DEVNULL,
@@ -4834,6 +4853,13 @@ def test_finish_evidence_binding():
     check("a waiver by an approver, run as that approver, is recorded with who ran it",
           "waived by Sam" in out and waived and waived[-1].get("waived_by") == "Sam"
           and waived[-1].get("waived_as"), out + str(waived))
+    code, out = sdlc("finish", "EVB-3", "--dry-run", env={"NUHUT_USER": "Sam", "CLAUDECODE": "1"})
+    check("an agent's finish without a terminal cannot use a waiver already in the ledger",
+          code == 1 and "cannot close the item in this run" in out, out)
+    code, out = sdlc("finish", "EVB-3", "--waive", "verify", "--by", "Sam", "--reason", "x",
+                     "--dry-run", env={"NUHUT_USER": "Sam", "CLAUDECODE": "1"})
+    check("an agent cannot waive even as the approver's NUHUT_USER or git user.name",
+          code == 1 and "an agent cannot waive for Sam" in out, out)
     commit("chore(EVB-3): waiver records", "EVB-3")
     subprocess.call(["git", "switch", "-q", "main"], cwd=d)
     write(d, "docs/project/charter.md", read(d, "docs/project/charter.md").replace(
@@ -8206,6 +8232,146 @@ def test_test_runner():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_trusted_records_review():
+    """NUHT-016 ship review: a branch cannot name itself the trusted ref, trusted reads
+    work when the kit lives in a subdirectory, and code pins come from the default branch."""
+    print("trusted records: origin/HEAD, monorepo paths and default-branch pins")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import registry
+    import sdlc as runtime
+    sys.path.pop(0)
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "core.hooksPath=/dev/null"]
+
+    def g(cwd, *args):
+        return subprocess.run(git + list(args), cwd=cwd, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, universal_newlines=True)
+
+    charter = "| **Default branch** | %s |\n| **Extensions allowed** | `%s` |\n| **Approvers** | %s |\n"
+    origin = tempfile.mkdtemp(prefix="sdlc-trust-origin-")
+    g(origin, "init", "-q", "--bare", "-b", "main")
+    seed = tempfile.mkdtemp(prefix="sdlc-trust-seed-")
+    g(seed, "init", "-q", "-b", "main")
+    write(seed, ".ai-sdlc/profile.json", json.dumps({"docs_dir": "docs", "default_branch": "main"}))
+    write(seed, "docs/project/charter.md", charter % ("main", "good", "alice"))
+    write(seed, "docs/project/people.json", '{"people":[{"handle":"alice"}]}')
+    g(seed, "add", "-A")
+    g(seed, "commit", "-q", "-m", "seed")
+    g(seed, "remote", "add", "origin", origin)
+    g(seed, "push", "-q", "origin", "main")
+    d = os.path.join(tempfile.mkdtemp(prefix="sdlc-trust-clone-"), "c")
+    g(os.path.dirname(d), "clone", "-q", origin, d)
+    g(d, "checkout", "-q", "-b", "evil")
+    write(d, "docs/project/charter.md", charter % ("evil", "pwn", "mallory"))
+    write(d, "docs/project/people.json", '{"people":[{"handle":"mallory"}]}')
+    g(d, "commit", "-q", "-am", "evil")
+    project = runtime.Project(d)
+    check("a branch that names itself Default branch does not move the trusted ref",
+          runtime.trusted_ref(project) == "refs/remotes/origin/main", str(runtime.trusted_ref(project)))
+    check("... nor the Extensions allowed list", registry.trusted_allowed(d) == frozenset({"good"}),
+          str(registry.trusted_allowed(d)))
+    text, source = runtime.trusted_text(project, "docs/project/people.json")
+    check("... nor people.json", "alice" in text and "mallory" not in text, "%s %s" % (source, text))
+
+    # The kit in a subdirectory of the repository (a monorepo package).
+    mono = tempfile.mkdtemp(prefix="sdlc-trust-mono-")
+    g(mono, "init", "-q", "-b", "main")
+    app = os.path.join(mono, "app")
+    write(app, ".ai-sdlc/profile.json", json.dumps({"docs_dir": "docs", "default_branch": "main"}))
+    write(app, "docs/project/charter.md", charter % ("main", "good", "alice"))
+    write(app, "docs/project/people.json", '{"people":[{"handle":"alice"}]}')
+    g(mono, "add", "-A")
+    g(mono, "commit", "-q", "-m", "seed")
+    text, source = runtime.trusted_text(runtime.Project(app), "docs/project/people.json")
+    check("trusted_text reads a subdirectory install from the default branch",
+          "alice" in text and source == "main", "%r %s" % (text, source))
+    check("trusted_allowed reads a subdirectory install from the default branch",
+          registry.trusted_allowed(app) == frozenset({"good"}), str(registry.trusted_allowed(app)))
+
+    # Pins: a branch that changes an allowed extension's code and its pin together.
+    proj = tempfile.mkdtemp(prefix="sdlc-trust-pins-")
+    g(proj, "init", "-q", "-b", "main")
+    ext = ".ai-sdlc/local/extensions/lint-pack/"
+    manifest = {"schema": 1, "id": "lint-pack", "version": "1.0.0", "nuhut": ">=1.0.0",
+                "provides": {"hook_rules": [{"id": "r", "file": "rule.py", "tools": ["Bash"]}]}}
+    write(proj, ext + "nuhut-extension.json", json.dumps(manifest))
+    write(proj, ext + "rule.py", "def evaluate(payload, cwd, root):\n    return None\n")
+    write(proj, ".ai-sdlc/profile.json", json.dumps({"docs_dir": "docs", "default_branch": "main"}))
+    write(proj, "docs/project/charter.md", charter % ("main", "lint-pack", "alice"))
+
+    def pin():
+        files = dict((rel, registry.sha256_file(os.path.join(proj, ext, rel)))
+                     for rel in ("nuhut-extension.json", "rule.py"))
+        write(proj, ".ai-sdlc/manifest.json", json.dumps({"extensions": {"lint-pack": {"files": files}}}))
+    pin()
+    g(proj, "add", "-A")
+    g(proj, "commit", "-q", "-m", "seed")
+    reg = registry.load(proj, kit=None, warn=False, use_cache=False, version="6.0.0",
+                        allowed=frozenset({"lint-pack"}))
+    check("an allowed, pinned extension's code loads", reg.load_code("lint-pack", "rule.py")[0] is not None,
+          str(reg.load_code("lint-pack", "rule.py")))
+    g(proj, "checkout", "-q", "-b", "evil")
+    write(proj, ext + "rule.py", "def evaluate(payload, cwd, root):\n    return 'pwned'\n")
+    pin()
+    g(proj, "commit", "-q", "-am", "evil")
+    reg = registry.load(proj, kit=None, warn=False, use_cache=False, version="6.0.0",
+                        allowed=frozenset({"lint-pack"}))
+    module, why = reg.load_code("lint-pack", "rule.py")
+    check("a branch that re-pins changed code does not load it until it merges",
+          module is None and "default branch" in (why or ""), str(why))
+
+
+def test_install_review_fixes():
+    """NUHT-016 ship review: installer robustness found in review."""
+    print("installer: a non-UTF-8 .gitattributes, the blank-Approvers note")
+    d = tempfile.mkdtemp(prefix="sdlc-attr-")
+    subprocess.call(["git", "init", "-q", d])
+    with open(os.path.join(d, ".gitattributes"), "wb") as fh:
+        fh.write(b"*.bin binary\n# caf\xe9\n")
+    code, out = run([d, "ATR", "-y"])
+    check("a non-UTF-8 .gitattributes does not abort the install",
+          code == 0 and "Traceback" not in out and os.path.isfile(os.path.join(d, ".ai-sdlc", "manifest.json")),
+          out[-600:])
+    check("... it is left as it was, and the line to add is printed",
+          open(os.path.join(d, ".gitattributes"), "rb").read() == b"*.bin binary\n# caf\xe9\n"
+          and "deploys.jsonl merge=union" in out, out[-600:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_status_review_fixes():
+    """NUHT-016 ship review: status and claim agree on identity, and an unborn HEAD."""
+    print("status and claim: one identity rule, no empty worktree before the first commit")
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-unborn-"))
+    subprocess.call(["git", "init", "-q", d])
+    for key, value in (("user.name", "tester"), ("user.email", "t@t"), ("commit.gpgsign", "false")):
+        subprocess.call(["git", "config", key, value], cwd=d)
+    code, out = run([d, "UNB", "-y"])
+    check("installs", code == 0, out[-300:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        env = person_env()
+        env.pop("NUHUT_USER", None)
+        env.pop("CI", None)
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        return p.returncode, p.stdout
+
+    sdlc("item", "add", "--title", "First thing", "--tier", "3", "--status", "Ready")
+    code, out = sdlc("status")
+    check("status on an unborn HEAD names the branch and says there are no commits",
+          "(no git)" not in out and "no commits yet" in out, out)
+    check("status reports the identity gap claim would warn about (empty people.json)",
+          "people.json" in out and "tester" in out, out)
+    code, out = sdlc("claim", "UNB-001", "--agent", "a")
+    check("claim refuses to make an empty worktree before the first commit",
+          code != 0 and "no commits yet" in out and not os.path.isdir(d + "-UNB-001"), out)
+    code, out = sdlc("claim", "UNB-001", "--agent", "a", "--no-worktree")
+    check("the person warning names the docs folder's people.json",
+          "docs/project/people.json" in out, out)
+    shutil.rmtree(d, ignore_errors=True)
+    shutil.rmtree(d + "-UNB-001", ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -8233,6 +8399,8 @@ def main():
                  test_hotfix_fast_path,
                  test_people_registry,
                  test_shard_merge_driver,
+                 test_trusted_records_review, test_install_review_fixes,
+                 test_status_review_fixes,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

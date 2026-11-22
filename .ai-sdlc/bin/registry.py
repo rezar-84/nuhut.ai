@@ -57,6 +57,8 @@ OVERLAY_TARGET_RE = re.compile(r"^templates/[A-Za-z0-9][A-Za-z0-9._-]*\.md$")
 # In a `wrap` overlay this line is replaced by the template's text.
 WRAP_MARKER = "<!-- nuhut:content -->"
 ALLOWED_LABEL = "Extensions allowed"
+UNMERGED_PIN = ("%s does not match the hash .ai-sdlc/manifest.json pins on the default "
+                "branch: the change to extension %s takes effect once it merges")
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _WARNED = set()
@@ -359,11 +361,13 @@ class Registry(object):
     """The loaded extensions. `missing` is True when no built-in location exists at all,
     in which case callers use their v5 tables."""
 
-    def __init__(self, root, kit, allowed=(), pins=None):
+    def __init__(self, root, kit, allowed=(), pins=None, trusted_pins=None):
         self.root = root
         self.kit = kit
         self.allowed = frozenset(allowed or ())
         self.pins = pins or {}   # id -> the manifest.json "extensions" record
+        # The same record on the default branch, or None when there is none to compare.
+        self.trusted_pins = trusted_pins
         self.missing = False
         self._code = {}          # (id, rel) -> (module, None) or (None, error)
         self.extensions = {}     # id -> {"id", "path", "source", "manifest"}
@@ -463,7 +467,15 @@ class Registry(object):
         if sha256_file(ext["path"]) != pinned[MANIFEST]:
             return False, ("%s changed since it was pinned: run `sdlc.py ext update %s`"
                            % (MANIFEST, ext_id))
+        if self._trusted_pin(ext_id, MANIFEST) != pinned[MANIFEST]:
+            return False, UNMERGED_PIN % (MANIFEST, ext_id)
         return True, None
+
+    def _trusted_pin(self, ext_id, rel):
+        """The hash the default branch pins for <rel>, or the working tree's when there
+        is no default-branch manifest to compare with."""
+        source = self.pins if self.trusted_pins is None else self.trusted_pins
+        return ((source.get(ext_id) or {}).get("files") or {}).get(rel)
 
     def status(self, ext_id):
         """data, code-enabled, code-blocked, version-refused or invalid."""
@@ -497,6 +509,8 @@ class Registry(object):
                 ok, why = False, ("%s does not match the sha256 pinned at `ext add`: run "
                                   "`sdlc.py ext update %s` or restore the file"
                                   % (rel, ext_id))
+            elif self._trusted_pin(ext_id, rel) != pinned:
+                ok, why = False, UNMERGED_PIN % (rel, ext_id)
         result = (None, why)
         if ok:
             name = "nuhut_ext_%s_%s" % (re.sub(r"[^A-Za-z0-9]", "_", ext_id),
@@ -563,9 +577,13 @@ def load(root=None, kit=True, version=None, warn=True, use_cache=True, allowed=N
     root = os.path.realpath(root) if root else None
     kit = os.path.realpath(kit) if kit else None
     allowed = frozenset(allowed or ())
+    trusted = None
     if pins is None:
         pins = read_pins(root)
-    key = (root, kit, version, allowed, json.dumps(pins, sort_keys=True))
+        # Code loads only for allowed ids; only then pay for the git read of the pins.
+        trusted = trusted_pins(root) if (root and allowed) else None
+    key = (root, kit, version, allowed, json.dumps(pins, sort_keys=True),
+           json.dumps(trusted, sort_keys=True))
     if use_cache and key in _CACHE:
         return _CACHE[key]
     if version is None and kit and os.path.isfile(os.path.join(kit, "VERSION")):
@@ -574,7 +592,7 @@ def load(root=None, kit=True, version=None, warn=True, use_cache=True, allowed=N
                 version = handle.read().strip()
         except (IOError, OSError):
             version = None
-    reg = Registry(root, kit, allowed, pins)
+    reg = Registry(root, kit, allowed, pins, trusted)
     locations = []
     if root:
         locations.append((os.path.join(root, ".ai-sdlc", "local", "extensions"), PROJECT))
@@ -847,40 +865,103 @@ def _git(root, *args):
     return proc.stdout.decode("utf-8", "replace") if proc.returncode == 0 else ""
 
 
+def _profile(root):
+    try:
+        with open(os.path.join(root, ".ai-sdlc", "profile.json"), encoding="utf-8") as handle:
+            prof = json.load(handle)
+    except (IOError, OSError, ValueError):
+        return {}
+    return prof if isinstance(prof, dict) else {}
+
+
+def _branch_cell(text):
+    cell = re.sub(r"_\([^)]*\)_", "", _row(text or "", "Default branch") or "")
+    return cell.strip().strip("`").strip()
+
+
+def _branch_ref(root, branch):
+    if not branch or branch.startswith("-"):
+        return None
+    for ref in ("refs/remotes/origin/" + branch, "refs/heads/" + branch):
+        if _git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}").strip():
+            return ref
+    return None
+
+
+def show_at(root, ref, rel):
+    """<rel>'s text at <ref>, or None when it is not there. <rel> is relative to <root>,
+    which may be a subdirectory of the repository (a monorepo package): `ref:./rel`
+    resolves against the working directory, where `ref:rel` would resolve against the
+    repository's top."""
+    rel = rel.replace(os.sep, "/").lstrip("/")
+    if not ref or not _git(root, "ls-tree", "--name-only", ref, "--", rel).strip():
+        return None
+    return _git(root, "show", "%s:./%s" % (ref, rel))
+
+
+def trusted_ref(root, charter_rel=None):
+    """The ref security-bearing records are read from (ADR 0003 decision 8), or None.
+
+    A branch must not be able to choose it, so the working tree decides only when git
+    names nothing else. In order: origin/HEAD, which `git clone` sets and no branch can
+    edit, followed to the branch its own charter's Default branch row names;
+    $GITHUB_BASE_REF in a pull_request job; then the working tree's Default branch row
+    or profile.json default_branch. origin/<name> is preferred to the local branch."""
+    if charter_rel is None:
+        docs = str(_profile(root).get("docs_dir") or "docs")
+        charter_rel = docs.strip("/") + "/project/charter.md"
+    head = _git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").strip()
+    if head.startswith("refs/remotes/origin/") and \
+            _git(root, "rev-parse", "--verify", "--quiet", head + "^{commit}").strip():
+        named = _branch_cell(show_at(root, head, charter_rel))
+        if named and named != head[len("refs/remotes/origin/"):]:
+            return _branch_ref(root, named) or head
+        return head
+    base = os.environ.get("GITHUB_BASE_REF", "").strip()
+    if base:
+        ref = _branch_ref(root, base)
+        if ref:
+            return ref
+    try:
+        with open(os.path.join(root, charter_rel), encoding="utf-8") as handle:
+            work = handle.read()
+    except (IOError, OSError, UnicodeDecodeError):
+        work = ""
+    branch = _branch_cell(work) or str(_profile(root).get("default_branch") or "")
+    return _branch_ref(root, branch)
+
+
 def trusted_allowed(root):
     """The Extensions allowed ids as the charter stands on the default branch, the same
     rule as sdlc.py's trusted_text (ADR 0003 decision 8), for callers that do not load
     sdlc.py (the hooks). Falls back to the working tree only when there is no default
     branch or the charter is not on it yet."""
-    docs, default = "docs", ""
-    try:
-        with open(os.path.join(root, ".ai-sdlc", "profile.json"), encoding="utf-8") as handle:
-            prof = json.load(handle)
-        if isinstance(prof, dict):
-            docs = str(prof.get("docs_dir") or docs)
-            default = str(prof.get("default_branch") or "")
-    except (IOError, OSError, ValueError):
-        pass
+    docs = str(_profile(root).get("docs_dir") or "docs")
     rel = docs.strip("/") + "/project/charter.md"
-    try:
-        with open(os.path.join(root, rel), encoding="utf-8") as handle:
-            work = handle.read()
-    except (IOError, OSError, UnicodeDecodeError):
-        work = ""
-    cell = re.sub(r"_\([^)]*\)_", "", _row(work, "Default branch") or "").strip().strip("`")
-    branch = cell.strip() or default
-    if not branch:
-        head = _git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").strip()
-        if head.startswith("refs/remotes/origin/"):
-            branch = head[len("refs/remotes/origin/"):]
-    text = work
-    if branch and not branch.startswith("-"):
-        for ref in ("refs/remotes/origin/" + branch, "refs/heads/" + branch):
-            if _git(root, "rev-parse", "--verify", "--quiet", ref + "^{commit}").strip():
-                if _git(root, "ls-tree", "--name-only", ref, "--", rel).strip():
-                    text = _git(root, "show", "%s:%s" % (ref, rel))
-                break
+    text = show_at(root, trusted_ref(root, rel), rel)
+    if text is None:
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8") as handle:
+                text = handle.read()
+        except (IOError, OSError, UnicodeDecodeError):
+            text = ""
     return parse_allowed(_row(text, ALLOWED_LABEL))
+
+
+def trusted_pins(root):
+    """The manifest.json "extensions" record as it stands on the default branch, or None
+    when there is no default-branch ref or the manifest is not on it. A branch that
+    edits an allowed extension's code and its pin together then still fails the hash
+    check until it merges."""
+    text = show_at(root, trusted_ref(root), ".ai-sdlc/manifest.json")
+    if text is None:
+        return None
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return {}
+    pins = data.get("extensions") if isinstance(data, dict) else None
+    return pins if isinstance(pins, dict) else {}
 
 
 _HOOK_WARNED = set()
