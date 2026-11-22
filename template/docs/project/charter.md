@@ -262,7 +262,7 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | **Retroactive review within** | _(default: 2 days. A hotfix (`sdlc.py hotfix <ID>`) finishes without its pre-merge review and owes a review file `project/reviews/<ID>-retro-<role>.md` within this many days of being marked; `sdlc.py doctor` fails it after that. See `process/05-change-control.md`, "Rollback and hotfix")_ |
 | **Finish guard** | `on` · `off` _(default: on where the installer registered it (Claude Code). When the agent stops, it names a Tier 1 or 2 item this session committed that is not yet Done or Parked, once per item, and asks for `sdlc.py finish <ID>`. It never blocks a tool call. CI's `sdlc.py doctor --strict` is the check that holds for every tool)_ |
 | **Agent budget per tier** | _(optional, e.g. "Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h". `sdlc.py metrics` reports usage from Tokens and Minutes commit trailers against it; nothing is enforced)_ |
-| **Approvers** | _(people.json handles for Tier 1's two approvals; see project/people.json)_ |
+| **Approvers** | _(people.json handles for Tier 1's two approvals; GitHub PR reviews count first, these names are the fallback; see project/people.json)_ |
 | **Extensions allowed** | _(ids of project extensions whose code may run: agent and check commands, hook rules, doctor checks, lifecycle hooks. Read from the default branch, so adding an id on a branch has no effect until it merges. Set with `sdlc.py config --allow-extension <id>`; blank means none)_ |
 | **Staleness threshold** | _(e.g. 90 days — after this, a `project/` doc is treated as a hypothesis)_ |
 

@@ -199,6 +199,17 @@ fails an item with no committed full verify record on its newest code commit (th
 An agent may prepare, propose, and justify a change. An agent does not approve its own
 Tier 1 work, and does not count as either of the two approvers.
 
+`sdlc.py finish` and `sdlc.py approvals <ID>` read these approvals from the item branch's
+GitHub pull request reviews through `gh`. An approval counts only when it was given on
+the PR's current head commit, the PR belongs to this repository and its head is the local
+item branch, and the reviewer is a person other than the PR's author whose GitHub login
+`project/people.json` maps to a handle on the default branch. Bots never count, and
+neither does the `AI_SDLC_APPROVAL` environment variable. Without `gh`, or without such a
+PR, the charter's **Approvers** names are recorded as the fallback and the item stays
+Parked. The required count does not change with team size: when **Approvers** lists
+fewer people than the tier needs, `finish` says so ("1 of 2: this project lists 1
+approver") and the item stays Parked until a human closes it.
+
 Never bypass a failing security, migration, accessibility, or data-integrity check. If
 the check is wrong, that is a separate tracked change with its own justification.
 

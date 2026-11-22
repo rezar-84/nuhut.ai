@@ -6681,6 +6681,195 @@ def test_unclaim_alias():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_github_approvals():
+    print("approvals: Tier 1 approvals come from the item branch's GitHub PR reviews on its head")
+    d = tempfile.mkdtemp(prefix="sdlc-apr-")
+    repo = os.path.join(d, "repo")
+    write(d, "gitconfig", "[user]\n\tname = tester\n\temail = t@t\n[commit]\n\tgpgsign = false\n")
+    subprocess.call(["git", "init", "-q", "-b", "main", repo])
+    code, out = run([repo, "APR", "-y"])
+    check("installs", code == 0, out[-300:])
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+    # PATH without any real gh: a folder holding only git, then the system folders.
+    nogh = os.path.join(d, "nogh")
+    os.makedirs(nogh)
+    os.symlink(os.path.realpath(shutil.which("git")), os.path.join(nogh, "git"))
+    stub = os.path.join(d, "stub")
+    write(d, "stub/gh", "#!/bin/sh\necho \"$@\" >> \"$GH_LOG\"\n"
+          "if [ \"$1\" = repo ]; then echo '{\"nameWithOwner\": \"acme/app\"}'; exit 0; fi\n"
+          "cat \"$GH_FIXTURE\"\nexit \"${GH_EXIT:-0}\"\n")
+    os.chmod(os.path.join(stub, "gh"), 0o755)
+    fixture_path = os.path.join(d, "pr.json")
+    gh_log = os.path.join(d, "gh.log")
+    base_env = dict((k, v) for k, v in os.environ.items()
+                    if k not in ("NUHUT_USER", "CI", "AI_SDLC_APPROVAL", "GITHUB_ACTIONS"))
+    base_env.update(GIT_CONFIG_GLOBAL=os.path.join(d, "gitconfig"), GIT_CONFIG_NOSYSTEM="1",
+                    GH_FIXTURE=fixture_path, GH_LOG=gh_log)
+
+    def sdlc(*args, **kw):
+        env = dict(base_env, PATH=(stub + os.pathsep if kw.get("gh", True) else "")
+                   + nogh + os.pathsep + "/usr/bin" + os.pathsep + "/bin")
+        env.update(kw.get("env") or {})
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, universal_newlines=True, env=env,
+                           stdin=subprocess.DEVNULL, timeout=180)
+        return p.returncode, p.stdout, p.stderr
+
+    def git(*args):
+        return subprocess.run(["git"] + list(args), cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              universal_newlines=True, env=base_env).stdout.strip()
+
+    def commit(message, item=None, paths=None):
+        git("add", *(paths or ["-A"]))
+        git("commit", "-qm", message + ("\n\nWork-Item: %s\nAgent: tester" % item if item else ""))
+
+    def head():
+        return git("rev-parse", "feat/APR-1")
+
+    def rv(login, state="APPROVED", oid=None, at="2026-11-20T10:00:00Z"):
+        return {"author": {"login": login}, "state": state, "commit": {"oid": oid or head()},
+                "submittedAt": at}
+
+    def pr(reviews, oid=None, state="OPEN", cross=False, author="carol-gh"):
+        return {"number": 7, "headRefOid": oid or head(), "state": state, "isCrossRepository": cross,
+                "author": {"login": author}, "headRepositoryOwner": {"login": "acme"},
+                "headRepository": {"name": "app"}, "baseRefName": "main", "reviews": reviews}
+
+    def approvals(fixture, raw=None, gh=True, exit_code=0, env=None, as_json=True):
+        with open(fixture_path, "w") as fh:
+            fh.write(raw if raw is not None else json.dumps(fixture))
+        e = dict(env or {}, GH_EXIT=str(exit_code))
+        code_a, out_a, err_a = sdlc("approvals", "APR-1", *(["--json"] if as_json else []), gh=gh, env=e)
+        if not as_json:
+            return code_a, out_a + err_a, {}
+        try:
+            return code_a, out_a + err_a, json.loads(out_a)
+        except ValueError:
+            return code_a, out_a + err_a, {}
+
+    def reasons(res):
+        return dict((i.get("login"), i.get("reason")) for i in res.get("ignored", []))
+
+    # Records on main: people.json maps alice, bob and carol (the PR author); one approver.
+    write(repo, "docs/project/people.json", json.dumps({"people": [
+        {"handle": "alice", "name": "Alice A", "github": "alice-gh"},
+        {"handle": "bob", "name": "Bob B", "github": "bob-gh"},
+        {"handle": "carol", "name": "Carol C", "github": "carol-gh"}]}, indent=2))
+    charter = read(repo, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| \*\*Default branch\*\* \|[^\n]*$", "| **Default branch** | `main` |", charter)
+    charter = re.sub(r"(?m)^\| \*\*Approvers\*\* \|[^\n]*$", "| **Approvers** | alice |", charter)
+    write(repo, "docs/project/charter.md", charter)
+    sdlc("config", "--set-check", "unit=true")
+    sdlc("item", "add", "--id", "APR-1", "--title", "Risky change", "--tier", "1")
+    commit("chore: records")
+    git("switch", "-q", "-c", "feat/APR-1")
+    write(repo, "src/a.txt", "1\n")
+    commit("feat(APR-1): risky change", "APR-1")
+    write(repo, "docs/project/reviews/APR-1-ship-qa.md", "# Ship review\n\nPass.\n")
+    commit("chore(APR-1): ship review", "APR-1")
+    sdlc("verify", "--item", "APR-1")
+
+    code, out, res = approvals(pr([rv("alice-gh")]))
+    check("one approval on the head is 1 of 2: approvals exits 1, alice recorded from github",
+          code == 1 and res.get("met") is False and res.get("required") == 2
+          and [(a.get("handle"), a.get("source"), a.get("commit")) for a in res.get("approvers", [])]
+          == [("alice", "github", head())], out)
+    log = read(d, "gh.log")
+    check("gh is asked for this repository's PR by the item branch, with --repo",
+          "repo view --json nameWithOwner" in log and "pr view feat/APR-1 --repo acme/app --json" in log
+          and "isCrossRepository" in log, log)
+    code, out, _ = approvals(pr([rv("alice-gh")]), as_json=False)
+    check("a solo team is told the project lists 1 approver",
+          code == 1 and "1 of 2: this project lists 1 approver; see process/05 Approvals" in out, out)
+    code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")]))
+    check("two mapped approvals on the head meet Tier 1", code == 0 and res.get("met") is True
+          and sorted(a.get("handle") for a in res.get("approvers", [])) == ["alice", "bob"], out)
+    code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")], state="MERGED"))
+    check("a merged PR whose head is the local branch still counts", code == 0 and res.get("met") is True, out)
+
+    code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh", oid="0" * 40)]))
+    check("an approval of an older commit is stale and does not count",
+          code == 1 and reasons(res).get("bob-gh") == "stale", out)
+    code, out, res = approvals(pr([rv("alice-gh"), rv("carol-gh"), rv("helper[bot]")]))
+    check("the PR author's own approval and a bot's are ignored",
+          code == 1 and reasons(res).get("carol-gh") == "self-approval"
+          and reasons(res).get("helper[bot]") == "bot", out)
+    code, out, res = approvals(pr([rv("alice-gh"), rv("stranger")]))
+    check("an approving login missing from people.json is unmapped and gets no handle",
+          code == 1 and reasons(res).get("stranger") == "unmapped"
+          and [a.get("handle") for a in res.get("approvers", [])] == ["alice"], out)
+    code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh", at="2026-11-20T10:00:00Z"),
+                                   rv("bob-gh", "CHANGES_REQUESTED", at="2026-11-21T10:00:00Z")]))
+    check("an approval followed by changes requested from the same login does not count",
+          code == 1 and reasons(res).get("bob-gh") == "changes-requested", out)
+    code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")], cross=True))
+    check("a cross-repository PR is not counted: charter fallback, note pr-mismatch",
+          code == 1 and res.get("source") == "charter" and "pr-mismatch" in (res.get("note") or ""), out)
+    code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")], oid="1" * 40))
+    check("a PR whose head is not the local branch is not counted",
+          code == 1 and res.get("source") == "charter" and "pr head differs from local" in (res.get("note") or ""), out)
+    code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")], state="CLOSED"))
+    check("a closed PR is not counted", code == 1 and res.get("source") == "charter"
+          and not [a for a in res.get("approvers", []) if a.get("source") == "github"], out)
+    write(repo, "docs/project/people.json", read(repo, "docs/project/people.json").replace(
+        '"people": [', '"people": [\n    {"handle": "alice", "github": "mallory-gh"},'))
+    code, out, res = approvals(pr([rv("alice-gh"), rv("mallory-gh")]))
+    check("a people.json mapping only in the working tree does not count: unmapped",
+          code == 1 and reasons(res).get("mallory-gh") == "unmapped", out)
+    git("checkout", "--", "docs/project/people.json")
+    code, out, res = approvals(pr([rv("alice-gh"), rv("a|b\n## Done")]))
+    check("a login outside the GitHub pattern is rejected and never printed",
+          code == 1 and "## Done" not in out and "invalid-login" in reasons(res).values(), out)
+
+    for label, kw in (("no gh on PATH", {"gh": False}), ("gh exiting 1", {"exit_code": 1}),
+                      ("gh printing invalid JSON", {"raw": "{not json"})):
+        code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")]), **kw)
+        check("%s falls back to the charter names with a note, no traceback" % label,
+              code == 1 and res.get("source") == "charter" and res.get("note")
+              and [(a.get("handle"), a.get("source")) for a in res.get("approvers", [])] == [("alice", "charter")]
+              and "Traceback" not in out, out)
+    code, out, res = approvals({}, gh=False, env={"AI_SDLC_APPROVAL": "ticket-1"})
+    check("AI_SDLC_APPROVAL is never an approval",
+          code == 1 and res.get("met") is False
+          and all(a.get("source") == "charter" for a in res.get("approvers", [])), out)
+
+    # finish: one approval parks the item and says why; two on the head close it.
+    notes = ["--why", "x", "--not-done", "nothing deferred", "--discovered", "nothing",
+             "--decisions", "none", "--assumptions", "none", "--plan", "inline"]
+    with open(fixture_path, "w") as fh:
+        fh.write(json.dumps(pr([rv("alice-gh"), rv("a|b\n## Done")])))
+    code, out, err = sdlc("finish", "APR-1", "--dry-run", *notes)
+    check("finish --dry-run names 1 of 2 and would park",
+          code == 0 and "1 of 2" in out and "would set Parked" in out and "alice (github)" in out, out + err)
+    code, out, err = sdlc("finish", "APR-1", *notes)
+    shard = json.loads(read(repo, "docs/project/items/APR-1.json") or "{}")
+    check("finish with one approval parks the item, waiting on the charter, and records alice",
+          code == 0 and shard.get("status") == "Parked"
+          and "alice (github)" in shard.get("waiting_on", "")
+          and ("1 of 2 on %s" % head()[:7]) in shard.get("park_reason", "")
+          and [(a.get("handle"), a.get("source")) for a in shard.get("approvers", []) if isinstance(a, dict)]
+          == [("alice", "github")], out + err + json.dumps(shard))
+    check("the hostile login reaches no record",
+          "## Done" not in read(repo, "docs/project/items/APR-1.json")
+          and "## Done" not in read(repo, "docs/project/worklog/APR-1.md"), "")
+    commit("chore(APR-1): park for approval", "APR-1", paths=["docs/project"])
+    git("switch", "-q", "main")
+    write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md").replace(
+        "| **Approvers** | alice |", "| **Approvers** | alice, bob |"))
+    commit("chore: bob approves too")
+    git("switch", "-q", "feat/APR-1")
+    with open(fixture_path, "w") as fh:
+        fh.write(json.dumps(pr([rv("alice-gh"), rv("bob-gh")])))
+    code, out, err = sdlc("finish", "APR-1")
+    shard = json.loads(read(repo, "docs/project/items/APR-1.json") or "{}")
+    recs = [a for a in shard.get("approvers", []) if isinstance(a, dict)]
+    check("a Parked item with two approvals on its head moves to Done with both recorded from github",
+          code == 0 and shard.get("status") == "Done" and shard.get("completed")
+          and sorted((a.get("handle"), a.get("source"), a.get("commit")) for a in recs)
+          == [("alice", "github", head()), ("bob", "github", head())], out + err + json.dumps(shard))
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -6706,7 +6895,8 @@ def main():
                  test_hotfix_fast_path,
                  test_people_registry,
                  test_shard_merge_driver,
-                 test_release_records, test_unclaim_alias):
+                 test_release_records, test_unclaim_alias,
+                 test_github_approvals):
         test()
     print("")
     if failures:
