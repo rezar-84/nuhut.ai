@@ -653,9 +653,20 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
     scripts = worktree_scripts(project) if path else None
     wants_port = bool(scripts and (scripts["setup"] or scripts["teardown"]))
 
+    if path and not base and not _git(project, "rev-parse", "--verify", "--quiet", "HEAD").strip():
+        # On an unborn HEAD `git worktree add -b` makes an empty orphan checkout: none of
+        # the kit's files, nothing to build on.
+        return None, ("this repository has no commits yet, so a worktree would be empty: "
+                      "commit the kit first (`git add -A && git commit`), or claim with "
+                      "--no-worktree")
     target = os.path.join(folder, item + ".json")
     port_lock = os.path.join(folder, ".ports.lock")
     locked = _acquire_lock(port_lock) if wants_port else False
+    if wants_port and not locked:
+        # Without the lock, the port pick and the claim file are not atomic between
+        # claims, and two worktrees could get the same NUHUT_PORT.
+        return None, ("could not take %s within 5 s to allocate a port: another claim holds it. "
+                      "Try again; a lock left by a crashed claim clears after 15 s" % port_lock)
     try:
         if wants_port:
             record["port"] = allocate_port(folder, scripts["port_base"]) or None

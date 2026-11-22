@@ -3776,6 +3776,16 @@ def test_worktree_scripts():
           and rec_a["port"] >= 4710 and rec_b["port"] >= 4710
           and setups and setups[0][2] == str(rec_a["port"]), str((rec_a.get("port"), rec_b.get("port"))))
 
+    lock = os.path.join(repo, ".git", "nuhut", "claims", ".ports.lock")
+    if os.path.isdir(os.path.dirname(lock)):
+        write(os.path.dirname(lock), ".ports.lock", "1 0\n")
+        code, out = sdlc("claim", "WTS-004", "--agent", "a")
+        check("a claim that cannot take the port lock is refused, not given a port unlocked",
+              code != 0 and "port" in out and not os.path.isdir(os.path.join(d, "repo-WTS-004")), out)
+        os.remove(lock)
+    else:
+        check("the claims folder is where the test looks", False, os.path.dirname(lock))
+
     code, out = sdlc("release", "WTS-001", "--agent", "a")
     check("release without --remove-worktree runs no teardown",
           code == 0 and not [e for e in entries() if e[0] == "teardown"], out)
