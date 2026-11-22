@@ -1986,6 +1986,23 @@ def allowed_extensions(project):
         return frozenset()
 
 
+def notify_event(project, event, item="", title="", tier="", status=""):
+    """Send one webhook event (NUHT-034) when the charter's Notify webhook row is on.
+    Returns (state, message); never raises and never blocks the caller."""
+    try:
+        return runtime_module("notify").send(sys.modules[__name__], project, event, item,
+                                             title, tier, status)
+    except Exception as exc:  # noqa: BLE001 -- a missing notify.py is "off"
+        return "off", exc.__class__.__name__
+
+
+def notify_if_parked(project, before, saved):
+    """The parked event, once, when <saved> is Parked and <before> was not."""
+    if (saved or {}).get("status") == "Parked" and (before or {}).get("status") != "Parked":
+        notify_event(project, "parked", saved.get("id", ""), saved.get("title", ""),
+                     saved.get("tier", ""), "Parked")
+
+
 def extension_lifecycle(project, event, *args):
     """[(extension id, message)] from the built-in and allowed extensions' <event> hooks;
     [] when the registry is missing."""
@@ -4168,6 +4185,21 @@ def configure_kit(project, changes):
         applied.append("Extensions allowed=%s (takes effect once this charter change is on "
                        "the default branch)" % ", ".join(have))
 
+    if changes.get("notify_webhook"):
+        name = str(changes["notify_webhook"]).strip()
+        if name.lower() == "off":
+            text = _set_charter_row(text, "Notify webhook", "off")
+            applied.append("Notify webhook=off")
+        else:
+            env_re = runtime_module("notify").ENV_RE
+            if not env_re.match(name):
+                return None, ("--notify-webhook takes the name of an environment variable "
+                              "matching ^NUHUT_[A-Z0-9_]{1,40}$ (e.g. NUHUT_WEBHOOK_URL), "
+                              "never the URL itself")
+            text = _set_charter_row(text, "Notify webhook", "`%s`" % name)
+            applied.append("Notify webhook=%s (takes effect once this charter change is on the "
+                           "default branch; set %s where the commands run)" % (name, name))
+
     charter_full = project.path(project.charter_path)
     charter_dir = os.path.dirname(charter_full)
     if charter_dir:
@@ -4641,6 +4673,7 @@ Writing (the charter's Slop filter row: off, on, strict)
 
 Setup
   config              see or change the charter's constraints                          config --specs on
+  notify              the Notify webhook: its setup; --test sends a test event         notify --test
   fix                 repair setup drift; preview record repairs (--apply writes)      fix rotate-worklog
 
 Options: --root <dir> runs against another project; --selftest checks the runtime itself.
@@ -4691,6 +4724,9 @@ EXAMPLES = {
     "merge-shard": ["merge-shard BASE OURS THEIRS   # what git runs; set it up with: fix merge-driver"],
     "lens": ["lens", "lens --area build", "lens --area standards --write", "lens --user --json"],
     "audit": ["audit", "audit --strict           # exit 1 on a critical or high vulnerability"],
+    "notify": ["notify                   # is the webhook on, which variable, is it set here",
+               "notify --test            # send a test event (exit 1 when nothing was sent)",
+               "notify --test --ids-only # the same, without the title"],
     "sync": ["sync                     # as of the last fetch", "sync --fetch             # fetch first",
              "sync --fetch --strict    # exit 1 when behind the default branch too (CI, before finish)"],
     "slop": ["slop                     # prose files changed against HEAD",
@@ -4880,6 +4916,9 @@ def main(argv):
     cfg.add_argument("--allow-extension", dest="allow_extension", action="append", default=[],
                      metavar="ID", help="add an extension id to the charter's Extensions allowed "
                      "row, so its code runs once the change is on the default branch")
+    cfg.add_argument("--notify-webhook", dest="notify_webhook", metavar="NUHUT_VAR|off",
+                     help="set the charter's Notify webhook row to the environment variable "
+                     "that holds the webhook URL (never the URL), or off")
     cfg.add_argument("--json", action="store_true", help="print kit status as JSON")
     ex = sub.add_parser("ext", help="project extensions: list, add, update, remove, search the "
                                     "catalog, validate a manifest")
@@ -5053,6 +5092,12 @@ def main(argv):
     ms_p.add_argument("theirs", help="their version (%%B)")
     ms_p.add_argument("--marker-size", dest="marker_size", type=int, default=7,
                       help="length of the conflict markers (git's %%L)")
+    nt = sub.add_parser("notify", help="the webhook named by the charter's Notify webhook row: "
+                                       "show how it is set up, or send a test event")
+    nt.add_argument("--test", action="store_true", help="send a test event and report the result")
+    nt.add_argument("--ids-only", dest="ids_only", action="store_true",
+                    help="leave the title out of the test payload")
+    nt.add_argument("--json", action="store_true", help="print the result as JSON")
     au = sub.add_parser("audit", help="run the charter's dependency scanner in JSON mode and keep "
                                       "the vulnerable packages it reports")
     au.add_argument("--timeout", type=int, default=600, help="seconds before the scanner is stopped")
@@ -5140,6 +5185,24 @@ def main(argv):
         else:
             print("\n".join(lines))
         return code
+    if opts.command == "notify":
+        notify_mod = runtime_module("notify")
+        if not opts.test:
+            cfg = notify_mod.config(sys.modules[__name__], project)
+            if opts.json:
+                print(json.dumps(dict(cfg, set=bool(cfg["env"] and os.environ.get(cfg["env"], "").strip())),
+                                 indent=2))
+            else:
+                print("\n".join(notify_mod.status_lines(sys.modules[__name__], project)))
+            return 0
+        state, message = notify_mod.send(sys.modules[__name__], project, "test",
+                                         title="Nuhut webhook test", ids_only=opts.ids_only,
+                                         warn=lambda m: None)
+        if opts.json:
+            print(json.dumps({"state": state, "message": message}, indent=2))
+        else:
+            print("notify: " + message)
+        return 0 if state == "sent" else 1
     if opts.command == "sync":
         sync_mod = runtime_module("sync")
         how = sync_mod.strategy(labelled(project.charter, "Updating a branch"))
@@ -5377,6 +5440,7 @@ def main(argv):
             except ValueError as exc:
                 sys.stderr.write("item add: %s\n" % exc)
                 return 2
+            notify_if_parked(project, None, saved)
             if opts.json:
                 out_saved = dict(saved)
                 if triage_note:
@@ -5408,6 +5472,7 @@ def main(argv):
                 updated["waiting_on"] = updated.get("waiting_on") or "backlog owner"
                 updated["park_reason"] = updated.get("park_reason") or ("Discovered item triage: %s" % triage_reason)
             saved = _shards_mod.save_item(project, updated, today=today_iso)
+            notify_if_parked(project, cur, saved)
             if opts.json:
                 out_saved = dict(saved, promoted=(saved["status"] == "Ready"), triage_reason=triage_reason)
                 print(json.dumps(out_saved, indent=2))
@@ -5461,6 +5526,7 @@ def main(argv):
             except ValueError as exc:
                 sys.stderr.write("item set: %s\n" % exc)
                 return 2
+            notify_if_parked(project, cur, saved)
             if getattr(opts, "hotfix", False):
                 saved, err_h, code_h = mark_hotfix(project, opts.target, today=today_iso)
                 if err_h:
@@ -5791,6 +5857,8 @@ def main(argv):
             changes["checks"] = chk_map
         if opts.allow_extension:
             changes["allow_extension"] = opts.allow_extension
+        if opts.notify_webhook:
+            changes["notify_webhook"] = opts.notify_webhook
         if changes:
             res, err = configure_kit(project, changes)
             if err:

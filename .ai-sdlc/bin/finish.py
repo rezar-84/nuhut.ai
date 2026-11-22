@@ -633,7 +633,8 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     elif reviews:
         out.append("review   %s" % ", ".join(r["file"] for r in reviews))
 
-    for name, n in ([] if already else rt.open_escalations(project, item)):
+    escalations = [] if already else rt.open_escalations(project, item)
+    for name, n in escalations:
         owe("review   finding %s in %s/project/reviews/%s is escalated and has no decision: "
             "a person decides it and writes their name in its Responses row"
             % (n, project.docs, name))
@@ -673,6 +674,8 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
         owe("ext      %s before_finish: %s" % (ext_id, message))
 
     if owing:
+        if escalations and not dry_run:
+            _notify(rt, project, out, "review-blocked", item, title, tier, status)
         return out + ["", "not finished: %d thing(s) owed (OWED above)" % len(owing)], 1
     if already:
         return out + ["status   already %s" % status], 0
@@ -721,7 +724,19 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
     out.append("status   %s %s%s" % ("would set" if dry_run else "set", final,
                                      " (waiting on %s for the merge approval)" % extra[0]
                                      if needs_human_gate else ""))
+    if needs_human_gate and not dry_run:
+        _notify(rt, project, out, "approval-needed", item, title, tier, final)
     return out, 0
+
+
+def _notify(rt, project, out, event, item, title, tier, status):
+    """Send a webhook event (NUHT-034) and note a sent one; failures only warn."""
+    send = getattr(rt, "notify_event", None)
+    if send is None:
+        return
+    state, message = send(project, event, item, title, tier, status)
+    if state == "sent":
+        out.append("notify   " + message)
 
 
 # ---------------------------------------------------------------- guard

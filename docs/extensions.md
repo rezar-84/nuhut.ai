@@ -165,6 +165,40 @@ The catalog is fetched through `.ai-sdlc/bin/net.py`:
 An entry whose URL breaks the `ext add` rules is shown as refused. `validate.py` checks
 that the kit's `VERSION` satisfies every range in the kit's own catalog.
 
+## Webhook notifications
+
+Nuhut can tell a chat channel or an on-call tool when an item waits on a person. The
+charter's optional **Notify webhook** row names an environment variable that holds the
+URL; the URL itself never goes in the repository. The row is off by default.
+
+```sh
+python3 .ai-sdlc/bin/sdlc.py config --notify-webhook NUHUT_WEBHOOK_URL   # writes the row
+export NUHUT_WEBHOOK_URL='https://hooks.example.com/...'                 # where commands run
+python3 .ai-sdlc/bin/sdlc.py notify            # on or off, which variable, is it set here
+python3 .ai-sdlc/bin/sdlc.py notify --test     # send a test event; exit 1 if nothing was sent
+```
+
+- The variable name must match `^NUHUT_[A-Z0-9_]{1,40}$`, so the row cannot point at
+  another secret in the environment. `config --notify-webhook off` turns it off.
+- The row is read from the default branch, like **Approvers** and **Extensions
+  allowed**: a branch that adds or changes it has no effect until it merges, and
+  `ci-check` fails a Tier 2 or 3 range that changes it.
+- Events: `parked` (an item set to Parked by `item add`, `item set` or `item triage`),
+  `review-blocked` (`finish` refused because a review finding is escalated with no
+  decision; sent on each refused run), `approval-needed` (`finish` parked a Tier 1 item,
+  or a Tier 2 item under Strict tier rules, for the merge approval) and `test`.
+- The payload is a small JSON object: `schema`, `source`, `event`, `project` (the ID
+  prefix), `item`, `title`, `tier`, `status` and `sent_at`. It carries no diff, no park
+  reason, no person's name and no URL. **It does include the item's title**, which
+  leaves the machine. Add `--ids-only` to the row (`` `NUHUT_WEBHOOK_URL` --ids-only ``)
+  to drop titles from every event, or pass `notify --test --ids-only` for one test.
+- The POST goes through `net.py`: `https://` only, no redirect that changes the scheme
+  or host, a 5 second timeout, and the response is ignored. Plain `http://` is allowed
+  only to `127.0.0.1` or `localhost` while `NUHUT_ALLOW_HTTP=1`, for a local receiver.
+- A failed send prints one `notify:` warning that names only the scheme and host (never
+  the path or query, which often carry a token) and never blocks the command. An unset
+  variable sends nothing and stays quiet, except under `notify --test`.
+
 ## Not yet
 
 - `commands` entry points are validated, pinned and listed, but `sdlc.py` does not yet

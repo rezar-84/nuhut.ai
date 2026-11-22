@@ -6681,6 +6681,251 @@ def test_unclaim_alias():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_webhook_notify():
+    print("NUHT-034: Notify webhook row, notify --test, Parked / review-blocked / approval-needed events")
+    import threading
+    import http.server
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    try:
+        import net as _net
+    except ImportError as exc:
+        check("optional/runtime/net.py imports", False, str(exc))
+        return
+    check("net.post_json exists", hasattr(_net, "post_json"))
+    if not hasattr(_net, "post_json"):
+        return
+    received = []
+
+    class Hook(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            size = int(self.headers.get("Content-Length") or 0)
+            received.append((self.path, self.headers.get("Content-Type") or "",
+                             self.rfile.read(size).decode("utf-8", "replace")))
+            self.send_response(204)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Hook)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    hook_url = "http://127.0.0.1:%d/hooks/s3cr3t-path?token=t0ken" % port
+
+    # net.post_json: https only; plain http only to the loopback under NUHUT_ALLOW_HTTP=1.
+    saved_allow = os.environ.pop("NUHUT_ALLOW_HTTP", None)
+    for bad in (hook_url, "file:///etc/passwd", "ftp://example.com/x"):
+        try:
+            _net.post_json(bad, {"x": 1})
+            refused = False
+        except ValueError as exc:
+            refused = "s3cr3t" not in str(exc) and "t0ken" not in str(exc)
+        check("net.post_json refuses %s without NUHUT_ALLOW_HTTP" % bad.split(":")[0], refused)
+    os.environ["NUHUT_ALLOW_HTTP"] = "1"
+    try:
+        _net.post_json("http://example.com/x", {"x": 1})
+        refused = False
+    except ValueError:
+        refused = True
+    check("NUHUT_ALLOW_HTTP=1 allows http only to 127.0.0.1 or localhost", refused)
+    try:
+        _net.post_json(hook_url, {"event": "unit"})
+        posted = bool(received) and json.loads(received[-1][2]).get("event") == "unit"
+    except ValueError:
+        posted = False
+    check("net.post_json sends JSON to the loopback under NUHUT_ALLOW_HTTP=1", posted, str(received))
+    if saved_allow is None:
+        os.environ.pop("NUHUT_ALLOW_HTTP", None)
+    else:
+        os.environ["NUHUT_ALLOW_HTTP"] = saved_allow
+    del received[:]
+
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-notify-"))
+    gitcfg = os.path.join(d, "gitconfig")
+    write(d, "gitconfig", "")
+    repo = os.path.join(d, "repo")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-b", "main", "-q", repo])
+    code, out = run([repo, "NTF", "-y"])
+    check("installs", code == 0, out[-300:])
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+    base_env = dict((k, v) for k, v in os.environ.items()
+                    if not k.startswith("NUHUT_") and k != "CI")
+    base_env.update(GIT_CONFIG_GLOBAL=gitcfg, GIT_CONFIG_NOSYSTEM="1",
+                    NUHUT_ALLOW_HTTP="1", NUHUT_TEST_HOOK=hook_url)
+
+    def sdlc(*args, **env):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, universal_newlines=True,
+                           env=dict(base_env, **env), timeout=120)
+        return p.returncode, p.stdout, p.stderr
+
+    def commit(message):
+        scoped = re.match(r"^[a-z]+\((NTF-[0-9]+)\):", message)
+        if scoped:
+            message += "\n\nWork-Item: %s" % scoped.group(1)
+        subprocess.call(["git", "add", "-A"], cwd=repo, env=base_env)
+        subprocess.call(git + ["commit", "-qm", message], cwd=repo, env=base_env,
+                        stdout=subprocess.DEVNULL)
+
+    def events():
+        out_ = []
+        for _, _, body in received:
+            try:
+                out_.append(json.loads(body))
+            except ValueError:
+                out_.append({"unparsed": body})
+        return out_
+
+    def set_row(cell):
+        text = read(repo, "docs/project/charter.md")
+        text = re.sub(r"(?m)^\| \*\*Notify webhook\*\* \|[^\n]*\n", "", text)
+        if cell:
+            text = text.rstrip("\n") + "\n\n| **Notify webhook** | %s |\n" % cell
+        write(repo, "docs/project/charter.md", text)
+
+    charter = re.sub(r"(?m)^\| \*\*Approvers\*\* \|[^\n]*$", "| **Approvers** | Sam |",
+                     read(repo, "docs/project/charter.md"))
+    if re.search(r"(?m)^\| \*\*Default branch\*\* \|", charter):
+        charter = re.sub(r"(?m)^\| \*\*Default branch\*\* \|[^\n]*$",
+                         "| **Default branch** | `main` |", charter)
+    else:
+        charter = charter.rstrip("\n") + "\n\n| **Default branch** | `main` |\n"
+    write(repo, "docs/project/charter.md", charter)
+    sdlc("config", "--set-check", "unit=true")
+    commit("chore: records")
+
+    # Off by default: no row, nothing sent, notify --test says how to turn it on.
+    code, out, err = sdlc("notify", "--test")
+    check("with no Notify webhook row, notify --test sends nothing and says it is off",
+          code == 1 and "off" in (out + err).lower() and "config --notify-webhook" in out + err
+          and not received, out + err)
+    code, out, err = sdlc("item", "add", "NTF-1", "--title", "Quiet park", "--status", "Parked",
+                          "--waiting-on", "Sam", "--park-reason", "a decision")
+    check("an item Parked while the row is off sends nothing", code == 0 and not received, out + err)
+
+    # An env var name outside ^NUHUT_[A-Z0-9_]{1,40}$ is refused, by config and at send time.
+    code, out, err = sdlc("config", "--notify-webhook", "PATH")
+    check("config --notify-webhook refuses a name outside NUHUT_[A-Z0-9_]",
+          code != 0 and "NUHUT_" in err, out + err)
+    set_row("`HOME`")
+    commit("chore: bad row")
+    code, out, err = sdlc("notify", "--test", HOME="http://127.0.0.1:%d/x" % port)
+    check("a row naming a non-NUHUT_ variable is refused and sends nothing",
+          code == 1 and "NUHUT_" in out + err and not received, out + err)
+
+    # The row is read from the default branch: a commit on another branch has no effect.
+    subprocess.call(git + ["switch", "-q", "-c", "feature"], cwd=repo)
+    code, out, err = sdlc("config", "--notify-webhook", "NUHUT_TEST_HOOK")
+    check("config --notify-webhook writes the row", code == 0
+          and "| **Notify webhook** | `NUHUT_TEST_HOOK` |" in read(repo, "docs/project/charter.md"),
+          out + err)
+    commit("chore: hook on a branch")
+    code, out, err = sdlc("notify", "--test")
+    check("a Notify webhook row only on a branch is not trusted (read from the default branch)",
+          code == 1 and not received, out + err)
+    subprocess.call(git + ["switch", "-q", "main"], cwd=repo)
+    subprocess.call(git + ["merge", "-q", "--ff-only", "feature"], cwd=repo)
+
+    code, out, err = sdlc("notify")
+    check("notify with no flag reports the variable name and whether it is set, never the URL",
+          code == 0 and "NUHUT_TEST_HOOK" in out and "s3cr3t" not in out + err
+          and "t0ken" not in out + err, out + err)
+    code, out, err = sdlc("notify", "--test")
+    ev = events()
+    check("notify --test sends a test event", code == 0 and len(ev) == 1
+          and ev[0].get("event") == "test" and received[0][1].startswith("application/json"),
+          out + err + str(received))
+    check("notify --test output names only scheme and host",
+          "127.0.0.1" in out and "s3cr3t" not in out + err and "t0ken" not in out + err, out + err)
+    del received[:]
+    code, out, err = sdlc("notify", "--test", NUHUT_TEST_HOOK="")
+    check("a row whose variable is unset says so and exits 1", code == 1
+          and "NUHUT_TEST_HOOK" in out + err and not received, out + err)
+
+    # Parked waiting on a human.
+    code, out, err = sdlc("item", "add", "NTF-2", "--title", "Retention period", "--tier", "2")
+    check("a Ready item sends nothing", code == 0 and not received, out + err)
+    code, out, err = sdlc("item", "set", "NTF-2", "--status", "Parked", "--waiting-on", "Sam",
+                          "--park-reason", "legal call")
+    ev = events()
+    check("item set --status Parked sends a parked event with the ID and title",
+          code == 0 and len(ev) == 1 and ev[0].get("event") == "parked"
+          and ev[0].get("item") == "NTF-2" and ev[0].get("title") == "Retention period", str(ev))
+    check("the payload carries IDs and titles only (no waiting-on, reason or diff)",
+          bool(ev) and "legal call" not in received[-1][2] and "Sam" not in received[-1][2]
+          and "diff" not in ev[0], received[-1][2] if received else "")
+    del received[:]
+    sdlc("item", "set", "NTF-2", "--title", "Retention period (renamed)")
+    check("an edit to an already Parked item sends nothing again", not received, str(events()))
+
+    # A send that fails warns and never blocks; the warning names only scheme and host.
+    code, out, err = sdlc("item", "add", "NTF-3", "--title", "Dead hook", "--status", "Parked",
+                          "--waiting-on", "Sam",
+                          NUHUT_TEST_HOOK="http://127.0.0.1:9/dead/s3cr3t?token=t0ken")
+    check("a failed webhook warns and the command still succeeds",
+          code == 0 and "notify" in err.lower() and "127.0.0.1" in err
+          and os.path.isfile(os.path.join(repo, "docs/project/items/NTF-3.json")), out + err)
+    check("the warning never prints the path or query", "s3cr3t" not in out + err
+          and "t0ken" not in out + err and "/dead" not in out + err, err)
+    code, out, err = sdlc("notify", "--test", NUHUT_TEST_HOOK="https://127.0.0.1:9/x/s3cr3t")
+    check("notify --test reports a failure with exit 1 and no path",
+          code == 1 and "s3cr3t" not in out + err, out + err)
+
+    # --ids-only drops titles.
+    code, out, err = sdlc("notify", "--test", "--ids-only")
+    ev = events()
+    check("notify --test --ids-only sends no title", code == 0 and bool(ev) and "title" not in ev[-1],
+          str(ev))
+    set_row("`NUHUT_TEST_HOOK` --ids-only")
+    commit("chore: ids only")
+    del received[:]
+    sdlc("item", "add", "NTF-4", "--title", "Secret project name", "--status", "Parked",
+         "--waiting-on", "Sam")
+    check("a row with --ids-only drops titles from events",
+          bool(received) and "Secret project name" not in received[-1][2]
+          and events()[-1].get("item") == "NTF-4", str(received))
+    set_row("`NUHUT_TEST_HOOK`")
+    commit("chore: titles again")
+    del received[:]
+
+    # finish: an open escalation blocks it (review-blocked); a Tier 1 finish waits for approval.
+    sdlc("item", "add", "NTF-5", "--title", "Risky change", "--tier", "1", "--status", "In progress")
+    write(repo, "src/f5.txt", "5")
+    commit("feat(NTF-5): change")
+    sdlc("verify", "--item", "NTF-5")
+    responses = ("# Ship review\n\nPass.\n\n## Responses\n\n"
+                 "| # | Response | Evidence or decision | Decided by |\n| --- | --- | --- | --- |\n"
+                 "| 1 | Escalate | the retention period is a legal call | |\n")
+    write(repo, "docs/project/reviews/NTF-5-ship-qa.md", responses)
+    del received[:]
+    code, out, err = sdlc("finish", "NTF-5")
+    ev = events()
+    check("finish blocked by an escalated finding sends review-blocked",
+          code == 1 and [e.get("event") for e in ev] == ["review-blocked"]
+          and ev[0].get("item") == "NTF-5", out + err + str(ev))
+    del received[:]
+    sdlc("finish", "NTF-5", "--dry-run")
+    check("finish --dry-run sends nothing", not received, str(events()))
+    write(repo, "docs/project/reviews/NTF-5-ship-qa.md",
+          responses.replace("legal call | |", "legal call; keep 30 days | Sam |"))
+    for _ in range(3):
+        code, out, err = sdlc("finish", "NTF-5")
+        if code == 0:
+            break
+        for rel in ("docs/project/worklog.md", "docs/project/worklog/NTF-5.md"):
+            log = read(repo, rel)
+            if log:
+                write(repo, rel, re.sub(r"(?m)^TODO\(finish\): .*$", "none.", log))
+    ev = events()
+    check("a Tier 1 finish sends approval-needed once",
+          code == 0 and [e.get("event") for e in ev] == ["approval-needed"]
+          and ev[-1].get("item") == "NTF-5" and ev[-1].get("title") == "Risky change",
+          out + err + str(ev))
+    server.shutdown()
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -6706,7 +6951,8 @@ def main():
                  test_hotfix_fast_path,
                  test_people_registry,
                  test_shard_merge_driver,
-                 test_release_records, test_unclaim_alias):
+                 test_release_records, test_unclaim_alias,
+                 test_webhook_notify):
         test()
     print("")
     if failures:
