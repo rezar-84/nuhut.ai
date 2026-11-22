@@ -1,0 +1,21 @@
+{
+  "id": "NUHT-039",
+  "title": "Server-side pre-receive hook running ci-check; approval readers for non-GitHub hosts as extensions",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Proposed",
+  "depends": [],
+  "touch": [],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "Changes what can refuse a merge: needs human approval (AGENTS.md section 9).",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

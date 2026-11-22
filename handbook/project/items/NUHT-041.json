@@ -1,0 +1,21 @@
+{
+  "id": "NUHT-041",
+  "title": "Block a release while an S1 defect is open",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Proposed",
+  "depends": [],
+  "touch": [],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "Tier 1 gate change: needs human approval.",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

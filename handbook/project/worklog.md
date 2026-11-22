@@ -30,6 +30,866 @@ last-reviewed: 2026-11-13
 
 <!-- New entries go here, above the older ones. -->
 
+## NUHT-035 — Move smoke tests to unittest with selection, a fast unit tier and a parallel pty tier (touch: tests/)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `0bd719a..8964d1e`
+
+### What changed
+
+- fix(NUHT-035): hold the semver unit tests to the 6.0 release levels (8964d1e)
+- Merge branch 'v6/NUHT-035' into kit-v6 (8977ae1)
+- feat(NUHT-035): add tests/run.py runner and tests/unit parser tests (0bd719a)
+
+Files: `tests/unit/test_semver.py`, `CHANGELOG.md`, `CONTRIBUTING.md`, `docs/install.md`, `tests/smoke.py`, `.github/workflows/ci.yml`, `tests/run.py`, `tests/unit/_paths.py`, `tests/unit/test_plan_parsing.py`, `tests/unit/test_review_responses.py`
+
+### Why
+
+tests/run.py adds --only, --list and --jobs; tests/unit/ holds unittest cases. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T113710Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T113710Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T113710Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T113710Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+tests/run.py adds --only, --list and --jobs; tests/unit/ holds unittest cases. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-034 — Webhook notifications for blocked, approval-needed and review-blocking events
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `33a0ac9..33a0ac9`
+
+### What changed
+
+- feat(NUHT-034): webhook notifications for parked, review-blocked and approval-needed items (33a0ac9)
+
+Files: `CHANGELOG.md`, `README.md`, `docs/cli.md`, `docs/extensions.md`, `install.py`, `optional/runtime/finish.py`, `optional/runtime/net.py`, `optional/runtime/notify.py`, `optional/runtime/sdlc.py`, `tests/smoke.py`
+
+### Why
+
+notify sends webhooks for blocked, approval-needed and review-blocking events. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T112811Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T112811Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T112811Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T112811Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+notify sends webhooks for blocked, approval-needed and review-blocking events. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-033 — Standards discovery: extract codebase conventions via lens
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `49a3967..49a3967`
+
+### What changed
+
+- feat(NUHT-033): standards discovery in sdlc.py lens --area standards (49a3967)
+
+Files: `CHANGELOG.md`, `docs/cli.md`, `optional/runtime/lens.py`, `optional/runtime/sdlc.py`, `tests/smoke.py`
+
+### Why
+
+lens --area standards extracts codebase conventions. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T111906Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T111906Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T111906Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T111906Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+lens --area standards extracts codebase conventions. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-032 — Worktree setup/run scripts for claim and dispatch
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `82193fc..e3d1222`
+
+### What changed
+
+- fix(NUHT-032): never allocate a port without the lock; no empty worktrees (e3d1222)
+- feat(NUHT-032): run worktree setup and teardown scripts on claim, release and dispatch (82193fc)
+
+Files: `optional/runtime/claims.py`, `tests/smoke.py`, `CHANGELOG.md`, `docs/cli.md`, `docs/multi-agent.md`, `handbook/process/10-multi-agent.md`, `optional/runtime/dispatch.py`, `optional/runtime/sdlc.py`, `template/docs/process/10-multi-agent.md`, `template/docs/project/charter.md`
+
+### Why
+
+claim and dispatch run per-worktree setup and teardown scripts; a timed-out port lock refuses the claim. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T110954Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T110954Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T110954Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T110954Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+claim and dispatch run per-worktree setup and teardown scripts; a timed-out port lock refuses the claim. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-031 — MCP server extension: backlog, verify, finish, doctor as tools (stdlib JSON-RPC)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `1e93fb1..5a813bd`
+
+### What changed
+
+- fix(NUHT-031): keep install.py --help within its 60 lines (5a813bd)
+- Merge branch 'v6/NUHT-031' into kit-v6 (17bed63)
+- feat(NUHT-031): serve the records as read-only MCP tools over stdio (1e93fb1)
+
+Files: `install.py`, `CHANGELOG.md`, `README.md`, `docs/cli.md`, `docs/install.md`, `optional/runtime/sdlc.py`, `tests/smoke.py`, `optional/runtime/mcp_server.py`
+
+### Why
+
+sdlc.py mcp serves backlog, verify, finish and doctor over stdio JSON-RPC, stdlib only. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T110044Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T110044Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T110044Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T110044Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+sdlc.py mcp serves backlog, verify, finish and doctor over stdio JSON-RPC, stdlib only. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-030 — Issue-tracker sync extension: GitHub Issues, then Linear and Jira
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `36bc9d9..5c9afc5`
+
+### What changed
+
+- fix(NUHT-030): link items by issue title only for mapped authors (5c9afc5)
+- feat(NUHT-030): issues pull|push through gh as the github-issues built-in extension (36bc9d9)
+
+Files: `optional/extensions/github-issues/issues.py`, `tests/smoke.py`, `CHANGELOG.md`, `README.md`, `docs/cli.md`, `docs/extensions.md`, `optional/extensions/github-issues/nuhut-extension.json`, `optional/runtime/sdlc.py`, `optional/runtime/shards.py`
+
+### Why
+
+github-issues extension pulls issues into the backlog; titles link items only for authors mapped in people.json. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T105137Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T105137Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T105137Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T105137Z, commit 8e128c9
+
+### Not done
+
+Linear and Jira extensions; a person copies issues.py into .ai-sdlc/extensions/github-issues/ (trust anchor)
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+github-issues extension pulls issues into the backlog; titles link items only for authors mapped in people.json. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-029 — DORA delivery metrics in metrics and the viewer (touch: optional/runtime/view.py, optional/runtime/view/)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `8d4f289..8d4f289`
+
+### What changed
+
+- feat(NUHT-029): DORA delivery measures in metrics and the viewer (8d4f289)
+
+Files: `CHANGELOG.md`, `README.md`, `docs/cli.md`, `docs/viewer.md`, `optional/runtime/sdlc.py`, `optional/runtime/view.html`, `optional/runtime/view.py`, `optional/runtime/view/js/12-dashboard.js`, `tests/smoke.py`
+
+### Why
+
+DORA metrics from release and deploy records in metrics and the viewer. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T104227Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T104227Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T104227Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T104227Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+DORA metrics from release and deploy records in metrics and the viewer. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-028 — Hotfix fast path with a doctor check for the retroactive review (touch: optional/runtime/sdlc.py, template/docs/process/05-change-control.md)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `a2f0a6f..bf8d00c`
+
+### What changed
+
+- test(NUHT-028): commit the hotfix fixtures with a Work-Item trailer (bf8d00c)
+- feat(NUHT-028): hotfix fast path with a retroactive review check in doctor (a2f0a6f)
+
+Files: `tests/smoke.py`, `CHANGELOG.md`, `README.md`, `docs/cli.md`, `handbook/process/05-change-control.md`, `handbook/templates/postmortem.md`, `optional/runtime/finish.py`, `optional/runtime/sdlc.py`, `optional/runtime/shards.py`, `template/docs/process/05-change-control.md`, `template/docs/project/charter.md`, `template/docs/templates/postmortem.md`
+
+### Why
+
+hotfix marks the fast path; doctor flags a hotfix without a retroactive review inside the charter window. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T103309Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T103309Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T103309Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T103309Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+hotfix marks the fast path; doctor flags a hotfix without a retroactive review inside the charter window. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-025 — Merge driver for item shards; rendered backlog and worklog gitignored (touch: optional/runtime/shards.py, install.py)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `4130b73..8e128c9`
+
+### What changed
+
+- fix(NUHT-025): the guided preview counts the .gitattributes lines it will write (8e128c9)
+- test(NUHT-025): status reports the installed nuhut-shard driver until fix merge-driver (e4b01ce)
+- feat(NUHT-025): field-level merge driver for item shards (4130b73)
+
+Files: `install.py`, `tests/smoke.py`, `CHANGELOG.md`, `README.md`, `docs/cli.md`, `docs/multi-agent.md`, `optional/runtime/sdlc.py`, `optional/runtime/shards.py`
+
+### Why
+
+merge-shard driver and fix merge-driver; rendered backlog and worklog gitignored; the guided preview counts the .gitattributes lines. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T113710Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T113710Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T113710Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T113710Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+merge-shard driver and fix merge-driver; rendered backlog and worklog gitignored; the guided preview counts the .gitattributes lines. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-023 — People registry: owner and claims name humans (touch: optional/runtime/shards.py, optional/runtime/claims.py)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `5e417d9..5e417d9`
+
+### What changed
+
+- feat(NUHT-023): people registry for owners, claims, doctor and the viewer (5e417d9)
+
+Files: `CHANGELOG.md`, `docs/cli.md`, `optional/runtime/claims.py`, `optional/runtime/dispatch.py`, `optional/runtime/sdlc.py`, `optional/runtime/status.py`, `optional/runtime/view.html`, `optional/runtime/view.py`, `optional/runtime/view/js/04-helpers.js`, `optional/runtime/view/js/12-dashboard.js`, `optional/runtime/view/js/15-dashboard-doctor.js`, `optional/runtime/view/js/17-tooltip-drawer.js` (+3 more)
+
+### Why
+
+people.json maps git identities and logins to people; owner and claims name them; status reports a missing entry. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T094749Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T094749Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T094749Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T094749Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+people.json maps git identities and logins to people; owner and claims name them; status reports a missing entry. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-021 — Split sdlc.py command routing into a command table (touch: optional/runtime/sdlc.py)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `7626276..041f8be`
+
+### What changed
+
+- fix(NUHT-021): keep the COMMANDS table test off the core deploy group (041f8be)
+- refactor(NUHT-021): route sdlc.py subcommands through a COMMANDS table (7626276)
+
+Files: `docs/cli.md`, `optional/runtime/sdlc.py`, `tests/smoke.py`, `CHANGELOG.md`
+
+### Why
+
+sdlc.py routes through a command table instead of an if chain. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T092942Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T092942Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T092942Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T092942Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+sdlc.py routes through a command table instead of an if chain. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-020 — New harness extensions: OpenCode, Kiro, ACP agents (no core changes) (touch: optional/extensions/)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `c996665..01555ab`
+
+### What changed
+
+- docs(NUHT-020): --by names every registry agent, not three tools (01555ab)
+- feat(NUHT-020): OpenCode, Kiro and ACP agents as data-only built-in extensions (c996665)
+
+Files: `docs/cli.md`, `optional/runtime/sdlc.py`, `CHANGELOG.md`, `docs/harnesses.md`, `optional/extensions/acp/nuhut-extension.json`, `optional/extensions/core/nuhut-extension.json`, `optional/extensions/kiro/nuhut-extension.json`, `optional/extensions/opencode/nuhut-extension.json`, `tests/smoke.py`, `validate.py`
+
+### Why
+
+OpenCode, Kiro and ACP added as data-only extensions with no core change. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T092033Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T092033Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T092033Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T092033Z, commit 8e128c9
+
+### Not done
+
+real-CLI format checks for OpenCode, Kiro and ACP (NUHT-036)
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+OpenCode, Kiro and ACP added as data-only extensions with no core change. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-019 — Generate Claude, Gemini, Codex and Kiro plugin wrappers from the extension manifest (touch: .claude-plugin/, install.py)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `5c0c705..5c0c705`
+
+### What changed
+
+- feat(NUHT-019): ext package writes Claude, Gemini, Codex and Kiro plugin wrappers (5c0c705)
+
+Files: `.claude-plugin/README.md`, `CHANGELOG.md`, `README.md`, `docs/cli.md`, `docs/extensions.md`, `optional/extensions/core/nuhut-extension.json`, `optional/runtime/ext.py`, `optional/runtime/registry.py`, `optional/runtime/sdlc.py`, `tests/smoke.py`, `validate.py`
+
+### Why
+
+ext package generates Claude, Gemini, Codex and Kiro wrappers from one nuhut-extension.json. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T091122Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T091122Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T091122Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T091122Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+ext package generates Claude, Gemini, Codex and Kiro wrappers from one nuhut-extension.json. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-018 — ext CLI: list, add, remove, update, search, validate; overlays; catalog (touch: optional/runtime/registry.py, optional/runtime/sdlc.py, docs/cli.md)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `fba9d5e..4b3a2d0`
+
+### What changed
+
+- fix(NUHT-018): ask before ext update runs new code; find ext in --help (4b3a2d0)
+- feat(NUHT-018): sdlc.py ext CLI, Extensions allowed gate, pinned code, overlays, catalog (fba9d5e)
+
+Files: `docs/cli.md`, `docs/extensions.md`, `optional/runtime/ext.py`, `optional/runtime/sdlc.py`, `tests/smoke.py`, `CHANGELOG.md`, `README.md`, `catalog.json`, `install.py`, `optional/runtime/finish.py`, `optional/runtime/hooks.py`, `optional/runtime/net.py` (+3 more)
+
+### Why
+
+ext list/add/remove/update/search/validate with hash pins and an Extensions allowed charter row; update prompts before re-pinning changed code. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T090221Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T090221Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T090221Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T090221Z, commit 8e128c9
+
+### Not done
+
+catalog 404 ends when catalog.json reaches main
+
+### Discovered
+
+nothing
+
+### Decisions
+
+ADR 0003 (Proposed)
+
+### Assumptions used
+
+none
+
+### Plan
+
+ext list/add/remove/update/search/validate with hash pins and an Extensions allowed charter row; update prompts before re-pinning changed code. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-017 — Move claude, codex, gemini, cursor support into built-in extensions (one agent table) (touch: optional/extensions/, install.py, optional/runtime/sdlc.py, optional/runtime/dispatch.py, optional/runtime/hooks.py)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `5378114..5378114`
+
+### What changed
+
+- refactor(NUHT-017): move claude, codex, gemini and cursor support into the built-in extensions (5378114)
+
+Files: `CHANGELOG.md`, `docs/cli.md`, `docs/harnesses.md`, `install.py`, `optional/extensions/claude/nuhut-extension.json`, `optional/extensions/codex/nuhut-extension.json`, `optional/extensions/cursor/nuhut-extension.json`, `optional/extensions/gemini/nuhut-extension.json`, `optional/runtime/dispatch.py`, `optional/runtime/hooks.py`, `optional/runtime/lens.py`, `optional/runtime/registry.py` (+4 more)
+
+### Why
+
+Claude, Codex, Gemini and Cursor moved into built-in extensions read by registry.py, replacing the hard-coded tables. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T085317Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T085317Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T085317Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T085317Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+ADR 0003 (Proposed)
+
+### Assumptions used
+
+none
+
+### Plan
+
+Claude, Codex, Gemini and Cursor moved into built-in extensions read by registry.py, replacing the hard-coded tables. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-015 — install.sh version floor and wording; finish swallows exceptions silently (touch: install.sh, optional/runtime/finish.py, tests/smoke.py)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `f4b3b14..20baa89`
+
+### What changed
+
+- test(NUHT-015): commit the finish-error fixtures with a Work-Item trailer (20baa89)
+- fix(NUHT-015): require Python 3.8 in install.sh and report unexpected finish failures (f4b3b14)
+
+Files: `tests/smoke.py`, `CHANGELOG.md`, `install.sh`, `optional/runtime/finish.py`
+
+### Why
+
+install.sh checks Python 3.8+ with correct wording; finish reports the exceptions it used to swallow. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T083446Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T083446Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T083446Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T083446Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+install.sh checks Python 3.8+ with correct wording; finish reports the exceptions it used to swallow. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-013 — Test-lock and protected-path guards miss shell writes (sed -i, redirects, tee, python -c) (touch: optional/runtime/hooks.py, tests/smoke.py, template/docs/process/05-change-control.md)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `1031fcc..ecee839`
+
+### What changed
+
+- fix(NUHT-013): see interpreter and archive writes; widen the trust anchors (ecee839)
+- feat(NUHT-013): guard locked and protected paths against shell writes (1031fcc)
+
+Files: `handbook/process/05-change-control.md`, `optional/runtime/hooks.py`, `template/docs/process/05-change-control.md`, `tests/smoke.py`, `CHANGELOG.md`, `optional/git-hooks/pre-commit`
+
+### Why
+
+The shell guard recognises sed -i, redirects, tee, interpreters with inline code, rsync, tar, patch and git apply against locked paths. Rejected: blocking all shell writes, which breaks normal work. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T081641Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T081641Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T081641Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T081641Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+The shell guard recognises sed -i, redirects, tee, interpreters with inline code, rsync, tar, patch and git apply against locked paths. Rejected: blocking all shell writes, which breaks normal work. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
+## NUHT-011 — Self-install kit_version drifts from VERSION after a release (touch: validate.py, .github/workflows/version.yml, .ai-sdlc/manifest.json, .ai-sdlc/profile.json, AGENTS.md, tests/smoke.py)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `1e3693a..1e3693a`
+
+### What changed
+
+- fix(NUHT-011): restamp the self-install with VERSION on release (1e3693a)
+
+Files: `.github/workflows/version.yml`, `CHANGELOG.md`, `tests/smoke.py`, `tools/semver.py`, `validate.py`
+
+### Why
+
+Release stamps the self-install (manifest, profile, AGENTS.md) and validate.py fails on drift. Rejected: running install.py --upgrade at release, which touches unrelated files. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T075825Z, commit 8e128c9
+- `checks.unit` — Verified: pass — run 20261122T075825Z, commit 8e128c9
+- `checks.integration` — Verified: pass — run 20261122T075825Z, commit 8e128c9
+- `checks.build` — Verified: pass — run 20261122T075825Z, commit 8e128c9
+
+### Not done
+
+nothing deferred
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+Release stamps the self-install (manifest, profile, AGENTS.md) and validate.py fails on drift. Rejected: running install.py --upgrade at release, which touches unrelated files. Built by the v6 roadmap workflow on kit-v6 (plan, design review NUHT-016-design-review.md, build waves, ship review NUHT-016-ship-review.md); verified with its own full verify --item run.
+
+### Reviews
+
+self-reviewed
+
 ## NUHT-010 — Guided installer draws 40 columns on Python 3.8-3.10 when the terminal reports size 0 (touch: install_ui.py, tests/smoke.py, CHANGELOG.md)
 
 **Date:** 2026-11-21 **Tier:** 2 **Effort:** Normal

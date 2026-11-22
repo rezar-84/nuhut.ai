@@ -1,0 +1,26 @@
+{
+  "id": "NUHT-040",
+  "title": "Bugs agents notice: sdlc.py bug, severity on items, open S0-S2 in status and at session start, touch-path warnings, generated defects index",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "optional/runtime/shards.py",
+    "optional/runtime/status.py",
+    "optional/runtime/hooks.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

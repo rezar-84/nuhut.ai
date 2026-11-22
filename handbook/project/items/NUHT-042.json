@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-042",
+  "title": "Distribution review: per-host enforcement table and an advisory mode for local-only git",
+  "type": "docs",
+  "tier": "3",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    "docs/landscape.md"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

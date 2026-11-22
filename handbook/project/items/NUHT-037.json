@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-037",
+  "title": "view --serve over the network: --host tailscale|<ip>, access key in the link, read-only unless --allow-actions",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    "optional/runtime/view.py",
+    "docs/cli.md"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "Owner asked 2026-11-22 for remote viewing (Tailscale). Strict Tier 2: independent security review.",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}
