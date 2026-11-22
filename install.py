@@ -74,7 +74,7 @@ RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
                  "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py",
-                 "registry.py", "status.py", "skillgen.py", "ext.py", "net.py")
+                 "registry.py", "status.py", "skillgen.py", "ext.py", "net.py", "releases.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -3796,6 +3796,29 @@ class Installer(object):
             return added
         self.merge_json_hooks(rel, mutate)
 
+    def apply_deploy_attributes(self):
+        """The deploy ledger is append-only, so parallel branches merge it by union."""
+        line = "%s/project/deploys.jsonl merge=union" % self.docs
+        path = ensure_inside(self.target, self.target / ".gitattributes")
+        content = ""
+        if path.exists():
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (IOError, OSError):
+                return
+        if any(existing.split() == line.split() for existing in content.splitlines()):
+            self.skipped += 1
+            print("  skip (exists)  %s in .gitattributes" % line)
+        elif self.o.dry_run:
+            self.added += 1
+            print("  would add      %s to .gitattributes" % line)
+        else:
+            entry = ("\n" if content and not content.endswith("\n") else "") + \
+                "# Nuhut: the deploy ledger is append-only\n" + line + "\n"
+            atomic_write_text(path, content + entry)
+            self.added += 1
+            print("  gitattributes  %s" % line)
+
     def apply_git_ignores(self):
         want_gitignore = bool(self.o.gitignore_tools)
         want_exclude = bool(self.o.git_exclude)
@@ -3873,6 +3896,7 @@ class Installer(object):
         """Route item shards through the nuhut-shard merge driver. Only missing lines are
         appended: every line already in .gitattributes (the deploys.jsonl merge=union line
         among them) is kept as it is. Git config is per clone and is never written here."""
+        self.apply_deploy_attributes()
         pattern = "%s/project/items/*.json merge=%s" % (self.docs, self.MERGE_DRIVER)
         ga_path = ensure_inside(self.target, self.target / ".gitattributes")
         content = ""

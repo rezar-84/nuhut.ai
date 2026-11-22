@@ -101,6 +101,8 @@ The minimum set proving the release is alive. Run every time; automate where pos
 ## Post-release
 
 - [ ] Annotated tag on the verified release commit, pushed (where the charter versions releases).
+- [ ] Deploy recorded: `python3 .ai-sdlc/bin/sdlc.py deploy record --version <v> --env <env>`
+      (once per environment; `deploy list` shows which version runs where).
 - [ ] Backlog IDs in the release marked `Done`.
 - [ ] Worklog entry written, including what was verified in production.
 - [ ] Metrics baselined for anything the measurement plan tracks.

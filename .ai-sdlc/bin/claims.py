@@ -15,7 +15,7 @@ same files (from item `touch` globs, plan "Files that change", or spec deltas). 
 items still require a written plan file before scheduling; single-writer files -- the
 charter, migrations, lockfiles, and charter Single-writer globs -- always conflict.
 
-Called by sdlc.py (claim, release, claims, parallel, next-id), doctor and view.py.
+Called by sdlc.py (claim, unclaim, claims, parallel, next-id), doctor and view.py.
 Standard library only. This file must never contain two opening braces in a row.
 """
 
@@ -836,8 +836,8 @@ def check(project, out, view_mod, window_days, today=None):
                 "warn",
                 "claims",
                 where,
-                "%s is %s but still claimed by %s; release it: "
-                "python3 .ai-sdlc/bin/sdlc.py release %s"
+                "%s is %s but still claimed by %s; unclaim it: "
+                "python3 .ai-sdlc/bin/sdlc.py unclaim %s"
                 % (c["id"], it["status"], c.get("agent", "?"), c["id"]),
             )
             continue
@@ -853,7 +853,7 @@ def check(project, out, view_mod, window_days, today=None):
                 "claims",
                 where,
                 "claimed by %s %d days ago with no commit on %s since; "
-                "re-claim it deliberately or release it"
+                "re-claim it deliberately or unclaim it"
                 % (c.get("agent", "?"), (today - since).days, c.get("branch", "?")),
             )
     branches = _git(project, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()

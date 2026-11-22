@@ -19,15 +19,18 @@ progress until someone notices half a feature is gone.
 python3 .ai-sdlc/bin/sdlc.py claim ACME-12            # claim + branch ACME-12-<slug> + ../<repo>-ACME-12
 cd ../acme-shop-ACME-12                                # the item's own checkout
 # … plan, build, verify, log …
-python3 .ai-sdlc/bin/sdlc.py release ACME-12 --remove-worktree
+python3 .ai-sdlc/bin/sdlc.py unclaim ACME-12 --remove-worktree
 ```
+
+`unclaim` was called `release` before 6.0. `release` still works the same way, with one
+deprecation line on stderr, and is removed in 7.0.
 
 - **The claim is atomic.** It is a file in the repository's shared git directory
   (`<git-common-dir>/nuhut/claims/ACME-12.json`), created with an exclusive create. A
   second agent asking for ACME-12 is refused, and told who holds it and since when.
 - **Every worktree sees it.** All worktrees of a clone share the git directory, so
   parallel sessions on one machine see each other's claims. Across machines, add
-  `--sync-refs` on `claim`, `release`, `claims`, `parallel` and `next-id` to publish
+  `--sync-refs` on `claim`, `unclaim`, `claims`, `parallel` and `next-id` to publish
   compare-and-swap claim leases under `refs/nuhut/claims/<ID>` and atomic sequence
   allocations under `refs/nuhut/seq` on `origin`.
 - **Each item gets its own worktree.** Parallel sessions in one checkout overwrite each
@@ -56,7 +59,7 @@ python3 .ai-sdlc/bin/sdlc.py release ACME-12 --remove-worktree
   people read the backlog on the hosting site without running anything.
 - **It refuses the obvious mistakes:** an item already claimed, one whose dependencies are
   unfinished, one that is Done or Dropped, or releasing a claim owned by another agent
-  without `--force`. `release --remove-worktree` refuses a worktree with uncommitted changes.
+  without `--force`. `unclaim --remove-worktree` refuses a worktree with uncommitted changes.
 
 `python3 .ai-sdlc/bin/sdlc.py claims` lists who holds what.
 
@@ -153,8 +156,8 @@ records which commit each run was on, so anyone can check.
 ## What doctor watches
 
 - A claim older than the charter's staleness window with no commit on its branch since:
-  re-claim it deliberately, or release it.
-- A claim on an item that is already Done or Dropped: a forgotten release.
+  re-claim it deliberately, or unclaim it.
+- A claim on an item that is already Done or Dropped: a forgotten unclaim.
 - Two branches for one claimed item: two agents may be on it.
 
 ## Without the runtime

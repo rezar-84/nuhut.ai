@@ -28,7 +28,8 @@ Before starting, take the item. With the runtime installed that is one command:
 - `--mark` sets the backlog row to `In progress`, from the main worktree only. Marking
   rows in several worktrees produces conflicting backlog edits at merge time.
 
-`sdlc.py claims` lists who holds what, and `sdlc.py release <ID>` frees an item.
+`sdlc.py claims` lists who holds what, and `sdlc.py unclaim <ID>` frees an item
+(`release` is its deprecated old name, removed in 7.0).
 
 Without the runtime, take the claim by hand: set the backlog row's **Owner** column to your
 agent identity and its status to `In progress`, and commit that edit on its own. Taking an
