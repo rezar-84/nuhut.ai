@@ -5,7 +5,7 @@
   "tier": "2",
   "effort": "",
   "owner": "security",
-  "status": "Ready",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/hooks.py",
@@ -14,7 +14,7 @@
   ],
   "created": "2026-11-22",
   "updated": "2026-11-22",
-  "completed": "",
+  "completed": "2026-11-22",
   "summary": "",
   "approvers": [],
   "waiting_on": "",

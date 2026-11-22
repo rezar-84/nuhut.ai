@@ -5,14 +5,14 @@
   "tier": "2",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Ready",
+  "status": "Done",
   "depends": [
     "NUHT-018"
   ],
   "touch": [],
   "created": "2026-11-22",
   "updated": "2026-11-22",
-  "completed": "",
+  "completed": "2026-11-22",
   "summary": "",
   "approvers": [],
   "waiting_on": "",
