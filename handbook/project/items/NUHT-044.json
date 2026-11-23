@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-044",
+  "title": "NUHT-038 follow-ups: other hosts' CI files are Tier 1, advisory is info without a remote, 5.x base falls back, this repo's CI runs ci-check",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "In progress",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "install.py",
+    ".github/workflows/ci.yml"
+  ],
+  "created": "2026-11-23",
+  "updated": "2026-11-23",
+  "completed": "",
+  "summary": "Owner: take the recommended option for each NUHT-038 point, 2026-11-23",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

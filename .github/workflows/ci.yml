@@ -39,3 +39,34 @@ jobs:
         run: python -m unittest discover tests/unit
       - name: Run installer smoke tests
         run: python tests/smoke.py
+
+  records:
+    # The kit's own checks on this repository: doctor on every push, and on a pull
+    # request the base branch's ci-check over the PR's commits (the PR's own copy, with a
+    # warning, when the base has none, as on the first PR after 5.x). Merges into main
+    # that are pushed directly are not judged here; history from before 6.0 predates
+    # ci-check.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SDLC records
+        run: python3 .ai-sdlc/bin/sdlc.py doctor --strict
+      - name: PR records
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p "$RUNNER_TEMP/base"
+          if git archive "origin/$GITHUB_BASE_REF" .ai-sdlc/bin | tar -x -C "$RUNNER_TEMP/base" \
+              && [ -f "$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py" ] \
+              && python3 "$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py" ci-check --help >/dev/null 2>&1; then
+            checker="$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py"
+          else
+            echo "::warning::origin/$GITHUB_BASE_REF has no .ai-sdlc/bin/sdlc.py with ci-check (before 6.0); running this PR's own ci-check"
+            checker=".ai-sdlc/bin/sdlc.py"
+          fi
+          python3 "$checker" --root "$GITHUB_WORKSPACE" ci-check --base "origin/$GITHUB_BASE_REF" \
+            --head event --charter-ref "origin/$GITHUB_BASE_REF"

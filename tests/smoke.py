@@ -2697,6 +2697,8 @@ def test_scaffolding():
           "workflow_dispatch" in workflow and "  pull_request:" in workflow)
     check("GitHub CI runs the doctor strictly before the quality commands",
           workflow.index("sdlc.py doctor --strict") < workflow.index("npm run build"), workflow)
+    check("GitHub CI falls back to the PR's checker when the base's sdlc.py has no ci-check (before 6.0)",
+          'base/.ai-sdlc/bin/sdlc.py" ci-check --help' in workflow and "before 6.0" in workflow, workflow)
     code, out = run([d, "APP", "-y", "--scaffold-ci", "gitlab"])
     check("GitLab CI adapter generated",
           code == 0 and "npm run build" in read(d, ".gitlab-ci.yml") and
@@ -2716,6 +2718,9 @@ def test_scaffolding():
     check("the generic script is executable and needs NUHUT_BASE",
           os.access(os.path.join(d, "ci/nuhut-check.sh"), os.X_OK)
           and "NUHUT_BASE" in read(d, "ci/nuhut-check.sh"))
+    check("the other scaffolds fall back the same way",
+          'ci-check --help >/dev/null' in read(d, "ci/nuhut-check.sh")
+          and 'ci-check --help >/dev/null' in read(d, ".gitlab-ci.yml"))
     check("the Gitea workflow is GitHub Actions syntax on pull_request",
           "  pull_request:" in read(d, ".gitea/workflows/nuhut.yml")
           and "actions/checkout@v4" in read(d, ".gitea/workflows/nuhut.yml"))
@@ -5318,6 +5323,13 @@ def test_ci_check():
     code, out = check_range("workflow")
     check("a Tier 3 item changing .github/workflows/ fails the tier floor",
           code == 1 and ".github/workflows/ci.yml" in out, out)
+    branch("gitlab-ci")
+    write(d, ".gitlab-ci.yml", "check:\n  script: [true]\n")
+    write(d, "Jenkinsfile", "pipeline {}\n")
+    commit("ci(CIC-10): other hosts' CI", "CIC-10")
+    code, out = check_range("gitlab-ci")
+    check("so are the other hosts' CI files: .gitlab-ci.yml and Jenkinsfile fail a Tier 3 item",
+          code == 1 and ".gitlab-ci.yml" in out and "Jenkinsfile" in out, out)
 
     # Bots are exempt from the trailer check only.
     bot = {"GIT_AUTHOR_NAME": "dependabot[bot]", "GIT_AUTHOR_EMAIL": "bot@example.invalid"}
@@ -5451,8 +5463,8 @@ def test_ci_context():
         return [i for i in items if i.get("check") == "enforcement"], out
 
     found, out = enforcement()
-    check("doctor with no remote says enforcement: advisory, as a warning",
-          len(found) == 1 and found[0]["level"] == "warn"
+    check("doctor with no remote says enforcement: advisory, as info (local-only git is a choice)",
+          len(found) == 1 and found[0]["level"] == "info"
           and found[0]["message"].startswith("enforcement: advisory")
           and "remote" in found[0]["message"], out[-800:])
     out = doctor("--strict")
@@ -5461,8 +5473,9 @@ def test_ci_context():
               ln.startswith("fail") and "enforcement" in ln for ln in out.splitlines()), out[-800:])
     subprocess.call(["git", "remote", "add", "origin", "https://example.invalid/r.git"], cwd=d)
     found, out = enforcement()
-    check("a remote but no CI file is still advisory",
-          len(found) == 1 and found[0]["message"].startswith("enforcement: advisory")
+    check("a remote but no CI file is still advisory, and now a warning",
+          len(found) == 1 and found[0]["level"] == "warn"
+          and found[0]["message"].startswith("enforcement: advisory")
           and "CI" in found[0]["message"], out[-800:])
     write(d, ".gitlab-ci.yml", "records:\n  script:\n    - python3 .ai-sdlc/bin/sdlc.py doctor --strict\n")
     found, out = enforcement()

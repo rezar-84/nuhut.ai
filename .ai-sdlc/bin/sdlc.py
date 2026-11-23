@@ -2646,7 +2646,8 @@ def check_enforcement(project, out):
            "(install.sh <project> --scaffold-ci github|gitlab|bitbucket|gitea|generic), then "
            "make the host require it")
     if not has_remote:
-        out.add("warn", "enforcement", "git remote",
+        # Local-only git is a legitimate setup, not a gap: say so, do not nag.
+        out.add("info", "enforcement", "git remote",
                 "enforcement: advisory. This repository has no git remote, so no CI runs the "
                 "kit's checks: they are local only and can be skipped", fix=fix, who="owner")
     elif not providers:
@@ -3507,8 +3508,10 @@ def ci_tier1_globs(project, charter_ref=None):
              if g.strip() and not re.search(r"\s", g.strip()) and not g.strip().startswith("-")]
     if not globs:
         globs = list(CI_DEFAULT_TIER1)
-    always = [".ai-sdlc/**", ".github/workflows/**",
-              project.docs.rstrip("/") + "/project/people.json"]
+    always = [".ai-sdlc/**", project.docs.rstrip("/") + "/project/people.json"]
+    # Every CI file the kit recognises, on any host: a change to one can switch the
+    # checks off.
+    always += [rel + "/**" if rel.endswith("/workflows") else rel for _, rel in CI_FILES]
     return globs + [g for g in always if g not in globs], source
 
 
