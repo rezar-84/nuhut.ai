@@ -286,7 +286,30 @@ def normalize_item(data, today=None):
     found_by = str(data.get("found_by") or "").strip()
     if found_by:
         out["found_by"] = found_by
+    # Approvals given in a terminal (`sdlc.py approve`), severity changes and blind
+    # re-ratings: written only once there is one, each a list of flat string records.
+    for key, fields, needed in (("local_approvals", LOCAL_APPROVAL_FIELDS, ("handle", "commit")),
+):
+        rows = _flat_records(data.get(key), fields, needed)
+        if rows:
+            out[key] = rows
     return out
+
+
+LOCAL_APPROVAL_FIELDS = ("handle", "commit", "at", "as")
+
+
+def _flat_records(value, fields, needed):
+    """A list of {field: str} dicts from <value>, keeping only rows that have every
+    <needed> field."""
+    rows = []
+    for row in value if isinstance(value, list) else []:
+        if not isinstance(row, dict):
+            continue
+        flat = dict((k, str(row.get(k) or "")) for k in fields)
+        if all(flat[k] for k in needed):
+            rows.append(flat)
+    return rows
 
 
 def severity_of(value):

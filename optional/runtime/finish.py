@@ -293,28 +293,30 @@ def _interactive():
         return False
 
 
-def check_waiver(rt, project, by, approvers, source, registry, interactive):
-    """None when <by> may waive verify here, else the reason it may not."""
+def check_waiver(rt, project, by, approvers, source, registry, interactive, act="waive"):
+    """None when <by> may waive verify here (or approve, with act="approve"), else the
+    reason it may not."""
+    noun = "waiver" if act == "waive" else "approval"
     charter = project.charter_path
     if not approvers:
-        return ("the charter's Approvers row is blank, so every waiver is refused: fill "
-                "**Approvers** in %s on the default branch with the people who may waive"
-                % charter)
+        return ("the charter's Approvers row is blank, so every %s is refused: fill "
+                "**Approvers** in %s on the default branch with the people who may %s"
+                % (noun, charter, act))
     handle = rt.resolve_person(registry, by)
     if handle is None or handle not in set(h for _, h in approvers if h):
-        return ("%s is not in the charter's Approvers row (%s, read from %s): a waiver must "
+        return ("%s is not in the charter's Approvers row (%s, read from %s): a %s must "
                 "name an approver. Add them to **Approvers** in %s on the default branch"
-                % (by, ", ".join(n for n, _ in approvers), source, charter))
+                % (by, ", ".join(n for n, _ in approvers), source, noun, charter))
     raw, runner = runner_identity(project, registry, rt)
     agent = agent_environment(rt, project)
     if not interactive and agent:
         # git user.name is usually the human's own in the checkout an agent works in, and
         # NUHUT_USER is whatever the process sets, so neither proves a person is here.
-        return ("an agent cannot waive for %s: this process runs under %s with no terminal. "
-                "Ask %s to run it in a terminal" % (by, agent, by))
+        return ("an agent cannot %s for %s: this process runs under %s with no terminal. "
+                "Ask %s to run it in a terminal" % (act, by, agent, by))
     if not interactive and runner != handle:
-        return ("an agent cannot waive for %s; ask %s to run it (this process runs as %r, "
-                "from NUHUT_USER or git user.name)" % (by, by, raw or "nobody"))
+        return ("an agent cannot %s for %s; ask %s to run it (this process runs as %r, "
+                "from NUHUT_USER or git user.name)" % (act, by, by, raw or "nobody"))
     return None
 
 
@@ -358,7 +360,9 @@ GH_TIMEOUT = 20
 PR_FIELDS = ("reviews,number,headRefOid,author,state,headRepositoryOwner,headRepository,"
              "isCrossRepository,baseRefName")
 ITEM_BRANCH = re.compile(r"^(?:[\w.-]+/)?([A-Z][A-Z0-9]*-[0-9]+)(?:-|$)")
-SOLO_HINT = "see process/05 Approvals"
+SOLO_HINT = ("a solo project can set **Tier 1 approvals** to 1 in the charter, and the "
+             "approver runs `sdlc.py approve <ID> --by <handle>` in a terminal; see process/05 "
+             "Approvals")
 
 
 def _safe(text):
@@ -435,10 +439,12 @@ def approvals(rt, project, item, tier=None, run=None):
         tier = _item_tier(rt, project, item)
         if tier is None:
             return None
-    # The rule finish's human gate applies: Tier 1 needs 2, Tier 2 under Strict tier
-    # rules needs 1, and nothing else needs an approval.
+    # The rule finish's human gate applies: Tier 1 needs the charter's Tier 1 approvals
+    # (2 unless the default branch says 1), Tier 2 under Strict tier rules needs 1, and
+    # nothing else needs an approval.
     strict = str(rt.tier_rules(project)).lower() == "strict"
-    required = 2 if tier == "1" else (1 if tier == "2" and strict else 0)
+    tier1 = rt.tier1_approvals(project)[0] if hasattr(rt, "tier1_approvals") else 2
+    required = tier1 if tier == "1" else (1 if tier == "2" and strict else 0)
     names, _ = rt.approver_names(project)
     registry = rt.people(project)
     charter = []
@@ -455,10 +461,14 @@ def approvals(rt, project, item, tier=None, run=None):
                       % (tier or "?", "Strict" if strict else "Standard"))
         return result
 
+    by_terminal = local_approvals(rt, project, item, charter)
+
     def fallback(note):
-        result.update(source="charter", note=note, met=False, approvers=[
+        have = set(a["handle"] for a in by_terminal)
+        result.update(source="charter", note=note, approvers=list(by_terminal) + [
             {"handle": h, "login": "", "source": "charter", "commit": "", "at": ""}
-            for h in charter])
+            for h in charter if h not in have])
+        result["met"] = approval_count(result) >= required
         return result
 
     branch = item_branch(rt, project, item)
@@ -546,6 +556,11 @@ def approvals(rt, project, item, tier=None, run=None):
             reason = "stale"
         elif not handle:
             reason = "unmapped"
+        elif handle not in charter:
+            # Ship review finding 18: a review counts only from someone the charter's
+            # Approvers row (on the default branch) names, the rule waivers and
+            # `approve` follow.
+            reason = "not-an-approver"
         elif handle in [c["handle"] for c in counted]:
             reason = "duplicate"
         else:
@@ -555,12 +570,69 @@ def approvals(rt, project, item, tier=None, run=None):
         else:
             counted.append({"handle": _safe(handle), "login": r["login"], "source": "github",
                             "commit": head, "at": r["at"]})
-    result.update(source="github", approvers=counted, met=len(counted) >= required)
+    have = set(c["handle"] for c in counted)
+    counted += [a for a in by_terminal if a["handle"] not in have]
+    result.update(source="github", approvers=counted)
+    result["met"] = approval_count(result) >= required
     return result
 
 
+COUNTED_SOURCES = ("github", "local")
+
+
+def local_approvals(rt, project, item, charter):
+    """Approvals an approver gave in a terminal (`sdlc.py approve`) that still count: the
+    approver is in the charter's Approvers row on the default branch, and the approval
+    names the item's newest commit, so a later commit needs a new one."""
+    try:
+        shard = shards.load_item(project, item) or {}
+    except Exception:                    # noqa: BLE001 -- an unreadable shard approves nothing
+        shard = {}
+    commits = rt.item_commits(project, item)
+    newest = commits[0][0] if commits else ""
+    out = []
+    for row in shard.get("local_approvals") or []:
+        handle = _safe(row.get("handle"))
+        if not newest or row.get("commit") != newest or handle not in charter:
+            continue
+        if handle in [a["handle"] for a in out]:
+            continue
+        out.append({"handle": handle, "login": "", "source": "local", "commit": newest,
+                    "at": row.get("at") or ""})
+    return out
+
+
+def approve(rt, project, item, by, interactive=None):
+    """Record <by>'s approval of <item>'s newest commit. (lines, exit code)."""
+    interactive = _interactive() if interactive is None else interactive
+    shard = shards.load_item(project, item)
+    if not shard:
+        return ["approve: %s has no item shard under %s/project/items/" % (item, project.docs)], 2
+    approvers, source, registry = waiver_approvers(rt, project)
+    refused = check_waiver(rt, project, by, approvers, source, registry, interactive,
+                           act="approve")
+    if refused:
+        return ["approve: " + refused], 1
+    commits = rt.item_commits(project, item)
+    if not commits:
+        return ["approve: no commit carries `Work-Item: %s`, so there is nothing to approve "
+                "yet" % item], 1
+    handle = _safe(rt.resolve_person(registry, by) or rt.person_key(by))
+    raw, _ = runner_identity(project, registry, rt)
+    newest = commits[0][0]
+    rows = [r for r in shard.get("local_approvals") or []
+            if not (r.get("handle") == handle and r.get("commit") == newest)]
+    rows.append({"handle": handle, "commit": newest, "as": _safe(raw) or "unknown",
+                 "at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    shard["local_approvals"] = rows
+    shards.save_item(project, shard)
+    res = approvals(rt, project, item)
+    lines = ["approved %s at %s by %s (local)" % (item, newest[:7], handle)]
+    return lines + (approval_lines(res) if res else []), 0
+
+
 def approval_count(res):
-    return len([a for a in res["approvers"] if a["source"] == "github"])
+    return len([a for a in res["approvers"] if a["source"] in COUNTED_SOURCES])
 
 
 def approval_lines(res):
@@ -573,11 +645,13 @@ def approval_lines(res):
     lines = []
     if res["source"] == "github":
         lines.append("approval %d of %d%s: %s" % (n, req, where, ", ".join(
-            "%s (github)" % a["handle"] for a in res["approvers"]) or "no approval counts yet"))
+            "%s (%s)" % (a["handle"], a["source"]) for a in res["approvers"])
+            or "no approval counts yet"))
     else:
         lines.append("approval %d of %d (charter fallback: %s): charter: %s"
-                     % (n, req, res["note"], ", ".join(a["handle"] for a in res["approvers"])
-                        or "no Approvers named"))
+                     % (n, req, res["note"], ", ".join(
+                         a["handle"] + (" (local)" if a["source"] == "local" else "")
+                         for a in res["approvers"]) or "no Approvers named"))
     if res["ignored"]:
         lines.append("approval ignored: %s" % ", ".join(
             "%s %s" % (i["login"], i["reason"]) for i in res["ignored"]))
@@ -591,8 +665,9 @@ def approval_waiting(res):
     """The Waiting-on text: the charter's Approvers still owed, as plain handles so
     `status` can say "Waiting on you", then who approved already and from where, e.g.
     "bob; approved: alice (github)"."""
-    got = ["%s (github)" % a["handle"] for a in res["approvers"] if a["source"] == "github"]
-    have = set(a["handle"] for a in res["approvers"] if a["source"] == "github")
+    got = ["%s (%s)" % (a["handle"], a["source"]) for a in res["approvers"]
+           if a["source"] in COUNTED_SOURCES]
+    have = set(a["handle"] for a in res["approvers"] if a["source"] in COUNTED_SOURCES)
     rest = [h for h in (res.get("charter") or []) if h not in have]
     return (", ".join(rest) or "the owner") + ("; approved: " + ", ".join(got) if got else "")
 

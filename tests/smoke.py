@@ -7905,7 +7905,8 @@ def test_github_approvals():
     write(repo, "docs/project/people.json", json.dumps({"people": [
         {"handle": "alice", "name": "Alice A", "github": "alice-gh"},
         {"handle": "bob", "name": "Bob B", "github": "bob-gh"},
-        {"handle": "carol", "name": "Carol C", "github": "carol-gh"}]}, indent=2))
+        {"handle": "carol", "name": "Carol C", "github": "carol-gh"},
+        {"handle": "dave", "name": "Dave D", "github": "dave-gh"}]}, indent=2))
     charter = read(repo, "docs/project/charter.md")
     charter = re.sub(r"(?m)^\| \*\*Default branch\*\* \|[^\n]*$", "| **Default branch** | `main` |", charter)
     charter = re.sub(r"(?m)^\| \*\*Approvers\*\* \|[^\n]*$", "| **Approvers** | alice |", charter)
@@ -7931,7 +7932,19 @@ def test_github_approvals():
           and "isCrossRepository" in log, log)
     code, out, _ = approvals(pr([rv("alice-gh")]), as_json=False)
     check("a solo team is told the project lists 1 approver",
-          code == 1 and "1 of 2: this project lists 1 approver; see process/05 Approvals" in out, out)
+          code == 1 and "1 of 2: this project lists 1 approver; a solo project can set "
+          "**Tier 1 approvals** to 1" in out, out)
+    code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")]))
+    check("a mapped reviewer who is not in Approvers does not count (finding 18)",
+          code == 1 and reasons(res).get("bob-gh") == "not-an-approver", out)
+    git("switch", "-q", "main")
+    write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md").replace(
+        "| **Approvers** | alice |", "| **Approvers** | alice, bob, carol |"))
+    commit("chore: two more approvers", paths=["docs/project/charter.md"])
+    git("switch", "-q", "feat/APR-1")
+    code, out, res = approvals(pr([rv("alice-gh"), rv("dave-gh")]))
+    check("dave, mapped but not an approver, is not-an-approver",
+          code == 1 and reasons(res).get("dave-gh") == "not-an-approver", out)
     code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")]))
     check("two mapped approvals on the head meet Tier 1", code == 0 and res.get("met") is True
           and sorted(a.get("handle") for a in res.get("approvers", [])) == ["alice", "bob"], out)
@@ -7977,7 +7990,8 @@ def test_github_approvals():
         code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")]), **kw)
         check("%s falls back to the charter names with a note, no traceback" % label,
               code == 1 and res.get("source") == "charter" and res.get("note")
-              and [(a.get("handle"), a.get("source")) for a in res.get("approvers", [])] == [("alice", "charter")]
+              and [(a.get("handle"), a.get("source")) for a in res.get("approvers", [])]
+              == [("alice", "charter"), ("bob", "charter"), ("carol", "charter")]
               and "Traceback" not in out, out)
     code, out, res = approvals({}, gh=False, env={"AI_SDLC_APPROVAL": "ticket-1"})
     check("AI_SDLC_APPROVAL is never an approval",
@@ -8928,6 +8942,85 @@ def test_release_defect_gate():
     shutil.rmtree(d, ignore_errors=True)
 
 
+
+def test_tier1_approval_count_and_local_approval():
+    print("Tier 1 approvals come from the charter (1 or 2), and an approver can approve in a terminal")
+    d = tempfile.mkdtemp(prefix="sdlc-approve-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    subprocess.call(["git", "init", "-q", "-b", "main", repo])
+    for key, value in (("user.name", "Sam"), ("user.email", "sam@example.invalid"),
+                       ("commit.gpgsign", "false")):
+        subprocess.call(["git", "config", key, value], cwd=repo)
+    code, out = run([repo, "TA", "-y"])
+    check("installs", code == 0, out[-300:])
+    charter = read(repo, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| \*\*Approvers\*\* \|[^\n]*$", "| **Approvers** | Sam |", charter)
+    charter = re.sub(r"(?m)^\| \*\*Tier 1 approvals\*\* \|[^\n]*\n", "", charter)
+    charter = re.sub(r"(?m)^\| \*\*Default branch\*\* \|[^\n]*$", "| **Default branch** | main |", charter)
+    write(repo, "docs/project/charter.md", charter)
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args, **env):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, timeout=120,
+                           env=person_env(**env))
+        return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
+
+    def commit(item, name):
+        write(repo, "src/%s.txt" % name, name + "\n")
+        subprocess.call(["git", "add", "-A"], cwd=repo)
+        msg = "%s\n" % name + ("\nWork-Item: %s\nAgent: claude-code\nModel: claude-opus\n" % item if item else "")
+        subprocess.call(["git", "commit", "-qm", msg], cwd=repo)
+
+    commit("", "kit")
+    code, out, err = sdlc("item", "add", "--title", "Change the gate", "--tier", "1")
+    check("a Tier 1 item", code == 0 and "TA-001" in out, out + err)
+    commit("TA-001", "gate")
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    res = json.loads(out or "{}")
+    check("Tier 1 needs 2 approvals when the charter does not say", res.get("required") == 2, out + err)
+
+    write(repo, "docs/project/charter.md", re.sub(
+        r"(?m)^(\| \*\*Approvers\*\* \|[^\n]*\n)", r"\1| **Tier 1 approvals** | 1 |\n",
+        read(repo, "docs/project/charter.md")))
+    commit("", "solo-project")
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    res = json.loads(out or "{}")
+    check("the charter's Tier 1 approvals row sets the count",
+          res.get("required") == 1 and not res.get("met"), out + err)
+
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", CLAUDECODE="1", NUHUT_USER="Sam")
+    check("an agent without a terminal cannot approve", code == 1 and "agent cannot approve" in err, out + err)
+    code, out, err = sdlc("approve", "TA-001", "--by", "Alex", NUHUT_USER="Alex")
+    check("someone not in Approvers cannot approve", code == 1 and "Approvers" in err, out + err)
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
+    check("the approver approves in a terminal", code == 0 and "approval 1 of 1" in out, out + err)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    res = json.loads(out or "{}")
+    check("a local approval meets the count",
+          res.get("met") is True and [a.get("source") for a in res.get("approvers", [])] == ["local"],
+          out + err)
+    commit("TA-001", "gate-again")
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    res = json.loads(out or "{}")
+    check("a later commit needs a new approval", res.get("met") is False, out + err)
+
+    write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md").replace(
+        "| **Tier 1 approvals** | 1 |", "| **Tier 1 approvals** | 2 |"))
+    commit("", "two-approvers")
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
+    subprocess.call(["git", "checkout", "-q", "-b", "TA-002-lower"], cwd=repo)
+    write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md").replace(
+        "| **Tier 1 approvals** | 2 |", "| **Tier 1 approvals** | 1 |"))
+    commit("", "branch-only")
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    res = json.loads(out or "{}")
+    check("a branch that lowers the count gains nothing until it merges",
+          res.get("required") == 2 and res.get("met") is False, out + err)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -8957,6 +9050,7 @@ def main():
                  test_shard_merge_driver,
                  test_trusted_records_review, test_install_review_fixes,
                  test_status_review_fixes, test_defect_awareness, test_release_defect_gate,
+                 test_tier1_approval_count_and_local_approval,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

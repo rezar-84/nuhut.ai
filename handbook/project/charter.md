@@ -177,6 +177,7 @@ last-reviewed: 2026-11-13
 | **Finish guard** | `on` |
 | **Agent budget per tier** | Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h |
 | **Approvers** | rezar-84 |
+| **Tier 1 approvals** | `1` _(one-person project; raise to `2` when a second approver joins)_ |
 | **Extensions allowed** | none |
 | **Staleness threshold** | 365 days |
 

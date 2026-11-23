@@ -1919,6 +1919,17 @@ def approver_names(project):
     return [n for n in names if n], source
 
 
+def tier1_approvals(project):
+    """(count, source): how many approvers a Tier 1 merge needs, 1 or 2, from the charter's
+    **Tier 1 approvals** row as it stands on the default branch (`trusted_text`), so a
+    branch that lowers it gains nothing until it merges. 2 when the row is missing or
+    unreadable."""
+    text, source = trusted_text(project, project.charter_path)
+    cell = labelled(text or "", "Tier 1 approvals") or ""
+    m = re.match(r"^\W*([12])\b", re.sub(r"[`*]", "", UNFILLED.sub("", cell)).strip())
+    return (int(m.group(1)) if m else 2), source
+
+
 def item_author(project, item):
     """(agent, model) from the item's commit trailers, or (None, None) when no commit
     carries them -- work from before 4.0, which the identity rules do not judge."""
@@ -4792,6 +4803,7 @@ Records and checks
   verify              run the charter's checks in order and keep the evidence        verify --item ACME-12
   finish <ID>         close an item: evidence, review, worklog draft, status          finish ACME-12
   approvals <ID>      merge approvals from the item branch's GitHub PR reviews       approvals ACME-12
+  approve <ID>        an approver approves the item's newest commit, in a terminal     approve ACME-12 --by sam
   bite <test cmd>     do the tests fail without the change and pass with it?          bite npm test
   plan-check <ID>     does the branch's diff match the plan's Files that change?     plan-check ACME-12
   ci-check            PR range: trailers, ledger record, Tier 1 review, tier floor    ci-check --base main
@@ -4853,6 +4865,7 @@ EXAMPLES = {
                "finish ACME-12 --waive verify --by Sam --reason \"no staging DB here\""],
     "approvals": ["approvals ACME-12        # exit 0 when the tier's approvals are on the PR head",
                   "approvals ACME-12 --json"],
+    "approve": ["approve ACME-12 --by sam  # run by the approver in a terminal"],
     "guard": ["guard start              # SessionStart hook (reads the hook JSON on stdin)",
               "guard stop               # Stop hook"],
     "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict",
@@ -4980,6 +4993,14 @@ def _cmd_approvals(project, opts, parser):
         print("%s · Tier %s" % (opts.item, res["tier"] or "?"))
         print("\n".join(runtime_module("finish").approval_lines(res)))
     return 0 if res["met"] else 1
+
+
+def _cmd_approve(project, opts, parser):
+    """approve: an approver's approval of an item's newest commit, given in a terminal."""
+    lines, code = runtime_module("finish").approve(sys.modules[__name__], project, opts.item,
+                                                   opts.by)
+    (sys.stdout if code == 0 else sys.stderr).write("\n".join(lines) + "\n")
+    return code
 
 
 def _cmd_finish(project, opts, parser):
@@ -6049,6 +6070,7 @@ def register_command(name, handler, help="", configure=None, verb=None, core=Fal
 
 for _name, _handler in (
         ("status", _cmd_status), ("doctor", _cmd_doctor), ("approvals", _cmd_approvals),
+        ("approve", _cmd_approve),
         ("finish", _cmd_finish), ("guard", _cmd_finish),
         ("notify", _cmd_notify), ("sync", _cmd_sync), ("slop", _cmd_slop), ("spec", _cmd_spec),
         ("next-id", _cmd_next_id), ("render", _cmd_render), ("item", _cmd_item),
@@ -6198,6 +6220,10 @@ def build_parser():
                          "GitHub PR reviews on its head (gh), else the charter's Approvers")
     apr.add_argument("item", help="work item ID")
     apr.add_argument("--json", action="store_true", help="print the result as JSON")
+    apv = sub.add_parser("approve", help="approve an item's newest commit as a charter "
+                         "approver, in a terminal (counts toward Tier 1 and Strict Tier 2)")
+    apv.add_argument("item", help="work item ID")
+    apv.add_argument("--by", required=True, help="your handle, as the charter's Approvers row names it")
     gd = sub.add_parser("guard", help="the finish guard, run by the agent tool's session hooks")
     gd.add_argument("event", choices=("start", "stop"))
     chk = sub.add_parser("plan-check", help="compare a Tier 1 plan's file list with the "
