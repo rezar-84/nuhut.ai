@@ -300,7 +300,7 @@ def normalize_item(data, today=None):
 LOCAL_APPROVAL_FIELDS = ("handle", "commit", "at", "as")
 SEVERITY_CHANGE_FIELDS = ("from", "to", "by", "how", "review", "reason", "at")
 SEVERITY_REVIEW_FIELDS = ("by", "model", "family", "requester", "requester_family",
-                          "independent", "rated", "for", "file", "at")
+                          "independent", "rated", "for", "report", "file", "at")
 
 
 def _flat_records(value, fields, needed):

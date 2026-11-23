@@ -263,21 +263,32 @@ ACCEPTABLE = ("S2",)
 
 
 def fix_shipped(project, item_id, to_sha):
-    """True when the history of to_sha has a commit whose Work-Item trailer is item_id: the
-    deployed code carries its fix, in this range or an earlier one."""
+    """True when the history of to_sha has a fix for item_id: a commit whose own trailer
+    block (git's trailer parser, not a line anywhere in the body) has `Work-Item: <ID>` and
+    that changes a file outside the docs folder. A commit that only files the defect
+    report or other records is not a fix."""
     if not to_sha or not SHA_RE.match(to_sha):
         return False
-    pattern = "^Work-Item:[[:space:]]*%s[[:space:]]*$" % re.escape(item_id)
-    return bool(project.git("log", "-1", "--format=%H", "--extended-regexp",
-                            "--grep=" + pattern, to_sha).strip())
+    log = project.git("log", "--format=%H%x00%(trailers:key=Work-Item,valueonly,separator=%x01)%x1e",
+                      to_sha)
+    docs = (getattr(project, "docs", "docs") or "docs").strip("/") + "/"
+    for entry in log.split("\x1e"):
+        sha, _, values = entry.strip().partition("\x00")
+        if not SHA_RE.match(sha) or item_id not in [v.strip() for v in values.split("\x01")]:
+            continue
+        paths = project.git("diff-tree", "--no-commit-id", "--name-only", "-r", "--root",
+                            sha).split()
+        if any(not p.startswith(docs) for p in paths):
+            return True
+    return False
 
 
 def release_blockers(project, shipped, to_sha=None):
-    """Open S0-S2 defects the deployed code carries no fix for. A defect whose ID is a
-    Work-Item trailer in the range, or anywhere in to_sha's history, does not block."""
+    """Open S0-S2 defects the deployed code carries no fix for (`fix_shipped`), in this
+    range or an earlier one."""
     items = shards.merged_items(project)
     return [it for it in shards.open_defects(items, HARD_BLOCKERS + ACCEPTABLE)
-            if it["id"] not in shipped and not fix_shipped(project, it["id"], to_sha)]
+            if not fix_shipped(project, it["id"], to_sha)]
 
 
 def check_defects(project, rt, shipped, accept, by, reason, to_sha=None):
