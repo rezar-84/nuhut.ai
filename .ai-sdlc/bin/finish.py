@@ -360,9 +360,9 @@ GH_TIMEOUT = 20
 PR_FIELDS = ("reviews,number,headRefOid,author,state,headRepositoryOwner,headRepository,"
              "isCrossRepository,baseRefName")
 ITEM_BRANCH = re.compile(r"^(?:[\w.-]+/)?([A-Z][A-Z0-9]*-[0-9]+)(?:-|$)")
-SOLO_HINT = ("a solo project can set **Tier 1 approvals** to 1 in the charter, and the "
-             "approver runs `sdlc.py approve <ID> --by <handle>` in a terminal; see process/05 "
-             "Approvals")
+SOLO_HINT = ("a solo project can set **Tier 1 approvals** to 1 in the charter, and with "
+             "**Local approvals** `on` the approver runs `sdlc.py approve <ID> --by <handle>` "
+             "in a terminal; see process/05 Approvals")
 
 
 def _safe(text):
@@ -461,9 +461,10 @@ def approvals(rt, project, item, tier=None, run=None):
                       % (tier or "?", "Strict" if strict else "Standard"))
         return result
 
-    by_terminal = local_approvals(rt, project, item, charter)
+    by_terminal = []
 
     def fallback(note):
+        by_terminal[:] = local_approvals(rt, project, item, charter)
         have = set(a["handle"] for a in by_terminal)
         result.update(source="charter", note=note, approvers=list(by_terminal) + [
             {"handle": h, "login": "", "source": "charter", "commit": "", "at": ""}
@@ -571,7 +572,8 @@ def approvals(rt, project, item, tier=None, run=None):
             counted.append({"handle": _safe(handle), "login": r["login"], "source": "github",
                             "commit": head, "at": r["at"]})
     have = set(c["handle"] for c in counted)
-    counted += [a for a in by_terminal if a["handle"] not in have]
+    counted += [a for a in local_approvals(rt, project, item, charter, against=head)
+                if a["handle"] not in have]
     result.update(source="github", approvers=counted)
     result["met"] = approval_count(result) >= required
     return result
@@ -580,31 +582,70 @@ def approvals(rt, project, item, tier=None, run=None):
 COUNTED_SOURCES = ("github", "local")
 
 
-def local_approvals(rt, project, item, charter):
+def local_approvals_on(rt, project):
+    """True when the charter's **Local approvals** row, on the default branch, is `on`.
+    Off by default: a local approval is an unsigned record in the item shard, so only a
+    project that accepts that (a one-person project, say) turns it on."""
+    text, _ = rt.trusted_text(project, project.charter_path)
+    cell = rt.labelled(text or "", "Local approvals") or ""
+    return re.sub(r"[`*]", "", rt.UNFILLED.sub("", cell)).strip().lower().startswith("on")
+
+
+def _records_only_since(rt, project, older, newer):
+    """True when <older> is <newer> or an ancestor of it and nothing outside the docs
+    folder changed between them."""
+    if not older or not newer:
+        return False
+    if older == newer:
+        return True
+    if not _is_ancestor(project, older, newer):
+        return False
+    docs = project.docs.strip("/") + "/"
+    changed = project.git("diff", "--name-only", older, newer).split()
+    return all(p.startswith(docs) for p in changed)
+
+
+def local_approvals(rt, project, item, charter, against=None):
     """Approvals an approver gave in a terminal (`sdlc.py approve`) that still count: the
-    approver is in the charter's Approvers row on the default branch, and the approval
-    names the item's newest commit, so a later commit needs a new one."""
+    charter turns them on, the approver is in Approvers on the default branch, the approved
+    commit contains the item's newest commit, and nothing but records changed between it
+    and <against> (the PR head, else the item branch, else HEAD)."""
+    if not local_approvals_on(rt, project):
+        return []
     try:
         shard = shards.load_item(project, item) or {}
     except Exception:                    # noqa: BLE001 -- an unreadable shard approves nothing
         shard = {}
     commits = rt.item_commits(project, item)
     newest = commits[0][0] if commits else ""
+    if against is None:
+        branch = item_branch(rt, project, item)
+        against = project.git("rev-parse", "--verify", "--quiet",
+                              (branch or "HEAD") + "^{commit}").strip()
     out = []
     for row in shard.get("local_approvals") or []:
         handle = _safe(row.get("handle"))
-        if not newest or row.get("commit") != newest or handle not in charter:
+        approved = row.get("commit") or ""
+        if not newest or handle not in charter or handle in [a["handle"] for a in out]:
             continue
-        if handle in [a["handle"] for a in out]:
+        if not (approved == newest or _is_ancestor(project, newest, approved)):
             continue
-        out.append({"handle": handle, "login": "", "source": "local", "commit": newest,
+        if not _records_only_since(rt, project, approved, against):
+            continue
+        out.append({"handle": handle, "login": "", "source": "local", "commit": approved,
                     "at": row.get("at") or ""})
     return out
 
 
 def approve(rt, project, item, by, interactive=None):
-    """Record <by>'s approval of <item>'s newest commit. (lines, exit code)."""
+    """Record <by>'s approval of what is checked out (HEAD), which must contain the item's
+    newest commit. (lines, exit code)."""
     interactive = _interactive() if interactive is None else interactive
+    if not local_approvals_on(rt, project):
+        return ["approve: local approvals are off. They are unsigned records anyone who can "
+                "write the item shard could forge, so a project turns them on deliberately: "
+                "set **Local approvals** to `on` in %s on the default branch. Otherwise "
+                "approve the item's pull request on GitHub" % project.charter_path], 1
     shard = shards.load_item(project, item)
     if not shard:
         return ["approve: %s has no item shard under %s/project/items/" % (item, project.docs)], 2
@@ -617,17 +658,21 @@ def approve(rt, project, item, by, interactive=None):
     if not commits:
         return ["approve: no commit carries `Work-Item: %s`, so there is nothing to approve "
                 "yet" % item], 1
+    head = project.git("rev-parse", "--verify", "--quiet", "HEAD^{commit}").strip()
+    newest = commits[0][0]
+    if not (head == newest or _is_ancestor(project, newest, head)):
+        return ["approve: HEAD does not contain %s's newest commit %s; check out the branch "
+                "that holds it" % (item, newest[:7])], 1
     handle = _safe(rt.resolve_person(registry, by) or rt.person_key(by))
     raw, _ = runner_identity(project, registry, rt)
-    newest = commits[0][0]
     rows = [r for r in shard.get("local_approvals") or []
-            if not (r.get("handle") == handle and r.get("commit") == newest)]
-    rows.append({"handle": handle, "commit": newest, "as": _safe(raw) or "unknown",
+            if not (r.get("handle") == handle and r.get("commit") == head)]
+    rows.append({"handle": handle, "commit": head, "as": _safe(raw) or "unknown",
                  "at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
     shard["local_approvals"] = rows
     shards.save_item(project, shard)
     res = approvals(rt, project, item)
-    lines = ["approved %s at %s by %s (local)" % (item, newest[:7], handle)]
+    lines = ["approved %s at %s by %s (local)" % (item, head[:7], handle)]
     return lines + (approval_lines(res) if res else []), 0
 
 

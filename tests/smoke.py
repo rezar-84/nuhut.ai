@@ -4400,7 +4400,9 @@ def test_upgrade_to_41():
                     # 6.0: worktree scripts (NUHT-032), hotfix review window (NUHT-028) and
                     # the extension code allowlist (NUHT-018).
                     "| **Worktree scripts** |", "| **Retroactive review within** |",
-                    "| **Extensions allowed** |")
+                    "| **Extensions allowed** |",
+                    # the Tier 1 approval count and local approvals (NUHT-043).
+                    "| **Tier 1 approvals** |", "| **Local approvals** |")
         check("project records keep every line; the charter only gains the new rows",
               all(l in after for l in charter_before.splitlines()) and len(added) == len(new_rows)
               and all(any(l.startswith(r) for l in added) for r in new_rows)
@@ -8969,6 +8971,7 @@ def test_tier1_approval_count_and_local_approval():
 
     def commit(item, name):
         write(repo, "src/%s.txt" % name, name + "\n")
+    charter = re.sub(r"(?m)^\| \*\*Local approvals\*\* \|[^\n]*\n", "", charter)
         subprocess.call(["git", "add", "-A"], cwd=repo)
         msg = "%s\n" % name + ("\nWork-Item: %s\nAgent: claude-code\nModel: claude-opus\n" % item if item else "")
         subprocess.call(["git", "commit", "-qm", msg], cwd=repo)
@@ -9002,6 +9005,13 @@ def test_tier1_approval_count_and_local_approval():
           res.get("met") is True and [a.get("source") for a in res.get("approvers", [])] == ["local"],
           out + err)
     commit("TA-001", "gate-again")
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
+    check("local approvals are off until the charter turns them on",
+          code == 1 and "Local approvals" in err, out + err)
+    write(repo, "docs/project/charter.md", re.sub(
+        r"(?m)^(\| \*\*Tier 1 approvals\*\* \|[^\n]*\n)", r"\1| **Local approvals** | on |\n",
+        read(repo, "docs/project/charter.md")))
+    commit("", "local-on")
     code, out, err = sdlc("approvals", "TA-001", "--json")
     res = json.loads(out or "{}")
     check("a later commit needs a new approval", res.get("met") is False, out + err)
@@ -9013,6 +9023,16 @@ def test_tier1_approval_count_and_local_approval():
     subprocess.call(["git", "checkout", "-q", "-b", "TA-002-lower"], cwd=repo)
     write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md").replace(
         "| **Tier 1 approvals** | 2 |", "| **Tier 1 approvals** | 1 |"))
+    write(repo, "docs/project/notes.md", "records only\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(["git", "commit", "-qm", "records"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("a records-only commit after the approval keeps it", json.loads(out or "{}").get("met") is True, out + err)
+    commit("", "unrelated-code")
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("a code commit without the item's trailer after the approval voids it (review finding 3)",
+          json.loads(out or "{}").get("met") is False, out + err)
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
     commit("", "branch-only")
     code, out, err = sdlc("approvals", "TA-001", "--json")
     res = json.loads(out or "{}")

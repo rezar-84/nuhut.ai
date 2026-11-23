@@ -193,7 +193,7 @@ fails an item with no committed full verify record on its newest code commit (th
 | --- | --- |
 | Tier 3 | Commit on the current branch once the checks pass. No approval, no parking. |
 | Tier 2 | As the charter's **Tier rules** say: `Standard`, commit and continue; `Strict`, **one human approver**. |
-| Tier 1 | **Two human approvers**, at least one with domain ownership of the affected surface. A one-person project sets the charter's **Tier 1 approvals** row to `1` on the default branch. An approval is an `APPROVED` GitHub review on the PR head by someone in **Approvers**, or `sdlc.py approve <ID> --by <handle>` run by that approver in their own terminal. |
+| Tier 1 | **Two human approvers**, at least one with domain ownership of the affected surface. A one-person project sets **Tier 1 approvals** to `1`. An approval is an `APPROVED` GitHub review on the PR head by someone in **Approvers**, or, with **Local approvals** `on`, `sdlc.py approve` run by that approver in a terminal. |
 | Anything named under "Human approval required for" in `AGENTS.md` | As named there, regardless of tier. |
 | Tier 2 or 3 items inside an epic | Merged into the epic branch by the agent once checks pass and no review holds a Block. The approval above is given once per checkpoint, when the epic branch is proposed for the default branch (`11-epics.md`). A Tier 1 item inside an epic is approved on its own. |
 
