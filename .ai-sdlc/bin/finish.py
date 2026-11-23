@@ -591,9 +591,18 @@ def local_approvals_on(rt, project):
     return re.sub(r"[`*]", "", rt.UNFILLED.sub("", cell)).strip().lower().startswith("on")
 
 
+# What an approval survives: the bookkeeping the kit writes after it (item shards, the
+# ledger, worklog and backlog renders, release records). The charter, people.json,
+# reviews, plans and process documents decide what an approval means, so a change to
+# them voids it (ship review NUHT-043 round 2, finding 3).
+BOOKKEEPING = ("project/items/", "project/ledger/", "project/evidence-ledger.jsonl",
+               "project/worklog/", "project/worklog.md", "project/backlog.md",
+               "project/releases/", "project/deploys.jsonl", "project/defects/README.md")
+
+
 def _records_only_since(rt, project, older, newer):
-    """True when <older> is <newer> or an ancestor of it and nothing outside the docs
-    folder changed between them."""
+    """True when <older> is <newer> or an ancestor of it and only bookkeeping changed
+    between them."""
     if not older or not newer:
         return False
     if older == newer:
@@ -602,7 +611,7 @@ def _records_only_since(rt, project, older, newer):
         return False
     docs = project.docs.strip("/") + "/"
     changed = project.git("diff", "--name-only", older, newer).split()
-    return all(p.startswith(docs) for p in changed)
+    return all(p.startswith(docs) and p[len(docs):].startswith(BOOKKEEPING) for p in changed)
 
 
 def local_approvals(rt, project, item, charter, against=None):

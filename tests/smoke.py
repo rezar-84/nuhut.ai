@@ -9023,14 +9023,21 @@ def test_tier1_approval_count_and_local_approval():
     check("a local approval meets the count",
           res.get("met") is True and [a.get("source") for a in res.get("approvers", [])] == ["local"],
           out + err)
-    write(repo, "docs/project/notes.md", "records only\n")
+    sdlc("item", "set", "TA-001", "--summary", "bookkeeping")
     subprocess.call(["git", "add", "-A"], cwd=repo)
     subprocess.call(["git", "commit", "-qm", "records"], cwd=repo)
     code, out, err = sdlc("approvals", "TA-001", "--json")
-    check("a records-only commit after the approval keeps it", json.loads(out or "{}").get("met") is True, out + err)
+    check("a bookkeeping commit after the approval keeps it", json.loads(out or "{}").get("met") is True, out + err)
+    write(repo, "docs/project/people.json", '{"people": []}\n')
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(["git", "commit", "-qm", "people"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("a change to people.json or the charter after the approval voids it (round 2, finding 3)",
+          json.loads(out or "{}").get("met") is False, out + err)
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
     commit("", "unrelated-code")
     code, out, err = sdlc("approvals", "TA-001", "--json")
-    check("a code commit without the item's trailer after the approval voids it (review finding 3)",
+    check("a code commit without the item's trailer after the approval voids it (finding 3)",
           json.loads(out or "{}").get("met") is False, out + err)
     code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
     commit("TA-001", "gate-again")
