@@ -262,15 +262,18 @@ HARD_BLOCKERS = ("S0", "S1")
 ACCEPTABLE = ("S2",)
 
 
-def fix_shipped(project, item_id, to_sha):
-    """True when the history of to_sha has a fix for item_id: a commit whose own trailer
-    block (git's trailer parser, not a line anywhere in the body) has `Work-Item: <ID>` and
-    that changes a file outside the docs folder. A commit that only files the defect
-    report or other records is not a fix."""
+def fix_shipped(project, item_id, to_sha, from_sha=None):
+    """True when this deploy's range (from_sha..to_sha, or all of to_sha's history when
+    there is no earlier deploy) has a fix for item_id: a commit whose own trailer block
+    (git's trailer parser, not a line anywhere in the body) has `Work-Item: <ID>` and that
+    changes a file outside the docs folder. A records-only commit is not a fix, and a fix
+    from an earlier deploy does not exempt a defect that is still open: once its fix ships,
+    the defect is closed (ship review NUHT-041 round 2, finding 4)."""
     if not to_sha or not SHA_RE.match(to_sha):
         return False
+    span = ("%s..%s" % (from_sha, to_sha)) if from_sha and SHA_RE.match(from_sha) else to_sha
     log = project.git("log", "--format=%H%x00%(trailers:key=Work-Item,valueonly,separator=%x01)%x1e",
-                      to_sha)
+                      span)
     docs = (getattr(project, "docs", "docs") or "docs").strip("/") + "/"
     for entry in log.split("\x1e"):
         sha, _, values = entry.strip().partition("\x00")
@@ -283,18 +286,17 @@ def fix_shipped(project, item_id, to_sha):
     return False
 
 
-def release_blockers(project, shipped, to_sha=None):
-    """Open S0-S2 defects the deployed code carries no fix for (`fix_shipped`), in this
-    range or an earlier one."""
+def release_blockers(project, shipped, to_sha=None, from_sha=None):
+    """Open S0-S2 defects this deploy's range carries no fix for (`fix_shipped`)."""
     items = shards.merged_items(project)
     return [it for it in shards.open_defects(items, HARD_BLOCKERS + ACCEPTABLE)
-            if not fix_shipped(project, it["id"], to_sha)]
+            if not fix_shipped(project, it["id"], to_sha, from_sha)]
 
 
-def check_defects(project, rt, shipped, accept, by, reason, to_sha=None):
+def check_defects(project, rt, shipped, accept, by, reason, to_sha=None, from_sha=None):
     """[{id, severity, by, reason}] for the accepted S2 defects; raises DeployError when an
     open defect blocks this release."""
-    blockers = release_blockers(project, set(shipped or ()), to_sha)
+    blockers = release_blockers(project, set(shipped or ()), to_sha, from_sha)
     by_id = dict((b["id"], b) for b in blockers)
     accept = [a for a in (accept or []) if a]
     for a in accept:
@@ -375,7 +377,8 @@ def record(project, rt, version, env, from_ref=None, to_ref="HEAD", by=None, dry
                "from": from_sha, "to": to_sha, "commits": found["commits"],
                "items": found["items"], "date": date, "by": who, "agent": agent}
         from_used = from_sha
-    accepted = check_defects(project, rt, rec.get("items") or [], accept, by, reason, to_sha)
+    accepted = check_defects(project, rt, rec.get("items") or [], accept, by, reason, to_sha,
+                             from_used)
     if accepted:
         kept = [a for a in rec.get("accepted_defects") or []
                 if a.get("id") not in set(x["id"] for x in accepted)]

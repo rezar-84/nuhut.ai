@@ -8933,6 +8933,11 @@ def test_release_defect_gate():
     commit("RG-001", "fix-basket")
     code, out, err = sdlc("deploy", "record", "--version", "1.0.0", "--env", "prod")
     check("a deploy that carries the S1's fix passes", code == 0, out + err)
+    commit("", "next")
+    code, out, err = sdlc("deploy", "record", "--version", "1.0.1", "--env", "prod", "--dry-run")
+    check("the next deploy blocks again while the fixed S1 is still open: close it",
+          code == 1 and "RG-001" in err, out + err)
+    sdlc("item", "set", "RG-001", "--status", "Done")
 
     code, out, err = sdlc("bug", "Slow search", "--severity", "S2", "--status", "Ready")
     commit("", "more-records")
@@ -9176,6 +9181,9 @@ def test_checker_fallback():
           and "before 6.0" in results["legacy"][1], str(results["legacy"]))
     check("a 6.0 kit: the base's checker runs",
           results["modern"][0] == 0 and "checker=/" in results["modern"][1], str(results["modern"]))
+    check("a base ref that cannot be read: exit 1, no fallback (round 2, finding 4)",
+          results["no-such-ref"][0] == 1 and "checker=" not in results["no-such-ref"][1],
+          str(results["no-such-ref"]))
     check("a base checker that fails to start: exit 1, no fallback",
           results["broken"][0] == 1 and "checker=" not in results["broken"][1], str(results["broken"]))
     shutil.rmtree(d, ignore_errors=True)
@@ -9188,9 +9196,6 @@ def main():
                  test_runtime, test_view, test_view_remote, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_ci_check, test_ci_context, test_kit_value_benchmark, test_kit_value_checks,
                  test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
-    check("a base ref that cannot be read: exit 1, no fallback (round 2, finding 4)",
-          results["no-such-ref"][0] == 1 and "checker=" not in results["no-such-ref"][1],
-          str(results["no-such-ref"]))
                  test_domain_detection,
                  test_role_and_skill_selection, test_profile,
                  test_effort_and_acquisition_profiles, test_legacy_mode_upgrade,

@@ -5488,8 +5488,16 @@ def _severity_rank(value):
     return int(sev[1]) if sev else 5
 
 
+def severity_ladder(project):
+    """The S0-S4 rows of CARD.md as the default branch has them (`trusted_text`), so a
+    branch cannot rewrite the ladder a re-rating is judged by."""
+    text, _ = trusted_text(project, os.path.join(project.docs, "CARD.md"))
+    return "\n".join(l for l in (text or "").splitlines()
+                     if re.match(r"^\| \*\*S[0-4]\*\* \|", l))
+
+
 def defect_fingerprint(project, item):
-    """sha256 of what a re-rating judges: the defect's title, touch paths and report. A
+    """sha256 of what a re-rating judges: the ladder, the defect's title, touch paths and report. A
     re-rating counts only while this is unchanged, so editing the report after a
     favourable rating voids it."""
     rel = os.path.join(project.docs, "project", "defects", item["id"] + ".md")
@@ -5499,7 +5507,7 @@ def defect_fingerprint(project, item):
     except (IOError, OSError):
         report = b""
     h = hashlib.sha256()
-    for part in (item.get("title", ""), item.get("touch") or ""):
+    for part in (severity_ladder(project), item.get("title", ""), item.get("touch") or ""):
         h.update(str(part).encode("utf-8") + b"\0")
     h.update(report)
     return h.hexdigest()
@@ -5516,13 +5524,7 @@ def blind_rerate_prompt(project, item):
         report = "(no defect report at %s)" % rel
     report = re.sub(r"(?im)^.*\bseverity\b.*$", "", report)
     report = re.sub(r"\bS[0-4]\b", "S?", report)
-    card = ""
-    try:
-        with open(project.path(os.path.join(project.docs, "CARD.md")), encoding="utf-8") as handle:
-            card = "\n".join(l for l in handle.read().splitlines()
-                             if re.match(r"^\| \*\*S[0-4]\*\* \|", l))
-    except (IOError, OSError):
-        pass
+    card = severity_ladder(project)
     return ("You are rating a defect's severity independently. You are not told what anyone "
             "else rated it. Read the defect and the ladder, decide by consequence, and end "
             "with one line `Severity: S<n>` and a line `Why: <one sentence>`. The defect "
