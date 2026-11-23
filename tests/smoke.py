@@ -9132,6 +9132,47 @@ def main():
                  test_mcp_server,
                  test_test_runner):
         test()
+
+def test_checker_fallback():
+    print("scaffolded CI falls back to the change's ci-check only for a base with no kit or a 5.x kit")
+    d = tempfile.mkdtemp(prefix="sdlc-checker-")
+    subprocess.call(["git", "init", "-q", "-b", "main", d])
+    for key, value in (("user.name", "t"), ("user.email", "t@example.invalid"), ("commit.gpgsign", "false")):
+        subprocess.call(["git", "config", key, value], cwd=d)
+    bodies = {
+        "nokit": None,
+        "legacy": "import sys\nif sys.argv[1:] == ['--help']:\n    print('usage: sdlc.py {verify,finish,doctor}')\n"
+                  "    sys.exit(0)\nsys.exit(2)\n",
+        "modern": "import sys\nsys.exit(0)\n",
+        "broken": "raise SystemExit(1)\n",
+    }
+    for name, body in bodies.items():
+        subprocess.call(["git", "checkout", "-q", "--orphan", name], cwd=d)
+        subprocess.call(["git", "rm", "-rqf", "--ignore-unmatch", "."], cwd=d)
+        write(d, "README", name + "\n")
+        if body is not None:
+            write(d, ".ai-sdlc/bin/sdlc.py", body)
+        subprocess.call(["git", "add", "-A"], cwd=d)
+        subprocess.call(["git", "commit", "-qm", name], cwd=d)
+    lines = installer.Installer.checker_select_shell("$REF", "$tmp", "", "warning: ", "error: ")
+    script = 'tmp="$(mktemp -d)"\n' + "\n".join(lines) + '\necho "checker=$checker"\n'
+    results = {}
+    for name in bodies:
+        p = subprocess.run(["sh", "-c", script], cwd=d, env=dict(os.environ, REF=name),
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        results[name] = (p.returncode, p.stdout)
+    check("no kit on the base: falls back with a warning",
+          results["nokit"][0] == 0 and "checker=.ai-sdlc/bin/sdlc.py" in results["nokit"][1]
+          and "warning" in results["nokit"][1], str(results["nokit"]))
+    check("a 5.x kit (no ci-check in --help): falls back with a warning",
+          results["legacy"][0] == 0 and "checker=.ai-sdlc/bin/sdlc.py" in results["legacy"][1]
+          and "before 6.0" in results["legacy"][1], str(results["legacy"]))
+    check("a 6.0 kit: the base's checker runs",
+          results["modern"][0] == 0 and "checker=/" in results["modern"][1], str(results["modern"]))
+    check("a base checker that fails to start: exit 1, no fallback",
+          results["broken"][0] == 1 and "checker=" not in results["broken"][1], str(results["broken"]))
+    shutil.rmtree(d, ignore_errors=True)
+
     print("")
     if failures:
         print("%d failed: %s" % (len(failures), ", ".join(failures)))
@@ -9142,3 +9183,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+                 test_checker_fallback,

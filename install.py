@@ -4326,16 +4326,10 @@ class Installer(object):
                      "      - name: PR records",
                      "        if: github.event_name == 'pull_request'",
                      "        run: |",
-                     '          mkdir -p "$RUNNER_TEMP/base"',
-                     '          if git archive "origin/$GITHUB_BASE_REF" .ai-sdlc/bin | tar -x -C "$RUNNER_TEMP/base" \\',
-                     '              && [ -f "$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py" ] \\',
-                     '              && python3 "$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py" ci-check --help >/dev/null 2>&1; then',
-                     '            checker="$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py"',
-                     "          else",
-                     '            echo "::warning::origin/$GITHUB_BASE_REF has no .ai-sdlc/bin/sdlc.py with ci-check '
-                     '(before 6.0); running this PR\'s own ci-check"',
-                     '            checker=".ai-sdlc/bin/sdlc.py"',
-                     "          fi",
+                     '          mkdir -p "$RUNNER_TEMP/base"']
+            lines.extend(self.checker_select_shell('origin/$GITHUB_BASE_REF', '$RUNNER_TEMP/base',
+                                                   "          ", "::warning::", "::error::"))
+            lines += [
                      '          python3 "$checker" --root "$GITHUB_WORKSPACE" ci-check --base "origin/$GITHUB_BASE_REF" \\',
                      '            --head %s --charter-ref "origin/$GITHUB_BASE_REF"' % head]
             for key, command in ordered:
@@ -4411,22 +4405,40 @@ class Installer(object):
         return "\n".join(lines)
 
     @staticmethod
+    def checker_select_shell(ref, tmp, pad, warn, err):
+        """Shell lines that set $checker to <ref>'s .ai-sdlc/bin/sdlc.py, so a change cannot
+        edit the checker it is judged by. They fall back to the change's own copy, with a
+        warning, only when <ref> has no kit or a kit from before 6.0 (its --help runs and
+        names no ci-check); any other failure exits 1 (ship review NUHT-044 finding 2)."""
+        bin_ = tmp + "/.ai-sdlc/bin/sdlc.py"
+        return [pad + line for line in (
+            'if ! git cat-file -e "%s:.ai-sdlc/bin/sdlc.py" 2>/dev/null; then' % ref,
+            '  echo "%s%s has no .ai-sdlc/bin/sdlc.py; running this change\'s own ci-check"' % (warn, ref),
+            '  checker=.ai-sdlc/bin/sdlc.py',
+            'elif ! git archive "%s" .ai-sdlc/bin | tar -x -C "%s"; then' % (ref, tmp),
+            '  echo "%scould not extract .ai-sdlc/bin from %s"; exit 1' % (err, ref),
+            'elif python3 "%s" ci-check --help >/dev/null 2>&1; then' % bin_,
+            '  checker="%s"' % bin_,
+            'elif python3 "%s" --help >/dev/null 2>&1 && ! python3 "%s" --help 2>&1 | grep -q ci-check; then'
+            % (bin_, bin_),
+            '  echo "%s%s has a kit from before 6.0 (no ci-check); running this change\'s own ci-check"'
+            % (warn, ref),
+            '  checker=.ai-sdlc/bin/sdlc.py',
+            'else',
+            '  echo "%sthe ci-check on %s fails to start; not falling back to this change\'s copy"' % (err, ref),
+            '  exit 1',
+            'fi')]
+
+    @staticmethod
     def base_checker_shell(base, root, pad):
         """Shell lines that fetch the target branch <base> (a variable), take ci-check from
         that branch's .ai-sdlc/bin so the change cannot edit its own checker, and run it
         with the CI context ci-check reads itself (--head env, base from the variables)."""
         return [pad + line for line in (
             'git fetch --quiet origin "+refs/heads/%s:refs/remotes/origin/%s"' % (base, base),
-            'tmp="$(mktemp -d)"',
-            'if git archive "origin/%s" .ai-sdlc/bin | tar -x -C "$tmp" \\' % base,
-            '    && [ -f "$tmp/.ai-sdlc/bin/sdlc.py" ] \\',
-            '    && python3 "$tmp/.ai-sdlc/bin/sdlc.py" ci-check --help >/dev/null 2>&1; then',
-            '  checker="$tmp/.ai-sdlc/bin/sdlc.py"',
-            "else",
-            '  echo "warning: origin/%s has no .ai-sdlc/bin/sdlc.py with ci-check (before 6.0); running this change\'s own ci-check" >&2' % base,
-            "  checker=.ai-sdlc/bin/sdlc.py",
-            "fi",
-            'python3 "$checker" --root %s ci-check --head env --charter-ref "origin/%s"' % (root, base))]
+            'tmp="$(mktemp -d)"',) + tuple(Installer.checker_select_shell(
+                "origin/" + base, "$tmp", "", "warning: ", "error: ")) + (
+            'python3 "$checker" --root %s ci-check --head env --charter-ref "origin/%s"' % (root, base),)]
 
     def pr_template_text(self):
         """.github/pull_request_template.md: what ci-check judges, asked up front."""
