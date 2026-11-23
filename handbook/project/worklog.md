@@ -30,6 +30,149 @@ last-reviewed: 2026-11-13
 
 <!-- New entries go here, above the older ones. -->
 
+## NUHT-040 — Bugs agents notice: sdlc.py bug, severity on items, open S0-S2 in status and at session start, touch-path warnings, generated defects index (touch: optional/runtime/sdlc.py, optional/runtime/shards.py, optional/runtime/status.py, optional/runtime/hooks.py)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `7754d1c..7754d1c`
+
+### What changed
+
+- feat(NUHT-040): sdlc.py bug, defect severity, open defects at session start and in status (7754d1c)
+
+Files: `CHANGELOG.md`, `README.md`, `docs/cli.md`, `optional/runtime/finish.py`, `optional/runtime/sdlc.py`, `optional/runtime/shards.py`, `optional/runtime/status.py`, `tests/smoke.py`
+
+### Why
+
+sdlc.py bug with severity and a filled defect report; severity and found_by on shards; render builds the defects index; status and guard start show open S0-S2; claim warns on overlapping touch paths. Rejected: an edit-time hook warning (hook rule plumbing; claim time reaches the agent before it edits).
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T122406Z, commit 489e0f7
+- `checks.unit` — Verified: pass — run 20261122T122406Z, commit 489e0f7
+- `checks.integration` — Verified: pass — run 20261122T122406Z, commit 489e0f7
+- `checks.build` — Verified: pass — run 20261122T122406Z, commit 489e0f7
+
+### Not done
+
+doctor warning for open defects with no severity (proposed under NUHT-041)
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+sdlc.py bug with severity and a filled defect report; severity and found_by on shards; render builds the defects index; status and guard start show open S0-S2; claim warns on overlapping touch paths. Rejected: an edit-time hook warning (hook rule plumbing; claim time reaches the agent before it edits).
+
+### Reviews
+
+self-reviewed
+
+## NUHT-038 — CI context beyond GitHub: GitLab, Bitbucket, Gitea and NUHUT_BASE/NUHUT_HEAD; more --scaffold-ci targets; doctor reports advisory-only repos (touch: optional/runtime/sdlc.py, optional/runtime/registry.py, install.py)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `2e087b9..489e0f7`
+
+### What changed
+
+- merge(NUHT-038): CI context beyond GitHub (489e0f7)
+- feat(NUHT-038): CI context for GitLab, Bitbucket, Gitea, Azure, Jenkins; more scaffolds; doctor reports advisory repos (2e087b9)
+
+Files: `CHANGELOG.md`, `docs/cli.md`, `optional/runtime/sdlc.py`, `tests/smoke.py`, `docs/install.md`, `install.py`, `optional/runtime/registry.py`
+
+### Why
+
+ci-check and trusted_ref read the CI target branch and head from GitHub, Gitea, GitLab, Bitbucket, Azure, Jenkins or NUHUT_BASE/NUHUT_HEAD; --scaffold-ci bitbucket|gitea|generic; doctor warns enforcement: advisory. Built by a worktree agent. Rejected: changing the default --head on GitHub (HEAD is the merge commit there).
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T124320Z, commit 489e0f7
+- `checks.unit` — Verified: pass — run 20261122T124320Z, commit 489e0f7
+- `checks.integration` — Verified: pass — run 20261122T124320Z, commit 489e0f7
+- `checks.build` — Verified: pass — run 20261122T124320Z, commit 489e0f7
+
+### Not done
+
+non-GitHub CI files as Tier 1 paths (gate change, owner decision); server-side hook and approval readers (NUHT-039)
+
+### Discovered
+
+this repo's own CI never runs sdlc.py, so doctor reports it advisory
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+ci-check and trusted_ref read the CI target branch and head from GitHub, Gitea, GitLab, Bitbucket, Azure, Jenkins or NUHUT_BASE/NUHUT_HEAD; --scaffold-ci bitbucket|gitea|generic; doctor warns enforcement: advisory. Built by a worktree agent. Rejected: changing the default --head on GitHub (HEAD is the merge commit there).
+
+### Reviews
+
+self-reviewed
+
+## NUHT-037 — view --serve over the network: --host tailscale|<ip>, access key in the link, read-only unless --allow-actions (touch: optional/runtime/view.py, docs/cli.md)
+
+**Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal
+**Status:** Done
+**Branch/commits:** `kit-v6` / `91daa9c..f3ae880`
+
+### What changed
+
+- merge(NUHT-037): view --serve remote mode (f3ae880)
+- feat(NUHT-037): view --serve --host with access key and read-only remote mode (91daa9c)
+
+Files: `CHANGELOG.md`, `docs/cli.md`, `optional/runtime/sdlc.py`, `tests/smoke.py`, `docs/viewer.md`, `optional/runtime/view.py`
+
+### Why
+
+view --serve --host tailscale|<ip> with a per-start access key in the link (cookie after first use), read-only unless --allow-actions. Built by a worktree agent; the key replaces the Host allowlist off loopback so tailscale serve needs no config. Rejected: an --allow-host list (user asked for no hostname config).
+
+### Verified
+
+- `checks.lint` — Verified: pass — run 20261122T120513Z, commit 489e0f7
+- `checks.unit` — Verified: pass — run 20261122T120513Z, commit 489e0f7
+- `checks.integration` — Verified: pass — run 20261122T120513Z, commit 489e0f7
+- `checks.build` — Verified: pass — run 20261122T120513Z, commit 489e0f7
+
+### Not done
+
+Origin check behind a proxy that rewrites Host (X-Forwarded-Host) untested; cookie names are per host, not per port
+
+### Discovered
+
+nothing
+
+### Decisions
+
+none
+
+### Assumptions used
+
+none
+
+### Plan
+
+view --serve --host tailscale|<ip> with a per-start access key in the link (cookie after first use), read-only unless --allow-actions. Built by a worktree agent; the key replaces the Host allowlist off loopback so tailscale serve needs no config. Rejected: an --allow-host list (user asked for no hostname config).
+
+### Reviews
+
+self-reviewed
+
 ## NUHT-035 — Move smoke tests to unittest with selection, a fast unit tier and a parallel pty tier (touch: tests/)
 
 **Date:** 2026-11-22 **Tier:** 2 **Effort:** Normal

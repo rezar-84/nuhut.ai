@@ -289,7 +289,8 @@ def normalize_item(data, today=None):
     # Approvals given in a terminal (`sdlc.py approve`), severity changes and blind
     # re-ratings: written only once there is one, each a list of flat string records.
     for key, fields, needed in (("local_approvals", LOCAL_APPROVAL_FIELDS, ("handle", "commit")),
-):
+                                ("severity_history", SEVERITY_CHANGE_FIELDS, ("from", "to")),
+                                ("severity_reviews", SEVERITY_REVIEW_FIELDS, ("rated",))):
         rows = _flat_records(data.get(key), fields, needed)
         if rows:
             out[key] = rows
@@ -297,6 +298,9 @@ def normalize_item(data, today=None):
 
 
 LOCAL_APPROVAL_FIELDS = ("handle", "commit", "at", "as")
+SEVERITY_CHANGE_FIELDS = ("from", "to", "by", "how", "review", "reason", "at")
+SEVERITY_REVIEW_FIELDS = ("by", "model", "family", "requester", "requester_family",
+                          "independent", "rated", "for", "file", "at")
 
 
 def _flat_records(value, fields, needed):

@@ -36,6 +36,8 @@ is prioritised.
 
 | ID | Task | Tier | Owner role | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
+| NUHT-043 | Tier 1 approvals row (1 or 2), sdlc.py approve in a terminal, GitHub reviews only from Approvers (touch: optional/runtime/finish.py, optional/runtime/sdlc.py, optional/runtime/shards.py) | 1 | software-engineer |  | In progress |
+| NUHT-044 | NUHT-038 follow-ups: other hosts' CI files are Tier 1, advisory is info without a remote, 5.x base falls back, this repo's CI runs ci-check (touch: optional/runtime/sdlc.py, install.py, .github/workflows/ci.yml) | 1 | software-engineer |  | In progress |
 
 ## Next
 
@@ -49,6 +51,8 @@ Agreed, not started. Ordered by priority.
 | NUHT-022 | ci-check: enforce trailers, ledger run on HEAD, review file and path-derived tier floor in PR CI (touch: optional/runtime/sdlc.py, install.py) | 1 | devops-sre |  | Ready |
 | NUHT-024 | Approvals read from GitHub PR reviews instead of charter names (touch: optional/runtime/finish.py) | 1 | security | NUHT-023 | Ready |
 | NUHT-027 | Release records and deploy ledger (environment, version, items); rename claim release to unclaim (touch: optional/runtime/) | 1 | devops-sre |  | Ready |
+| NUHT-039 | Server-side pre-receive hook running ci-check; approval readers for non-GitHub hosts as extensions | 1 | software-engineer |  | Proposed |
+| NUHT-041 | Block a release while an S1 defect is open | 1 | software-engineer | NUHT-040 | Ready |
 
 ## Blocked
 
@@ -85,6 +89,10 @@ permanent record, and the entry is found by ID.
 
 | ID | Task | Tier | Owner role | Depends on | Status | Completed |
 | --- | --- | --- | --- | --- | --- | --- |
+| NUHT-042 | Distribution review: per-host enforcement table and an advisory mode for local-only git (touch: docs/landscape.md) | 3 | software-engineer |  | Done | 2026-11-22 |
+| NUHT-040 | Bugs agents notice: sdlc.py bug, severity on items, open S0-S2 in status and at session start, touch-path warnings, generated defects index (touch: optional/runtime/sdlc.py, optional/runtime/shards.py, optional/runtime/status.py, optional/runtime/hooks.py) | 2 | software-engineer |  | Done | 2026-11-22 |
+| NUHT-038 | CI context beyond GitHub: GitLab, Bitbucket, Gitea and NUHUT_BASE/NUHUT_HEAD; more --scaffold-ci targets; doctor reports advisory-only repos (touch: optional/runtime/sdlc.py, optional/runtime/registry.py, install.py) | 2 | software-engineer |  | Done | 2026-11-22 |
+| NUHT-037 | view --serve over the network: --host tailscale\|<ip>, access key in the link, read-only unless --allow-actions (touch: optional/runtime/view.py, docs/cli.md) | 2 | software-engineer |  | Done | 2026-11-22 |
 | NUHT-035 | Move smoke tests to unittest with selection, a fast unit tier and a parallel pty tier (touch: tests/) | 2 | qa |  | Done | 2026-11-22 |
 | NUHT-034 | Webhook notifications for blocked, approval-needed and review-blocking events | 2 | devops-sre | NUHT-018 | Done | 2026-11-22 |
 | NUHT-033 | Standards discovery: extract codebase conventions via lens | 2 | architect |  | Done | 2026-11-22 |

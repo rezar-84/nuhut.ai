@@ -9021,6 +9021,78 @@ def test_tier1_approval_count_and_local_approval():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_severity_downgrade_rule():
+    print("an agent lowers an S0-S2 only after an independent blind re-rating; a person may in a terminal")
+    d = tempfile.mkdtemp(prefix="sdlc-rerate-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    subprocess.call(["git", "init", "-q", "-b", "main", repo])
+    for key, value in (("user.name", "Sam"), ("user.email", "sam@example.invalid"),
+                       ("commit.gpgsign", "false")):
+        subprocess.call(["git", "config", key, value], cwd=repo)
+    code, out = run([repo, "SV", "-y"])
+    check("installs", code == 0, out[-300:])
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+    fake = os.path.join(d, "bin")
+    os.makedirs(fake)
+    with open(os.path.join(fake, "codex"), "w") as handle:
+        handle.write("#!/bin/sh\ncat > \"$FAKE_PROMPT\" 2>/dev/null; for a in \"$@\"; do "
+                     "printf '%s\\n' \"$a\" >> \"$FAKE_PROMPT\"; done\n"
+                     "echo \"Severity: $FAKE_RATING\"\necho 'Why: test'\n")
+    os.chmod(os.path.join(fake, "codex"), 0o755)
+    prompt_file = os.path.join(d, "prompt.txt")
+    agent = {"CLAUDECODE": "1", "AI_SDLC_AGENT": "claude-code"}
+
+    def sdlc(*args, **env):
+        e = person_env(PATH=fake + os.pathsep + os.environ.get("PATH", ""),
+                       FAKE_PROMPT=prompt_file, **env)
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, timeout=120, env=e)
+        return p.returncode, p.stdout.decode("utf-8", "replace"), p.stderr.decode("utf-8", "replace")
+
+    def shard(item):
+        return json.loads(read(repo, "docs/project/items/%s.json" % item) or "{}")
+
+    sdlc("bug", "Export drops rows", "--severity", "S1", "--status", "Ready",
+         "--repro", "Export 10k rows; 9,998 arrive")
+    code, out, err = sdlc("item", "set", "SV-001", "--severity", "S3", **agent)
+    check("an agent cannot lower an S1 on its own word",
+          code == 1 and "rerate" in err and shard("SV-001").get("severity") == "S1", out + err)
+    code, out, err = sdlc("rerate", "SV-001", "--by", "cmd:echo Severity: S4", **agent)
+    check("a cmd: re-rating is recorded but not independent",
+          code == 0 and shard("SV-001")["severity_reviews"][0]["independent"] == "no", out + err)
+    code, out, err = sdlc("item", "set", "SV-001", "--severity", "S3", **agent)
+    check("a cmd: re-rating does not clear the downgrade", code == 1, out + err)
+    code, out, err = sdlc("rerate", "SV-001", "--by", "codex", FAKE_RATING="S3", **agent)
+    prompt = read(d, "prompt.txt")
+    check("the re-rating is blind: the prompt carries the report, not the severity",
+          code == 0 and "9,998" in prompt and "Severity:** S1" not in prompt
+          and "Severity: S1" not in prompt and "Severity: S<n>" in prompt,
+          out + err + prompt[:400])
+    code, out, err = sdlc("item", "set", "SV-001", "--severity", "S3", "--severity-reason",
+                          "only CSV export", **agent)
+    hist = shard("SV-001").get("severity_history") or [{}]
+    check("an independent re-rating that agrees lets the agent lower it, with a record",
+          code == 0 and shard("SV-001").get("severity") == "S3" and hist[-1].get("how") == "re-rated"
+          and hist[-1].get("from") == "S1" and hist[-1].get("reason") == "only CSV export", out + err)
+
+    sdlc("bug", "Login fails for some users", "--severity", "S1", "--status", "Ready")
+    sdlc("rerate", "SV-002", "--by", "codex", FAKE_RATING="S3", **agent)
+    sdlc("rerate", "SV-002", "--by", "codex", FAKE_RATING="S1", **agent)
+    code, out, err = sdlc("item", "set", "SV-002", "--severity", "S3", **agent)
+    check("any re-rating at the current severity that disagrees holds it",
+          code == 1 and "stays S1" in err and len(shard("SV-002")["severity_reviews"]) == 2, out + err)
+    code, out, err = sdlc("item", "set", "SV-002", "--severity", "S4")
+    hist = shard("SV-002").get("severity_history") or [{}]
+    check("a person in a terminal may lower it", code == 0 and hist[-1].get("how") == "person", out + err)
+
+    sdlc("bug", "Odd padding", "--severity", "S3", "--status", "Ready")
+    code, out, err = sdlc("item", "set", "SV-003", "--severity", "S1", **agent)
+    check("raising a severity is free", code == 0 and shard("SV-003").get("severity") == "S1", out + err)
+    code, out, err = sdlc("item", "set", "SV-003", "--severity", "S2", **agent)
+    check("lowering it again is guarded", code == 1, out + err)
+    shutil.rmtree(d, ignore_errors=True)
+
 def main():
     for test in (test_guided_setup, test_setup_paths, test_arrow_keys, test_guards, test_non_interactive, test_dry_run,
                  test_custom_docs_dir, test_gitignore_options, test_managed_upgrade, test_command_detection,
@@ -9050,7 +9122,7 @@ def main():
                  test_shard_merge_driver,
                  test_trusted_records_review, test_install_review_fixes,
                  test_status_review_fixes, test_defect_awareness, test_release_defect_gate,
-                 test_tier1_approval_count_and_local_approval,
+                 test_tier1_approval_count_and_local_approval, test_severity_downgrade_rule,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

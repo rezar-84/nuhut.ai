@@ -1,7 +1,7 @@
 ---
 status: current
 owner: architect
-last-reviewed: 2026-11-22
+last-reviewed: 2026-11-23
 ---
 
 # Plan: NUHT-041 Block a release while an S0 or S1 defect is open
@@ -29,6 +29,23 @@ release record whatever is open.
 - `--dry-run` reports the same refusal and writes nothing.
 - A promotion of an already recorded version to another environment is checked the same
   way against the items in the stored record.
+
+## Addition, 2026-11-23: who may lower a severity
+
+The owner's decision: a severity is lowered by a person, or by an agent after a second
+agent confirms it without bias.
+
+- Raising a severity, or moving between S3 and S4, is free.
+- Lowering an S0, S1 or S2 from an agent's session with no terminal needs a blind
+  re-rating (`sdlc.py rerate <ID> --by <agent>`) taken at the current severity by an agent
+  of another model family, and no re-rating at that severity may rate it more severe than
+  the new value, so running it again until one agrees does not work.
+- The re-rating prompt holds the ladder and the defect report with every severity removed.
+  `cmd:` reviewers are recorded, never counted.
+- Each change goes in the shard's `severity_history`; each re-rating in `severity_reviews`
+  and `reviews/<ID>-severity[-n].md`.
+- Not done: `ci-check` flagging a downgrade with no record. The record is in the shard,
+  which `ci-check` does not diff yet.
 
 ## Files that change
 

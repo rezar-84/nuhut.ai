@@ -4818,6 +4818,7 @@ Work items and agents
   item                manage sharded items: add, set, show, list                      item add --title "Fix auth"
   hotfix <ID>         mark an item a hotfix (same as item set <ID> --hotfix)          hotfix ACME-12
   bug "<title>"       report a defect with its severity; agents see S0-S2 at start   bug "Login 500s" --severity S1
+  rerate <ID>         blind severity re-rating by another agent (before lowering S0-S2)  rerate ACME-31 --by codex
   next-id             allocate the next work item or ADR ID (--sync-refs for CAS)     next-id --sync-refs
   render              materialize backlog.md and worklog.md from shards (--check)     render --check
   merge-shard         git merge driver for items/*.json (fix merge-driver sets it)    fix merge-driver
@@ -4866,6 +4867,7 @@ EXAMPLES = {
     "approvals": ["approvals ACME-12        # exit 0 when the tier's approvals are on the PR head",
                   "approvals ACME-12 --json"],
     "approve": ["approve ACME-12 --by sam  # run by the approver in a terminal"],
+    "rerate": ["rerate ACME-31 --by codex  # blind re-rating; needed before an agent lowers S0-S2"],
     "guard": ["guard start              # SessionStart hook (reads the hook JSON on stdin)",
               "guard stop               # Stop hook"],
     "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict",
@@ -5419,6 +5421,13 @@ def _cmd_item(project, opts, parser):
             if opts.severity and not _shards_mod.severity_of(opts.severity):
                 sys.stderr.write("item set: --severity must be S0 to S4\n")
                 return 2
+            change, refused = severity_change(project, cur, opts.severity,
+                                              getattr(opts, "severity_reason", None) or "")
+            if refused:
+                sys.stderr.write("item set: %s\n" % refused)
+                return 1
+            if change:
+                updated["severity_history"] = list(cur.get("severity_history") or []) + [change]
             updated["severity"] = opts.severity
         if getattr(opts, "found_by", None) is not None:
             updated["found_by"] = opts.found_by
@@ -5468,6 +5477,171 @@ def defect_report_text(project, item, repro="", today=None):
         text = re.sub(r"(?s)(## Steps to reproduce\n\n).*?(?=\n\*\*Inputs|\n## )",
                       lambda m: m.group(1) + repro.strip() + "\n", text, count=1)
     return text
+
+
+SEVERITY_GUARDED = ("S0", "S1", "S2")
+
+
+def _severity_rank(value):
+    """0 for S0 .. 4 for S4; 5 for unrated, the lowest of all."""
+    sev = _shards_mod.severity_of(value)
+    return int(sev[1]) if sev else 5
+
+
+def blind_rerate_prompt(project, item):
+    """The prompt `rerate` sends: the defect report and the severity ladder, with every
+    severity the item carries left out, so the reviewer rates it without an anchor."""
+    rel = os.path.join(project.docs, "project", "defects", item["id"] + ".md")
+    try:
+        with open(project.path(rel), encoding="utf-8") as handle:
+            report = handle.read()
+    except (IOError, OSError):
+        report = "(no defect report at %s)" % rel
+    report = re.sub(r"(?im)^.*\bseverity\b.*$", "", report)
+    report = re.sub(r"\bS[0-4]\b", "S?", report)
+    card = ""
+    try:
+        with open(project.path(os.path.join(project.docs, "CARD.md")), encoding="utf-8") as handle:
+            card = "\n".join(l for l in handle.read().splitlines()
+                             if re.match(r"^\| \*\*S[0-4]\*\* \|", l))
+    except (IOError, OSError):
+        pass
+    return ("You are rating a defect's severity independently. You are not told what anyone "
+            "else rated it. Read the defect and the ladder, decide by consequence, and end "
+            "with one line `Severity: S<n>` and a line `Why: <one sentence>`.\n\n"
+            "## Severity ladder\n\n%s\n\n## Defect %s: %s\n\nFiles: %s\n\n%s\n"
+            % (card or "S0 irreversible harm; S1 serious, no workaround; S2 real harm, poor "
+               "workaround; S3 localised; S4 cosmetic.",
+               item["id"], item.get("title", ""), item.get("touch") or "unknown",
+               report.strip()))
+
+
+def rerate(project, item_id, by, model=None, timeout=900):
+    """Run a blind severity re-rating of <item_id> in agent <by> and record it on the item.
+    Returns (record, error)."""
+    cur = _shards_mod.load_item(project, item_id)
+    if not cur:
+        return None, "%s has no item shard" % item_id
+    if by.startswith("cmd:"):
+        command, harness = by[4:].strip(), "cmd"
+        if not command:
+            return None, "--by cmd: needs a command"
+    elif broken_agent(project, by):
+        return None, broken_agent(project, by)
+    elif by in agent_table(project, "review"):
+        command, harness = None, by
+        exe = agent_table(project, "review")[by][0][0]
+        if shutil.which(exe) is None:
+            return None, "%s is not installed (no `%s` on PATH)" % (by, exe)
+    else:
+        return None, "--by must be %s or cmd:<command>" % ", ".join(
+            sorted(agent_table(project, "review")))
+    prompt = blind_rerate_prompt(project, cur)
+    if command:
+        rc, out_b, err_b, timed_out = _run_isolated(command, cwd=project.root, timeout=timeout,
+                                                    shell=True, input_text=prompt)
+    else:
+        args, flag = agent_table(project, "review")[by]
+        args = [part.replace("{prompt}", prompt) for part in args]
+        if model:
+            args += [flag, model]
+        rc, out_b, err_b, timed_out = _run_isolated(args, cwd=project.root, timeout=timeout)
+    if timed_out:
+        return None, "the reviewer did not answer within %ds" % timeout
+    out = out_b.decode("utf-8", "replace")
+    if rc != 0 or not out.strip():
+        return None, "the reviewer failed (exit %s): %s" % (
+            rc, (err_b.decode("utf-8", "replace") or out).strip()[-400:])
+    found = re.findall(r"(?im)^\W*Severity:\W*(S[0-4])\b", out)
+    rated = found[-1].upper() if found else ""
+    req_agent, req_model = identity(project=project)
+    req_family = model_family(req_model if req_model != "unknown" else req_agent)
+    rev_family = model_family(model or agent_family(project, harness)) if harness != "cmd" \
+        else "unknown"
+    # cmd: is any shell command, so it can be a stand-in that prints a chosen answer: it is
+    # recorded, never counted. A same-family reviewer shares the requester's blind spots.
+    independent = (harness != "cmd" and rev_family not in ("unknown", "")
+                   and rev_family != req_family)
+    today = datetime.date.today().isoformat()
+    folder = project.path(os.path.join(project.docs, "project", "reviews"))
+    os.makedirs(folder, exist_ok=True)
+    base = os.path.join(folder, "%s-severity" % item_id)
+    path, n = base + ".md", 1
+    while os.path.exists(path):
+        n += 1
+        path = "%s-%d.md" % (base, n)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("---\nstatus: current\nowner: %s\nlast-reviewed: %s\n---\n\n"
+                     "# Blind severity re-rating — %s\n\n**Reviewer:** %s / %s\n"
+                     "**Requested by:** %s / %s\n**Independent:** %s\n**Rated:** %s\n\n"
+                     "---\n\n%s\n" % (harness, today, item_id, harness,
+                                       model or "default", req_agent, req_model,
+                                       "yes" if independent else "no", rated or "unstated",
+                                       out.strip()))
+    rec = {"by": harness if harness != "cmd" else "cmd:" + command.split()[0],
+           "model": model or "", "family": rev_family, "requester": req_agent,
+           "requester_family": req_family, "independent": "yes" if independent else "no",
+           "rated": rated or "unstated", "for": cur.get("severity") or "unrated",
+           "file": os.path.relpath(path, project.root),
+           "at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    cur["severity_reviews"] = list(cur.get("severity_reviews") or []) + [rec]
+    cur["updated"] = today
+    _shards_mod.save_item(project, cur, today=today)
+    return rec, None
+
+
+def severity_change(project, cur, new, reason=""):
+    """(history record, None) when <cur>'s severity may become <new> in this process, else
+    (None, why not). Raising a severity, or moving within S3 and S4, is free. Lowering an
+    S0, S1 or S2 needs a person at a terminal, or blind re-ratings (`sdlc.py rerate`):
+    at least one by an independent agent taken at the current severity, and none of them
+    rating it more severe than <new>."""
+    old = _shards_mod.severity_of(cur.get("severity"))
+    new = _shards_mod.severity_of(new)
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rec = {"from": old or "unrated", "to": new or "unrated", "reason": reason or "", "at": now}
+    if old == new:
+        return None, None
+    if old not in SEVERITY_GUARDED or _severity_rank(new) <= _severity_rank(old):
+        return dict(rec, how="free", by=identity(project=project)[0]), None
+    fin = runtime_module("finish")
+    agent = fin.agent_environment(sys.modules[__name__], project)
+    if not agent or fin._interactive():
+        raw, _ = fin.runner_identity(project, people(project), sys.modules[__name__])
+        return dict(rec, how="person", by=raw or "unknown"), None
+    reviews = [r for r in cur.get("severity_reviews") or [] if r.get("for") == old]
+    counted = [r for r in reviews if r.get("independent") == "yes"
+               and _shards_mod.severity_of(r.get("rated"))]
+    harsher = [r for r in counted if _severity_rank(r["rated"]) < _severity_rank(new)]
+    if not counted:
+        return None, ("%s is %s, and an agent (%s) cannot lower it on its own word. Ask a "
+                      "person to run this in a terminal, or get a blind re-rating from an "
+                      "agent of another model family first: `sdlc.py rerate %s --by "
+                      "<codex|gemini|claude|...>`" % (cur["id"], old, agent, cur["id"]))
+    if harsher:
+        return None, ("%s stays %s: a blind re-rating rated it %s (%s), more severe than %s. "
+                      "Every re-rating at %s counts, so ask a person to decide"
+                      % (cur["id"], old, harsher[-1]["rated"], harsher[-1].get("file", "?"),
+                         new or "unrated", old))
+    return dict(rec, how="re-rated", by=agent,
+                review=", ".join(r.get("file", "") for r in counted)), None
+
+
+def _cmd_rerate(project, opts, parser):
+    """rerate: a blind severity re-rating of a defect by another agent."""
+    rec, error = rerate(project, opts.item, opts.by, opts.model, opts.timeout)
+    if error:
+        sys.stderr.write("rerate: %s\n" % error)
+        return 2
+    if opts.json:
+        print(json.dumps(rec, indent=2))
+        return 0
+    print("rated %s by %s (%s): %s" % (opts.item, rec["by"], "independent" if
+                                       rec["independent"] == "yes" else
+                                       "not independent, it cannot clear a downgrade",
+                                       rec["rated"]))
+    print("  saved %s" % rec["file"])
+    return 0
 
 
 def _cmd_bug(project, opts, parser):
@@ -6070,7 +6244,7 @@ def register_command(name, handler, help="", configure=None, verb=None, core=Fal
 
 for _name, _handler in (
         ("status", _cmd_status), ("doctor", _cmd_doctor), ("approvals", _cmd_approvals),
-        ("approve", _cmd_approve),
+        ("approve", _cmd_approve), ("rerate", _cmd_rerate),
         ("finish", _cmd_finish), ("guard", _cmd_finish),
         ("notify", _cmd_notify), ("sync", _cmd_sync), ("slop", _cmd_slop), ("spec", _cmd_spec),
         ("next-id", _cmd_next_id), ("render", _cmd_render), ("item", _cmd_item),
@@ -6494,6 +6668,8 @@ def build_parser():
     it_p.add_argument("--summary", help="optional short summary")
     it_p.add_argument("--severity", help="defect severity S0 to S4 (CARD.md ladder); "
                       "S0 to S2 are shown at session start and in status")
+    it_p.add_argument("--severity-reason", dest="severity_reason",
+                      help="why the severity changes; kept in the item's severity_history")
     it_p.add_argument("--found-by", dest="found_by", help="who or what found a defect: a "
                       "person, a tool, a user report (never an email)")
     it_p.add_argument("--hotfix", action="store_true",
@@ -6514,6 +6690,14 @@ def build_parser():
     bug_p.add_argument("--tier", choices=("1", "2", "3"), default="2", help="risk tier of the fix (default 2)")
     bug_p.add_argument("--status", help="status; default follows the charter's Discovered defects row")
     bug_p.add_argument("--json", action="store_true", help="print the item as JSON")
+    rr_p = sub.add_parser("rerate", help="a blind severity re-rating of a defect by another "
+                          "agent; an agent needs one to lower an S0, S1 or S2")
+    rr_p.add_argument("item", help="defect item ID")
+    rr_p.add_argument("--by", required=True, help="reviewer agent (codex, gemini, claude, ...) "
+                      "or cmd:<command> (recorded, never counted)")
+    rr_p.add_argument("--model", help="model override for the reviewer")
+    rr_p.add_argument("--timeout", type=int, default=900, help="seconds (default 900)")
+    rr_p.add_argument("--json", action="store_true", help="print the record as JSON")
     hf_p = sub.add_parser("hotfix", help="mark a work item a hotfix: the same as `item set <ID> --hotfix`")
     hf_p.add_argument("item", help="work item ID")
     hf_p.add_argument("--json", action="store_true", help="print the item as JSON")
