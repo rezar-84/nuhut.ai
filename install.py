@@ -4408,11 +4408,14 @@ class Installer(object):
     def checker_select_shell(ref, tmp, pad, warn, err):
         """Shell lines that set $checker to <ref>'s .ai-sdlc/bin/sdlc.py, so a change cannot
         edit the checker it is judged by. They fall back to the change's own copy, with a
-        warning, only when <ref> has no kit or a kit from before 6.0 (its --help runs and
-        names no ci-check); any other failure exits 1 (ship review NUHT-044 finding 2)."""
+        warning, only when <ref> resolves and has no kit, or a kit from before 6.0 (its --help
+        runs and names no ci-check); a ref that cannot be read, an extraction failure or a
+        checker that fails to start exits 1 (ship review NUHT-044 findings 2 and 4)."""
         bin_ = tmp + "/.ai-sdlc/bin/sdlc.py"
         return [pad + line for line in (
-            'if ! git cat-file -e "%s:.ai-sdlc/bin/sdlc.py" 2>/dev/null; then' % ref,
+            'if ! git rev-parse --verify --quiet "%s^{commit}" >/dev/null; then' % ref,
+            '  echo "%scannot read %s; not falling back to this change\'s copy"; exit 1' % (err, ref),
+            'elif [ -z "$(git ls-tree --name-only "%s" -- .ai-sdlc/bin/sdlc.py)" ]; then' % ref,
             '  echo "%s%s has no .ai-sdlc/bin/sdlc.py; running this change\'s own ci-check"' % (warn, ref),
             '  checker=.ai-sdlc/bin/sdlc.py',
             'elif ! git archive "%s" .ai-sdlc/bin | tar -x -C "%s"; then' % (ref, tmp),

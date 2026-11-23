@@ -61,7 +61,9 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           mkdir -p "$RUNNER_TEMP/base"
-          if ! git cat-file -e "origin/$GITHUB_BASE_REF:.ai-sdlc/bin/sdlc.py" 2>/dev/null; then
+          if ! git rev-parse --verify --quiet "origin/$GITHUB_BASE_REF^{commit}" >/dev/null; then
+            echo "::error::cannot read origin/$GITHUB_BASE_REF; not falling back to this change's copy"; exit 1
+          elif [ -z "$(git ls-tree --name-only "origin/$GITHUB_BASE_REF" -- .ai-sdlc/bin/sdlc.py)" ]; then
             echo "::warning::origin/$GITHUB_BASE_REF has no .ai-sdlc/bin/sdlc.py; running this change's own ci-check"
             checker=.ai-sdlc/bin/sdlc.py
           elif ! git archive "origin/$GITHUB_BASE_REF" .ai-sdlc/bin | tar -x -C "$RUNNER_TEMP/base"; then

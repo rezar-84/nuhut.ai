@@ -9157,7 +9157,7 @@ def test_checker_fallback():
     lines = installer.Installer.checker_select_shell("$REF", "$tmp", "", "warning: ", "error: ")
     script = 'tmp="$(mktemp -d)"\n' + "\n".join(lines) + '\necho "checker=$checker"\n'
     results = {}
-    for name in bodies:
+    for name in list(bodies) + ["no-such-ref"]:
         p = subprocess.run(["sh", "-c", script], cwd=d, env=dict(os.environ, REF=name),
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         results[name] = (p.returncode, p.stdout)
@@ -9181,6 +9181,9 @@ def main():
                  test_runtime, test_view, test_view_remote, test_lifecycle_gaps, test_finish, test_finish_evidence_binding, test_ci_check, test_ci_context, test_kit_value_benchmark, test_kit_value_checks,
                  test_upgrade_from_350, test_lean_kit, test_separation,
                  test_dashboard,
+    check("a base ref that cannot be read: exit 1, no fallback (round 2, finding 4)",
+          results["no-such-ref"][0] == 1 and "checker=" not in results["no-such-ref"][1],
+          str(results["no-such-ref"]))
                  test_domain_detection,
                  test_role_and_skill_selection, test_profile,
                  test_effort_and_acquisition_profiles, test_legacy_mode_upgrade,
