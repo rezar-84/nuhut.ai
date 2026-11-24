@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-050",
+  "title": "Two check-command detectors disagree (install.py detect vs sdlc.py detect_candidate_commands)",
+  "type": "refactor",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Parked",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "install.py"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "backlog owner",
+  "park_reason": "Discovered item triage: accept into Ready, defer, or drop (charter Discovered defects policy is Parked (human triage required))",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-049",
+  "title": "ADR 0004: the kit records approvals; a system outside the agent's reach authenticates them",
+  "type": "docs",
+  "tier": "1",
+  "effort": "",
+  "owner": "architect",
+  "status": "Parked",
+  "depends": [],
+  "touch": [
+    "handbook/project/adr/0004-trust-boundary.md",
+    "handbook/project/adr/README.md"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "rezar-84",
+  "park_reason": "ADR decision: accept or reject the trust boundary (Tier 1 governance)",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}
