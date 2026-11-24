@@ -174,6 +174,35 @@ def charter_commands(text):
     return commands
 
 
+def detected_commands(project):
+    """{stage: command} the installer detected (profile.json) for `checks.*` rows the
+    charter still leaves blank. A `-y` install declares nothing, so these wait for a
+    person to adopt them (`fix adopt-commands --apply`); a row marked absent or filled in
+    is never listed."""
+    charter = charter_commands(project.charter or "")
+    recorded = (project.profile or {}).get("commands") or {}
+    return dict((stage, str(recorded[stage]).strip()) for stage in STAGES
+                if charter.get(stage, None) == "" and str(recorded.get(stage) or "").strip())
+
+
+def adopt_commands(project, apply=False):
+    """Report lines; with apply, write each detected command into its blank charter row."""
+    found = detected_commands(project)
+    if not found:
+        return ["no blank charter `checks.*` row has a detected command"]
+    lines = ["%s `checks.%s` <- `%s`" % ("wrote" if apply else "would write", stage, cmd)
+             for stage, cmd in sorted(found.items(), key=lambda kv: STAGES.index(kv[0]))]
+    if apply:
+        text = project.charter or ""
+        for stage, cmd in found.items():
+            text = _set_check_row(text, stage, cmd)
+        with open(project.path(project.charter_path), "w", encoding="utf-8") as handle:
+            handle.write(text)
+        project.__init__(project.root)
+        lines.append("check each command runs here, then run %s verify" % SDLC)
+    return lines
+
+
 def choice(cell, options):
     """(value, state): state is 'decided', 'undecided' (every option still listed, so
     the documented default applies), 'blank', or 'invalid'."""
@@ -415,6 +444,8 @@ FIX_HINTS = (
      "\"a client\")"),
     ("worklog", r"", "tool", SDLC + " fix rotate-worklog --apply (preview without --apply)"),
     ("profile", r"kit_version", "tool", "Finish the upgrade: install.sh <this project> --upgrade"),
+    ("profile", r"installer detected", "owner", "Check each detected command runs here, then "
+     + SDLC + " fix adopt-commands --apply"),
     ("profile", r"", "tool", SDLC + " fix sync-profile"),
     ("epics", r"an epic with no", "agent", "Create the epic file from templates/epic.md"),
     ("epics", r"", "agent", "Correct the Epic cell of {item}, or add the epic's row"),
@@ -945,9 +976,15 @@ def check_profile(project, out):
     where = ".ai-sdlc/profile.json"
     charter = charter_commands(project.charter)
     recorded = profile.get("commands") or {}
-    differ = [stage for stage in STAGES
-              if recorded.get(stage, "") != ("" if charter.get(stage, "") == "absent"
+    detected = detected_commands(project)
+    differ = [stage for stage in STAGES if stage not in detected
+              and recorded.get(stage, "") != ("" if charter.get(stage, "") == "absent"
                                              else charter.get(stage, ""))]
+    if detected:
+        out.add("warn", "profile", "%s/project/charter.md Commands" % project.docs,
+                "blank, but the installer detected %s. Check them, then adopt them with "
+                "`%s fix adopt-commands --apply`, or write `absent` in the row"
+                % (", ".join("%s `%s`" % kv for kv in sorted(detected.items())), SDLC))
     if differ:
         # Warn, not fail: verify always runs the charter's commands, so this misleads
         # only tools that read the profile.
@@ -3945,6 +3982,8 @@ def kit_status(project):
     # Check safe mechanical fixables
     prof_findings = Findings()
     check_profile(project, prof_findings)
+    # Detected commands waiting for a person (fix adopt-commands) are not sync-profile's.
+    prof_findings.items = [f for f in prof_findings.items if "installer detected" not in f["message"]]
     ptr_findings = Findings()
     check_pointer(project, ptr_findings)
     hrn_findings = Findings()
@@ -4126,7 +4165,9 @@ def sync_profile(project, extra=None):
     if project.charter_prefix:
         data["prefix"] = project.charter_prefix
     cmds = charter_commands(project.charter)
-    data["commands"] = dict((s, "" if cmds.get(s, "") == "absent" else cmds.get(s, ""))
+    detected = detected_commands(project)
+    data["commands"] = dict((s, detected[s] if s in detected else
+                             "" if cmds.get(s, "") == "absent" else cmds.get(s, ""))
                             for s in STAGES if s in cmds or s in (data.get("commands") or {}))
     for key, label, options, fallback in (
         ("effort_mode", "Default effort mode", EFFORT, "normal"),
@@ -6190,6 +6231,15 @@ def _cmd_fix(project, opts, parser):
         return 0
     if opts.action == "merge-driver":
         return fix_merge_driver(project, opts.json)
+    if opts.action == "adopt-commands":
+        report = adopt_commands(project, opts.apply)
+        if opts.json:
+            print(json.dumps({"action": opts.action, "applied": bool(opts.apply), "report": report}, indent=2))
+        else:
+            print("\n".join(report))
+            if not opts.apply and detected_commands(project):
+                print("(preview: add --apply to write it)")
+        return 0
     if (opts.action == "unlock-tests" or opts.unlock_tests) and not os.environ.get("AI_SDLC_APPROVAL"):
         if any(os.environ.get(k) for k in AGENT_SESSION_ENVS):
             sys.stderr.write(
@@ -6578,7 +6628,7 @@ def build_parser():
     fx.add_argument("action", nargs="?", default="all",
                     choices=("all", "sync-profile", "wire-pointer", "shared-skills", "restore-bite",
                              "unlock-tests", "rotate-worklog", "normalise-status", "link-evidence",
-                             "migrate-shards", "merge-driver"),
+                             "migrate-shards", "merge-driver", "adopt-commands"),
                     help="repair action to run (default: all, the setup repairs). The record "
                     "repairs preview unless --apply")
     fx.add_argument("--apply", action="store_true", help="record repairs: write the change")

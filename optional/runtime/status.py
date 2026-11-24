@@ -129,7 +129,7 @@ def gh_state():
     return "ok" if proc.returncode == 0 else "unauthenticated"
 
 
-def setup_gaps(project, me, open_tier1):
+def setup_gaps(project, me, open_tier1, rt=None):
     """[{check, text, fix}] for what this clone is missing, in the order to fix them."""
     gaps = []
     for name in gitattribute_drivers(project):
@@ -155,6 +155,12 @@ def setup_gaps(project, me, open_tier1):
                      "text": "%s (%s) is not in %s" % (me["name"], me["source"], rel),
                      "fix": "export NUHUT_USER=<your handle in people.json>, or add "
                             "\"%s\" to your entry's names in %s" % (me["name"], rel)})
+    detected = rt.detected_commands(project) if rt is not None else {}
+    if detected:
+        gaps.append({"check": "commands",
+                     "text": "the charter's Commands rows are blank, but the installer detected "
+                             "%s, so verify runs nothing" % ", ".join(sorted(detected)),
+                     "fix": "check them, then %s fix adopt-commands --apply" % SDLC})
     if open_tier1:
         state = gh_state()
         if state != "ok":
@@ -260,7 +266,7 @@ def report(rt, project):
 
     open_tier1 = sum(1 for it in backlog.values()
                      if it.get("tier") == "1" and it["column"] not in ("Done", "Dropped"))
-    setup = setup_gaps(project, me, open_tier1)
+    setup = setup_gaps(project, me, open_tier1, rt)
     if unborn:
         setup.insert(0, {"check": "commits",
                          "text": "no commits yet on %s, so claim cannot make a worktree" % branch,

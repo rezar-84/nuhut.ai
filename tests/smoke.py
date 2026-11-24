@@ -3901,6 +3901,60 @@ def test_status():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_adopt_detected_commands():
+    print("adopt-commands: a -y install keeps detected checks until a person adopts them")
+    d = tempfile.mkdtemp(prefix="sdlc-adopt-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    subprocess.call(["git", "init", "-q", repo])
+    write(repo, "package.json", json.dumps({"name": "x", "scripts": {"test": "node --test",
+                                                                      "lint": "eslint ."}}))
+    code, out = run([repo, "ADC", "-y"])
+    check("adopt repo installs", code == 0, out[-300:])
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=120)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+
+    def row(stage):
+        m = re.search(r"(?m)^\| `checks\.%s` \|(.*)\|$" % stage, read(repo, "docs/project/charter.md"))
+        return m.group(1).strip() if m else None
+
+    def profile_cmds():
+        return json.loads(read(repo, ".ai-sdlc/profile.json")).get("commands") or {}
+
+    check("-y still declares nothing: the detected unit command is not in the charter",
+          row("unit") == "" and profile_cmds().get("unit") == "npm run test",
+          "row=%r profile=%r" % (row("unit"), profile_cmds()))
+    code, out = sdlc("doctor")
+    check("doctor points blank rows with a detected command at adopt-commands",
+          "fix adopt-commands" in out and "npm run test" in out, out[-1500:])
+    code, out = sdlc("status", "--json")
+    setup = dict((g.get("check"), g) for g in (json.loads(out).get("setup") if code == 0 else []))
+    check("status lists the detected commands as missing setup",
+          "commands" in setup and "fix adopt-commands --apply" in setup["commands"].get("fix", ""),
+          out[:800])
+    code, out = sdlc("fix", "sync-profile")
+    check("sync-profile keeps a detected command while its charter row is blank",
+          code == 0 and profile_cmds().get("unit") == "npm run test", json.dumps(profile_cmds()))
+    charter = read(repo, "docs/project/charter.md")
+    write(repo, "docs/project/charter.md",
+          re.sub(r"(?m)^\| `checks\.lint` \|.*\|$", "| `checks.lint` | absent |", charter))
+    code, out = sdlc("fix", "adopt-commands")
+    check("adopt-commands previews without --apply", code == 0 and "npm run test" in out
+          and row("unit") == "", out)
+    code, out = sdlc("fix", "adopt-commands", "--apply")
+    check("adopt-commands --apply writes detected commands into blank rows",
+          code == 0 and row("unit") == "`npm run test`", "%s row=%r" % (out, row("unit")))
+    check("a row a person decided (absent) is never overwritten", row("lint") == "absent", repr(row("lint")))
+    code, out = sdlc("status", "--json")
+    setup = dict((g.get("check"), g) for g in (json.loads(out).get("setup") if code == 0 else []))
+    check("the commands gap clears once adopted", "commands" not in setup, out[:800])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_worktree_scripts():
     print("worktree scripts: setup on claim and dispatch, teardown on release, a port per worktree")
     d = tempfile.mkdtemp(prefix="sdlc-wtscripts-")
@@ -9241,7 +9295,7 @@ def main():
                  test_trusted_records_review, test_install_review_fixes,
                  test_status_review_fixes, test_defect_awareness, test_release_defect_gate,
                  test_tier1_approval_count_and_local_approval, test_severity_downgrade_rule,
-                 test_checker_fallback,
+                 test_checker_fallback, test_adopt_detected_commands,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,
