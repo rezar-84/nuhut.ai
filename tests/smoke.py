@@ -3787,12 +3787,14 @@ def test_status():
     backlog = add_rows(backlog, "## Next",
                        "| STX-2 | Billing page | 2 | software-engineer |  | Ready |\n"
                        "| STX-4 | Auth rewrite | 1 | security |  | Ready |\n"
-                       "| STX-5 | Needs STX-1 | 2 | software-engineer | STX-1 | Ready |\n")
+                       "| STX-5 | Needs STX-1 | 2 | software-engineer | STX-1 | Ready |\n"
+                       "| STX-7 | Export CSV | 2 | software-engineer |  | Ready |\n")
     backlog = add_rows(backlog, "## Parked",
                        "| STX-3 | Pricing copy | 2 | copywriter |  | Parked | alice, bob | merge approval (Tier 2) | 2026-11-01 |\n"
                        "| STX-6 | Other approval | 2 | copywriter |  | Parked | carol | merge approval (Tier 2) | 2026-11-01 |\n")
     write(repo, "docs/project/backlog.md", backlog)
     write(repo, "docs/project/plans/STX-2.md", "# STX-2\n\n## Files that change\n\n- `src/billing.py`\n")
+    write(repo, "docs/project/plans/STX-7.md", "# STX-7\n\n## Files that change\n\n- `src/export.py`\n")
     subprocess.call(["git", "add", "-A"], cwd=repo)
     subprocess.call(git + ["commit", "-qm", "chore: backlog"], cwd=repo)
     script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
@@ -3849,6 +3851,27 @@ def test_status():
     mine = dict((i.get("id"), i) for i in st.get("items", []))
     check("after a commit the next owed step is verify", mine.get("STX-1", {}).get("next") == "verify",
           json.dumps(st.get("items"))[:400])
+    # A Ready item whose own commits already change code is built, not free to take
+    # (NUHT-047): offering it invites a second build. A records-only commit (its plan)
+    # does not make it built.
+    write(repo, "src/billing.py", "def bill():\n    return 0\n")
+    subprocess.call(["git", "add", "src/billing.py"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "feat(STX-2): billing page\n\nWork-Item: STX-2"], cwd=repo)
+    write(repo, "docs/project/plans/STX-7.md",
+          "# STX-7\n\nExport rows as CSV.\n\n## Files that change\n\n- `src/export.py`\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "docs(STX-7): plan\n\nWork-Item: STX-7"], cwd=repo)
+    code, out = sdlc("status", "--json")
+    st = json.loads(out) if code == 0 else {}
+    ready = [r.get("id") for r in st.get("ready", [])]
+    built = [r.get("id") for r in st.get("built", [])]
+    check("a Ready item with a code commit is not offered as Ready to take",
+          "STX-2" not in ready and built == ["STX-2"], "ready=%s built=%s" % (ready, built))
+    check("a Ready item whose only commit is its plan stays Ready", "STX-7" in ready, str(ready))
+    code, out = sdlc("status")
+    check("text status lists built items with the finish command, not under Ready to take",
+          "Built, not finished" in out and "finish STX-2 --dry-run" in out
+          and "STX-2" not in out.split("Ready to take")[1].split("Doctor")[0], out)
     # setup gaps: an unmapped identity, an unconfigured merge driver, an unauthenticated gh
     write(repo, "docs/project/people.json", json.dumps({"people": [{"handle": "bob", "name": "Bob B"}]}))
     write(repo, ".gitattributes", "docs/project/items/*.json merge=nuhut-shard\n*.png binary\n")

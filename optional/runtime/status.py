@@ -3,7 +3,8 @@
 Read-only. It reports and names commands; it changes no record, claim or git state. The
 order is the order of what blocks work: setup this clone is missing, then the items you
 hold and the next step each one owes (the same rules `finish` applies, run as a dry run),
-then items Parked on you, then Ready items you could take, then the doctor finding count.
+then items Parked on you, then Ready items already built but not finished, then Ready
+items you could take, then the doctor finding count.
 """
 import json
 import os
@@ -255,6 +256,7 @@ def report(rt, project):
              for c in sorted(par["candidates"], key=lambda c: shards_mod._id_sort_key(c["id"]))
              if c["id"] not in ids]
     plan_first = [dict(p) for p in par["plan_first"] if p["id"] not in ids]
+    built = [dict(b) for b in par.get("built", []) if b["id"] not in ids]
 
     open_tier1 = sum(1 for it in backlog.values()
                      if it.get("tier") == "1" and it["column"] not in ("Done", "Dropped"))
@@ -275,7 +277,7 @@ def report(rt, project):
     return {"branch": branch, "defects": defects,
             "user": {"name": me["name"], "source": me["source"], "handle": me["handle"]},
             "setup": setup, "items": items, "other_claims": others, "parked": parked,
-            "ready": ready, "plan_first": plan_first, "doctor": counts}
+            "ready": ready, "plan_first": plan_first, "built": built, "doctor": counts}
 
 
 def format_report(data, limit=8):
@@ -315,6 +317,14 @@ def format_report(data, limit=8):
                 " (touches %s)" % clean(", ".join(dft["touch"][:3])) if dft["touch"] else ""))
         if len(data["defects"]) > limit:
             out.append("  ... %d more: %s item list" % (len(data["defects"]) - limit, SDLC))
+    if data.get("built"):
+        out.append("")
+        out.append("Built, not finished")
+        for b in data["built"][:limit]:
+            out.append("  %-10s T%-2s %s" % (clean(b["id"]), clean(b["tier"]), clean(b["title"])[:56]))
+            out.append("  %10s next: %s finish %s --dry-run" % ("", SDLC, clean(b["id"])))
+        if len(data["built"]) > limit:
+            out.append("  ... %d more: %s parallel --json" % (len(data["built"]) - limit, SDLC))
     out.append("")
     out.append("Ready to take")
     if not (data["ready"] or data["plan_first"]):

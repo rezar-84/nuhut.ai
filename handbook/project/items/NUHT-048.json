@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-048",
+  "title": "Detected check commands never reach the charter on a -y install",
+  "type": "fix",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    "install.py",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "The installer writes detected commands to profile.json only; the charter stays blank, verify reports every stage Absent, and fix sync-profile erases the detection.",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

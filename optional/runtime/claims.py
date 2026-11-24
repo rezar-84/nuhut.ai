@@ -951,11 +951,18 @@ def parallel(project, rt, view_mod, sync_refs=False, remote="origin"):
     backlog = items(project, view_mod)
     held = set(c["id"] for c in list_claims(project, sync_refs=sync_refs, remote=remote))
     custom_sw = _charter_single_writers(project, rt)
-    candidates, no_plan = [], []
+    candidates, no_plan, built = [], [], []
+    commits = rt.commit_index(project)
     for item, it in backlog.items():
         if it["column"] != "Next" or item in held:
             continue
         if any(d in backlog and backlog[d]["column"] != "Done" for d in it["depends"]):
+            continue
+        # A Ready item whose own commits already change code was built and not finished:
+        # scheduling it again would build it twice. Records-only commits (a plan) don't count.
+        if any(not rt.records_path(project, path)
+               for sha, _, _ in commits.get(item, ()) for path in rt.commit_paths(project, sha)):
+            built.append({"id": item, "title": it["title"], "tier": it.get("tier") or "2"})
             continue
         plan_paths = rt.planned_paths(plan_text(project, item, rt) or "")
         # Tier 1 items always owe a written plan before scheduling, even if touch globs exist.
@@ -1009,6 +1016,7 @@ def parallel(project, rt, view_mod, sync_refs=False, remote="origin"):
         "candidates": candidates,
         "conflicts": conflicts,
         "plan_first": sorted(no_plan, key=lambda x: x["id"]),
+        "built": sorted(built, key=lambda x: x["id"]),
         "claimed": sorted(held),
     }
 
