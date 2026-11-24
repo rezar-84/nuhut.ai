@@ -5,7 +5,7 @@
   "tier": "2",
   "effort": "",
   "owner": "software-engineer",
-  "status": "In progress",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/claims.py",
@@ -14,7 +14,7 @@
   ],
   "created": "2026-11-25",
   "updated": "2026-11-25",
-  "completed": "",
+  "completed": "2026-11-25",
   "summary": "Ready items whose Work-Item commits change code are listed as Ready to take, inviting an agent to rebuild them. List them as built-not-finished with the finish command instead.",
   "approvers": [],
   "waiting_on": "",
