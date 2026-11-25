@@ -4329,7 +4329,8 @@ class Installer(object):
             lines = ["name: Project quality", "", "on:", "  pull_request:", "  workflow_dispatch:",
                      "", "permissions:", "  contents: read", "",
                      "jobs:", "  quality:", "    runs-on: ubuntu-latest", "    steps:",
-                     "      - uses: actions/checkout@v4",
+                     "      - uses: %s" % (PINNED_CHECKOUT if provider == "github"
+                                               else "actions/checkout@v4"),
                      "        with:",
                      "          fetch-depth: 0",
                      "      - name: SDLC records",
@@ -5189,6 +5190,11 @@ def upgrade(target, o):
 
 
 # ---------------------------------------------------------------- uninstall
+
+# A tag can be moved to other code; a commit cannot. Dependabot updates the pin in this
+# repository; a project that adopts the scaffold owns its own (NUHT-046).
+PINNED_CHECKOUT = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0"
+
 
 RETIRED_HOOKS = ("work-item-id.sh", "secret-guard.sh")
 

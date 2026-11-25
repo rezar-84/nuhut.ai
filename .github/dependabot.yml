@@ -1,0 +1,8 @@
+# Keeps the commit-pinned GitHub Actions current (NUHT-046): each update is a PR that
+# moves the hash and its version comment together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

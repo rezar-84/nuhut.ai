@@ -521,6 +521,16 @@ def main():
     if not VERSION_RE.match(version):
         errors.append("VERSION is not semantic major.minor.patch: %r" % version)
 
+    # Every action a workflow runs is pinned to a commit, with its version as a comment
+    # (NUHT-046): a tag can be moved to other code.
+    for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        for n, line in enumerate(wf.read_text(encoding="utf-8").splitlines(), 1):
+            m = re.search(r"\buses:\s*([^\s#]+)", line)
+            if m and not m.group(1).startswith("./") and \
+                    not re.match(r"^[^@]+@[0-9a-f]{40}\s+#\s*v\S+", line.split("uses:", 1)[1].strip()):
+                errors.append("%s:%d: %s is not pinned to a commit hash with a `# vX` comment"
+                              % (wf.relative_to(ROOT), n, m.group(1)))
+
     # The plugin manifest carries its own version string and drifts silently otherwise.
     manifest = ROOT / ".claude-plugin" / "plugin.json"
     if manifest.is_file():

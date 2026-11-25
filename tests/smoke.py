@@ -2701,8 +2701,10 @@ def test_scaffolding():
     check("machine-readable profile records confirmation boundary",
           profile.get("confirmation_required") is True and "node" in profile.get("adapters", []))
     check("charter ticks generated test plan", "☑ test-plan" in read(d, "docs/project/charter.md"))
+    check("GitHub CI pins actions/checkout to a commit, with its version as a comment (NUHT-046)",
+          re.search(r"actions/checkout@[0-9a-f]{40} # v4", workflow) is not None, workflow[:600])
     check("GitHub CI uses detected commands",
-          "actions/checkout@v4" in workflow and "npm run build" in workflow and
+          "npm run build" in workflow and
           "workflow_dispatch" in workflow and "  pull_request:" in workflow)
     check("GitHub CI runs the doctor strictly before the quality commands",
           workflow.index("sdlc.py doctor --strict") < workflow.index("npm run build"), workflow)
