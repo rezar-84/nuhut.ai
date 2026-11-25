@@ -5130,13 +5130,21 @@ def upgrade(target, o):
             print("  %s .claude/settings.json (finish guard%s)" % (
                 "merge         " if added else "skip          ",
                 "" if added else ": already there" if added == 0 else ": not valid JSON"))
-        retired = retire_hook_commands(target)
-        if retired:
-            print("  update         .claude/settings.json (%d shell-text commit hook%s retired; "
-                  "the git hooks check commits)" % (retired, "" if retired == 1 else "s"))
-            if not (target / ".ai-sdlc" / "git-hooks" / "commit-msg").is_file():
-                notes.append("the commit checks now run as git hooks: install them with "
-                             "install.sh %s --git-hooks" % target)
+        # The commit checks move to git hooks: install those first, and retire the old
+        # agent registrations only once they are in place.
+        git_hooks_dir = target / ".ai-sdlc" / "git-hooks"
+        if (target / ".claude" / "hooks" / "work-item-id.sh").is_file() and \
+                not (git_hooks_dir / "commit-msg").is_file():
+            inst.o.git_hooks = inst.o.git_hooks or "all"
+            inst.install_git_hooks()
+        if (git_hooks_dir / "commit-msg").is_file() and (git_hooks_dir / "pre-commit").is_file():
+            retired = retire_hook_commands(target)
+            if retired:
+                print("  update         .claude/settings.json (%d shell-text commit hook%s retired; "
+                      "the git hooks check commits)" % (retired, "" if retired == 1 else "s"))
+        else:
+            notes.append("the old agent commit checks stay registered until the git hooks are "
+                         "installed: install.sh %s --git-hooks" % target)
         repaired = repair_hook_commands(target)
         if repaired:
             print("  update         .claude/settings.json (%d hook command%s anchored on "
@@ -5207,9 +5215,11 @@ def retire_hook_commands(target):
     hooks = data.get("hooks") if isinstance(data, dict) else None
     if not isinstance(hooks, dict):
         return 0
-    retired = lambda spec: isinstance(spec, dict) and any(
-        str(spec.get("command", "")).endswith(name) or
-        str(spec.get("command", "")).endswith(name + '"') for name in RETIRED_HOOKS)
+    # Only the kit's own registrations: the script under .claude/hooks/, in the anchored
+    # form or the older relative one. A project hook of the same name elsewhere stays.
+    kit_cmd = re.compile(r'^sh (?:"\$CLAUDE_PROJECT_DIR"/)?\.claude/hooks/(?:%s)$'
+                         % "|".join(re.escape(n) for n in RETIRED_HOOKS))
+    retired = lambda spec: isinstance(spec, dict) and bool(kit_cmd.match(str(spec.get("command", ""))))
     dropped = 0
     for event, entries in list(hooks.items()):
         if not isinstance(entries, list):

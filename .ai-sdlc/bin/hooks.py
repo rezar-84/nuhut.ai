@@ -810,9 +810,30 @@ def _shell_denial(cmd, cwd, root, checks):
             if _glob_hit(target, patterns):
                 return reason % target
     # Inline code (eval, sh -c, an interpreter's -e, a heredoc, awk, a patch) is not guessed
-    # at: naming a guarded path is not writing it, and refusing on a mention blocked reads.
-    # What such code writes is caught when it is committed (run_git_pre_commit) and in CI.
+    # at for ordinary guarded paths: naming one is not writing it, and refusing on a mention
+    # blocked reads; the commit check catches what it writes. The files that decide what
+    # the hooks enforce are the exception, because a hook reads them before any commit.
+    if inline:
+        for cand in candidates:
+            if _glob_hit(cand, _enforcement_files(root)):
+                return (
+                    "this command runs inline code (a heredoc, sh -c, an interpreter's -e, awk, "
+                    "a patch) that names %s, which decides what the guard hooks enforce, and the "
+                    "hook cannot see what the code does with it: change it by hand, or with "
+                    "`sdlc.py hooks`." % cand
+                )
     return None
+
+
+def _enforcement_files(root):
+    """The files the guard hooks read to decide what they enforce: the guard lists, the
+    off list, the hook scripts and their wiring, and the kit's code."""
+    files = (TEST_LOCK_LIST, PROTECTED_LIST, GATES_LIST, HOOKS_OFF_LIST,
+             ".ai-sdlc/git-hooks", ".ai-sdlc/git-hooks/*",
+             ".claude/hooks", ".claude/hooks/*") + HOOK_SETTINGS
+    if not _kit_checkout(root):
+        files += (".ai-sdlc/bin", ".ai-sdlc/bin/*")
+    return files
 
 
 LOCKED_SHELL_REASON = (

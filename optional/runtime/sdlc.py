@@ -6263,16 +6263,27 @@ def _cmd_hooks(project, opts, parser):
     path = project.path(hooks_mod.HOOKS_OFF_LIST)
     off = set(hooks_mod._active_patterns(path))
 
-    def installed(name):
-        if name == "work-item-id":
-            return os.path.isfile(project.path(".ai-sdlc/git-hooks/commit-msg"))
-        if name == "secret-guard":
-            return os.path.isfile(project.path(".ai-sdlc/git-hooks/pre-commit"))
-        return os.path.isfile(project.path(".claude/hooks/%s.sh" % name))
+    git_dir = project.git("rev-parse", "--git-common-dir").strip() or ".git"
+    hooks_dir = project.git("config", "core.hooksPath").strip() or os.path.join(git_dir, "hooks")
+    if not os.path.isabs(hooks_dir):
+        hooks_dir = project.path(hooks_dir)
+    settings = read(project.path(".claude/settings.json")) or ""
+
+    def state_of(name):
+        """'on' when the hook is wired to run, 'not wired' when only its script is there."""
+        if name in ("work-item-id", "secret-guard"):
+            hook = "commit-msg" if name == "work-item-id" else "pre-commit"
+            script = os.path.isfile(project.path(".ai-sdlc/git-hooks/" + hook))
+            wired = script and any(".ai-sdlc/git-hooks/" + hook in (read(os.path.join(d, hook)) or "")
+                                   for d in (hooks_dir, project.path(".husky")))
+        else:
+            script = os.path.isfile(project.path(".claude/hooks/%s.sh" % name))
+            wired = script and (".claude/hooks/%s.sh" % name) in settings
+        return "on" if wired else ("not wired" if script else "not installed")
     if opts.action == "list":
         print("%-16s %-14s %-34s %s" % ("hook", "state", "runs on", "blocks"))
         for name, (where, blocks, blind) in sorted(info.items()):
-            state = "off" if name in off else ("on" if installed(name) else "not installed")
+            state = "off" if name in off else state_of(name)
             print("%-16s %-14s %-34s %s" % (name, state, where, blocks))
             print("%-16s %-14s %-34s cannot see: %s" % ("", "", "", blind))
         print("\nTurn one off: %s hooks off <name> (a person, in a terminal). On again: "

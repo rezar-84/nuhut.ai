@@ -1003,6 +1003,10 @@ def test_shell_write_guards():
         "git checkout HEAD~1 -- tests/locked_test.py",
         "git restore --source HEAD tests/locked_test.py",
         "dd if=/dev/null of=tests/locked_test.py",
+        # Inline code that names a file the hooks enforce from is still refused (NUHT-055 review).
+        "node -e \"require('fs').writeFileSync('.ai-sdlc/protected.txt','')\"",
+        "perl -e 'open F,\">.ai-sdlc/gates.txt\"'",
+        "ruby -e 'File.write(\".ai-sdlc/gates.txt\",\"\")'",
         "python3 -c \"open('tests/locked_test.py','w').write('')\"",
         "cd tests && echo x > locked_test.py",
         "echo x > %s/tests/locked_test.py" % d,
@@ -1051,9 +1055,6 @@ def test_shell_write_guards():
         "bash -c 'echo > tests/locked_test.py'",
         "sh -c 'cat tests/locked_test.py'",
         "eval 'echo > tests/locked_test.py'",
-        "node -e \"require('fs').writeFileSync('.ai-sdlc/protected.txt','')\"",
-        "perl -e 'open F,\">.ai-sdlc/gates.txt\"'",
-        "ruby -e 'File.write(\".ai-sdlc/gates.txt\",\"\")'",
         "php -r \"file_put_contents('tests/locked_test.py','');\"",
         "python3 - <<'EOF'\nopen('.ai-sdlc/manifest.json','w').write('{}')\nEOF",
         "cat <<'EOF' | sh\necho > tests/locked_test.py\nEOF",
@@ -4123,6 +4124,9 @@ def test_hooks_command():
     check("inline code that only names a guarded path is allowed", "deny" not in out, out)
     out = fire("approval-gate.sh", "echo x > tests/locked_test.py")
     check("a direct shell write to a locked test is still denied", '"permissionDecision":"deny"' in out, out)
+    out = fire("approval-gate.sh", "python3 -c \"open('.ai-sdlc/hooks-off.txt','a').write('test-lock')\"")
+    check("inline code that names the off list is refused (review finding 2)",
+          '"permissionDecision":"deny"' in out, out)
 
     script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
 
@@ -4144,6 +4148,12 @@ def test_hooks_command():
     check("anyone may turn a hook back on", code == 0, out)
     out = fire("approval-gate.sh", "echo x > tests/locked_test.py")
     check("the hook blocks again once it is on", '"permissionDecision":"deny"' in out, out)
+    hook_settings = read(d, ".claude/settings.json")
+    write(d, ".claude/settings.json", hook_settings.replace(".claude/hooks/doc-leak-guard.sh", ".claude/hooks/x.sh"))
+    code, out = sdlc(person, "hooks", "list")
+    check("a hook whose script exists but is not registered is listed as not wired (finding 5)",
+          re.search(r"doc-leak-guard\s+not wired", out) is not None, out)
+    write(d, ".claude/settings.json", hook_settings)
     code, out = sdlc(person, "hooks", "off", "no-such-hook")
     check("an unknown hook name is refused", code != 0, out)
 
@@ -4155,9 +4165,24 @@ def test_hooks_command():
     write(d, ".claude/settings.json", json.dumps(data, indent=2))
     subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
     subprocess.call(git + ["commit", "-qm", "init", "--no-verify"], cwd=d)
+    data["hooks"]["PreToolUse"].append({"matcher": "Bash", "hooks": [{
+        "type": "command", "command": "sh tools/work-item-id.sh"}]})
+    write(d, ".claude/settings.json", json.dumps(data, indent=2))
+    # An install from before 6.1 with agent hooks only: no git hooks, none in the manifest.
+    shutil.rmtree(os.path.join(d, ".ai-sdlc", "git-hooks"))
+    man = json.loads(read(d, ".ai-sdlc/manifest.json"))
+    man["files"] = dict((k, v) for k, v in man.get("files", {}).items()
+                        if not k.startswith(".ai-sdlc/git-hooks/"))
+    write(d, ".ai-sdlc/manifest.json", json.dumps(man, indent=2))
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    subprocess.call(git + ["commit", "-qm", "agent hooks only", "--no-verify"], cwd=d)
     code, out = run([d, "--upgrade", "-y"])
-    check("--upgrade retires the shell-text commit hooks", code == 0
-          and "work-item-id.sh" not in read(d, ".claude/settings.json"), out[-600:])
+    after = read(d, ".claude/settings.json")
+    check("--upgrade installs the git hooks before it retires the old agent commit hooks",
+          code == 0 and os.path.isfile(os.path.join(d, ".ai-sdlc", "git-hooks", "commit-msg"))
+          and ".claude/hooks/work-item-id.sh" not in after, out[-600:])
+    check("--upgrade keeps a project's own hook with the same script name (review finding 4)",
+          "sh tools/work-item-id.sh" in after, after)
     shutil.rmtree(d, ignore_errors=True)
 
 
