@@ -673,10 +673,11 @@ def test_hooks():
     check("existing settings survive the merge",
           settings.get("permissions", {}).get("allow") == ["Bash(npm *)"], str(settings))
     entries = settings.get("hooks", {}).get("PreToolUse", [])
-    check("all six hooks are registered", len(entries) == 6, str(entries))
-    check("the commit hook is filtered to git commit",
-          any(h.get("if") == "Bash(git commit*)"
-              for e in entries for h in e.get("hooks", [])), str(entries))
+    # The commit checks run as git hooks since NUHT-055, so four agent hooks are registered.
+    check("all four agent hooks are registered", len(entries) == 4, str(entries))
+    check("no hook reads shell text for git commit",
+          not any(h.get("if") == "Bash(git commit*)"
+                  for e in entries for h in e.get("hooks", [])), str(entries))
     check("every hook is anchored on the project root",
           all(h.get("command", "").startswith('sh "$CLAUDE_PROJECT_DIR"/.claude/hooks/')
               for e in entries for h in e.get("hooks", [])), str(entries))
@@ -873,7 +874,7 @@ def test_hooks():
           kept.get("facts", {}).get("marker_from_setup") is True, out[-300:])
     settings = json.loads(read(d, ".claude/settings.json"))
     check("re-running does not duplicate the hooks",
-          len(settings.get("hooks", {}).get("PreToolUse", [])) == 6, str(settings))
+          len(settings.get("hooks", {}).get("PreToolUse", [])) == 4, str(settings))
 
     # An older install registered relative commands; both routes repair them in place.
     legacy = read(d, ".claude/settings.json").replace('sh \\"$CLAUDE_PROJECT_DIR\\"/', "sh ")
@@ -883,7 +884,7 @@ def test_hooks():
     settings = json.loads(read(d, ".claude/settings.json"))
     commands = [h["command"] for e in settings["hooks"]["PreToolUse"] for h in e["hooks"]]
     check("--hooks rewrites legacy commands without duplicating them",
-          len(commands) == 6 and all("$CLAUDE_PROJECT_DIR" in c for c in commands), str(commands))
+          len(commands) == 4 and all("$CLAUDE_PROJECT_DIR" in c for c in commands), str(commands))
     write(d, ".claude/settings.json", legacy)
     code, out = run([d, "HKT", "--upgrade"])
     settings = json.loads(read(d, ".claude/settings.json"))
@@ -899,21 +900,21 @@ def test_hooks():
     check("exit 0 with other harnesses", code == 0, out[-300:])
     gem = json.loads(read(d, ".gemini/settings.json") or "{}")
     before = gem.get("hooks", {}).get("BeforeTool", [])
-    check("gemini gets all six rules as BeforeTool hooks through the adapter",
-          len(before) == 6 and all('adapter.sh gemini' in h["command"] and "$GEMINI_PROJECT_DIR" in h["command"]
+    check("gemini gets the four agent rules as BeforeTool hooks through the adapter",
+          len(before) == 4 and all('adapter.sh gemini' in h["command"] and "$GEMINI_PROJECT_DIR" in h["command"]
                                    for e in before for h in e["hooks"]), str(before)[:300])
     check("gemini matchers name its tools",
-          any(e["matcher"] == "run_shell_command" for e in before)
+          any("run_shell_command" in e["matcher"] for e in before)
           and any(e["matcher"] == "write_file|replace" for e in before), str(before)[:300])
     cur = json.loads(read(d, ".cursor/hooks.json") or "{}")
     shell = cur.get("hooks", {}).get("beforeShellExecution", [])
-    check("cursor gets the three shell rules and keeps its own hooks",
-          len(shell) == 3 and cur["hooks"].get("afterFileEdit") == [{"command": "./fmt.sh"}]
+    check("cursor gets the shell rule (approval-gate) and keeps its own hooks",
+          len(shell) == 1 and cur["hooks"].get("afterFileEdit") == [{"command": "./fmt.sh"}]
           and cur.get("version") == 1, str(cur)[:300])
     run([d, "HKT", "-y", "--hooks", "--harness", "claude,gemini,cursor"])
     check("re-running does not duplicate harness hooks",
-          len(json.loads(read(d, ".gemini/settings.json"))["hooks"]["BeforeTool"]) == 6
-          and len(json.loads(read(d, ".cursor/hooks.json"))["hooks"]["beforeShellExecution"]) == 3)
+          len(json.loads(read(d, ".gemini/settings.json"))["hooks"]["BeforeTool"]) == 4
+          and len(json.loads(read(d, ".cursor/hooks.json"))["hooks"]["beforeShellExecution"]) == 1)
     check("the adapter is installed and kit-managed",
           ".claude/hooks/adapter.sh" in json.loads(read(d, ".ai-sdlc/manifest.json")).get("files", {}))
 
@@ -1003,9 +1004,6 @@ def test_shell_write_guards():
         "git restore --source HEAD tests/locked_test.py",
         "dd if=/dev/null of=tests/locked_test.py",
         "python3 -c \"open('tests/locked_test.py','w').write('')\"",
-        "bash -c 'echo > tests/locked_test.py'",
-        "sh -c 'cat tests/locked_test.py'",
-        "eval 'echo > tests/locked_test.py'",
         "cd tests && echo x > locked_test.py",
         "echo x > %s/tests/locked_test.py" % d,
         "echo x > tests/../tests/locked_test.py",
@@ -1018,18 +1016,9 @@ def test_shell_write_guards():
         "echo '[]' > docs/project/people.json",
         ": > .ai-sdlc/test-lock.txt",
         "sed -i '1d' .ai-sdlc/protected.txt",
-        # Interpreters that run inline code, and stdin scripts (NUHT-016 ship review).
-        "node -e \"require('fs').writeFileSync('.ai-sdlc/protected.txt','')\"",
-        "perl -e 'open F,\">.ai-sdlc/gates.txt\"'",
-        "ruby -e 'File.write(\".ai-sdlc/gates.txt\",\"\")'",
-        "php -r \"file_put_contents('tests/locked_test.py','');\"",
-        "python3 - <<'EOF'\nopen('.ai-sdlc/manifest.json','w').write('{}')\nEOF",
-        "cat <<'EOF' | sh\necho > tests/locked_test.py\nEOF",
-        "awk 'BEGIN{print \"\" > \"tests/locked_test.py\"}'",
         "rsync /tmp/x tests/locked_test.py",
         "tar -xf /tmp/x.tar -C .ai-sdlc/extensions",
         "unzip -o /tmp/x.zip -d .ai-sdlc/local/extensions",
-        "git apply <<'EOF'\n--- a/.ai-sdlc/manifest.json\n+++ b/.ai-sdlc/manifest.json\nEOF",
         "patch .ai-sdlc/manifest.json /tmp/p.diff",
         # Trust anchors beyond the extension files.
         "echo x > .ai-sdlc/bin/hooks.py",
@@ -1056,6 +1045,25 @@ def test_shell_write_guards():
     for cmd in allowed:
         out = shell(cmd)
         check("shell read allowed: %s" % cmd, "deny" not in out, out)
+    # Inline code is not guessed at (NUHT-055): a mention of a guarded path is not a write,
+    # and refusing on one blocked reads. The git pre-commit backstop catches what it writes.
+    inline = (
+        "bash -c 'echo > tests/locked_test.py'",
+        "sh -c 'cat tests/locked_test.py'",
+        "eval 'echo > tests/locked_test.py'",
+        "node -e \"require('fs').writeFileSync('.ai-sdlc/protected.txt','')\"",
+        "perl -e 'open F,\">.ai-sdlc/gates.txt\"'",
+        "ruby -e 'File.write(\".ai-sdlc/gates.txt\",\"\")'",
+        "php -r \"file_put_contents('tests/locked_test.py','');\"",
+        "python3 - <<'EOF'\nopen('.ai-sdlc/manifest.json','w').write('{}')\nEOF",
+        "cat <<'EOF' | sh\necho > tests/locked_test.py\nEOF",
+        "awk 'BEGIN{print \"\" > \"tests/locked_test.py\"}'",
+        "git apply <<'EOF'\n--- a/.ai-sdlc/manifest.json\n+++ b/.ai-sdlc/manifest.json\nEOF",
+    )
+    for cmd in inline:
+        out = shell(cmd)
+        check("inline code is left to the commit backstop: %s" % cmd.replace("\n", "\\n"),
+              "deny" not in out, out)
     out = shell("sed -i 's/1/0/' tests/locked_test.py", script="test-lock.sh")
     check("test-lock inspects a Bash payload", '"permissionDecision":"deny"' in out, out)
     out = shell("echo {} > gen/out.json", script="protected-paths.sh")
@@ -4084,6 +4092,75 @@ def test_fast_verify():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_hooks_command():
+    print("hooks: commit checks run in git, inline code is not guessed at, hooks list/on/off")
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-hookscmd-"))
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "HKC", "-y", "--hooks"])
+    check("hooks repo installs", code == 0, out[-300:])
+    settings = read(d, ".claude/settings.json")
+    check("the agent no longer reads shell text for commit checks",
+          "work-item-id.sh" not in settings and "secret-guard.sh" not in settings, settings)
+    check("--hooks installs the git commit-msg and pre-commit hooks that replace them",
+          os.path.isfile(os.path.join(d, ".ai-sdlc", "git-hooks", "commit-msg"))
+          and os.path.isfile(os.path.join(d, ".ai-sdlc", "git-hooks", "pre-commit")), out[-600:])
+    write(d, "tests/locked_test.py", "def test_x():\n    assert 1\n")
+    with open(os.path.join(d, ".ai-sdlc", "test-lock.txt"), "a") as fh:
+        fh.write("tests/locked_test.py\n")
+    person = dict((k, v) for k, v in os.environ.items()
+                  if k not in ("CLAUDECODE", "CLAUDE_PROJECT_DIR", "GEMINI_CLI", "GEMINI_PROJECT_DIR",
+                               "CURSOR_PROJECT_DIR", "CURSOR_AGENT", "CODEX_SANDBOX", "AI_SDLC_AGENT",
+                               "AI_SDLC_APPROVAL"))
+    agent = dict(person, CLAUDE_PROJECT_DIR=d, CLAUDECODE="1")
+
+    def fire(script, cmd):
+        p = subprocess.run(["sh", os.path.join(d, ".claude", "hooks", script)], cwd=d, env=agent,
+                           input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}).encode(),
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return p.stdout.decode("utf-8", "replace")
+    out = fire("approval-gate.sh", "python3 - <<'EOF'\nprint(open('.ai-sdlc/profile.json').read())\nEOF")
+    check("inline code that only names a guarded path is allowed", "deny" not in out, out)
+    out = fire("approval-gate.sh", "echo x > tests/locked_test.py")
+    check("a direct shell write to a locked test is still denied", '"permissionDecision":"deny"' in out, out)
+
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(env, *args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, env=env, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+    code, out = sdlc(person, "hooks", "list")
+    check("hooks list names each hook, where it runs, what it blocks and that it is on",
+          code == 0 and "test-lock" in out and "work-item-id" in out and "git commit" in out
+          and " on " in out, out)
+    code, out = sdlc(agent, "hooks", "off", "test-lock")
+    check("an agent's session cannot turn a hook off", code != 0 and "terminal" in out, out)
+    code, out = sdlc(person, "hooks", "off", "test-lock")
+    check("a person turns a hook off", code == 0, out)
+    out = fire("approval-gate.sh", "echo x > tests/locked_test.py")
+    check("a hook that is off does not block", "deny" not in out, out)
+    code, out = sdlc(agent, "hooks", "on", "test-lock")
+    check("anyone may turn a hook back on", code == 0, out)
+    out = fire("approval-gate.sh", "echo x > tests/locked_test.py")
+    check("the hook blocks again once it is on", '"permissionDecision":"deny"' in out, out)
+    code, out = sdlc(person, "hooks", "off", "no-such-hook")
+    check("an unknown hook name is refused", code != 0, out)
+
+    # An install from before 6.1 has the Bash commit hooks; --upgrade retires them.
+    data = json.loads(read(d, ".claude/settings.json"))
+    data["hooks"]["PreToolUse"].append({"matcher": "Bash", "hooks": [{
+        "type": "command", "if": "Bash(git commit*)",
+        "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/work-item-id.sh"}]})
+    write(d, ".claude/settings.json", json.dumps(data, indent=2))
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    subprocess.call(git + ["commit", "-qm", "init", "--no-verify"], cwd=d)
+    code, out = run([d, "--upgrade", "-y"])
+    check("--upgrade retires the shell-text commit hooks", code == 0
+          and "work-item-id.sh" not in read(d, ".claude/settings.json"), out[-600:])
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_worktree_scripts():
     print("worktree scripts: setup on claim and dispatch, teardown on release, a port per worktree")
     d = tempfile.mkdtemp(prefix="sdlc-wtscripts-")
@@ -4796,7 +4873,8 @@ def test_release_workflow():
     check("an existing tag fails the release cleanly", "already exists" in text)
     refs = []
     for base, dirs, files in os.walk(ROOT):
-        dirs[:] = [x for x in dirs if x not in (".git", ".claude", "node_modules", "worklog", "plans")]
+        dirs[:] = [x for x in dirs if x not in (".git", ".claude", "node_modules", "worklog", "plans",
+                                                 "worklog-archive")]
         for f in files:
             if f.endswith((".md", ".yml", ".py", ".txt")) and f not in ("worklog.md", "backlog.md", "CHANGELOG.md", "smoke.py"):
                 if "workflows/release.yml" in read(base, f):
@@ -6656,8 +6734,8 @@ def test_tool_support_in_extensions():
     gem = json.loads(read(d, ".gemini/settings.json") or "{}")
     cur = json.loads(read(d, ".cursor/hooks.json") or "{}")
     check("gemini and cursor hooks are still written from their records",
-          len(gem.get("hooks", {}).get("BeforeTool", [])) == 6
-          and len(cur.get("hooks", {}).get("beforeShellExecution", [])) == 3)
+          len(gem.get("hooks", {}).get("BeforeTool", [])) == 4
+          and len(cur.get("hooks", {}).get("beforeShellExecution", [])) == 1)
     bindir = os.path.join(d, ".ai-sdlc", "bin")
     check("the helper ships with the runtime", os.path.isfile(os.path.join(bindir, "skillgen.py")))
     # A project tool that reuses the gemini dialect, and one that tries to change claude's.
@@ -6785,7 +6863,7 @@ def test_new_tool_extensions():
     os.chmod(stub, 0o755)
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
     subprocess.call(["git", "add", "-A"], cwd=d)
-    subprocess.call(git + ["commit", "-qm", "chore: install the kit"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "chore: install the kit", "--no-verify"], cwd=d)
     write(d, "app.py", "V = 1\n")
     subprocess.call(["git", "add", "app.py"], cwd=d)
     subprocess.call(git + ["commit", "-qm", "feat(NTL-001): app\n\nWork-Item: NTL-001\n"
@@ -9429,6 +9507,7 @@ def main():
                  test_status_review_fixes, test_defect_awareness, test_release_defect_gate,
                  test_tier1_approval_count_and_local_approval, test_severity_downgrade_rule,
                  test_checker_fallback, test_adopt_detected_commands, test_fast_verify,
+                 test_hooks_command,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

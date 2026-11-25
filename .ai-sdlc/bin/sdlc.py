@@ -4917,6 +4917,7 @@ Setup
   config              see or change the charter's constraints                          config --specs on
   notify              the Notify webhook: its setup; --test sends a test event         notify --test
   fix                 repair setup drift; preview record repairs (--apply writes)      fix rotate-worklog
+  hooks               the guard hooks: what each blocks; a person turns one off      hooks off test-lock
   ext                 extensions: list, add, update, remove, search, validate, package ext search lint
 """
 MAIN_HELP_FOOTER = """
@@ -4939,6 +4940,8 @@ EXAMPLES = {
                   "approvals ACME-12 --json"],
     "approve": ["approve ACME-12 --by sam  # run by the approver in a terminal"],
     "rerate": ["rerate ACME-31 --by codex  # blind re-rating; needed before an agent lowers S0-S2"],
+    "hooks": ["hooks                    # each guard hook: on or off, what it blocks, what it cannot see",
+              "hooks off test-lock      # a person, in a terminal", "hooks on test-lock"],
     "guard": ["guard start              # SessionStart hook (reads the hook JSON on stdin)",
               "guard stop               # Stop hook"],
     "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict",
@@ -6253,6 +6256,54 @@ def _cmd_verify(project, opts, parser):
     return 1 if failed else 0
 
 
+def _cmd_hooks(project, opts, parser):
+    """hooks: list the kit's guard hooks, or turn one off or on (.ai-sdlc/hooks-off.txt)."""
+    hooks_mod = runtime_module("hooks")
+    info = dict((h[0], h[1:]) for h in hooks_mod.HOOK_INFO)
+    path = project.path(hooks_mod.HOOKS_OFF_LIST)
+    off = set(hooks_mod._active_patterns(path))
+
+    def installed(name):
+        if name == "work-item-id":
+            return os.path.isfile(project.path(".ai-sdlc/git-hooks/commit-msg"))
+        if name == "secret-guard":
+            return os.path.isfile(project.path(".ai-sdlc/git-hooks/pre-commit"))
+        return os.path.isfile(project.path(".claude/hooks/%s.sh" % name))
+    if opts.action == "list":
+        print("%-16s %-14s %-34s %s" % ("hook", "state", "runs on", "blocks"))
+        for name, (where, blocks, blind) in sorted(info.items()):
+            state = "off" if name in off else ("on" if installed(name) else "not installed")
+            print("%-16s %-14s %-34s %s" % (name, state, where, blocks))
+            print("%-16s %-14s %-34s cannot see: %s" % ("", "", "", blind))
+        print("\nTurn one off: %s hooks off <name> (a person, in a terminal). On again: "
+              "hooks on <name>. Install them: install.sh <project> --hooks. The finish "
+              "reminder is the charter's Finish guard row." % SDLC)
+        return 0
+    name = opts.name or ""
+    if name not in info:
+        sys.stderr.write("hooks: unknown hook %r; one of: %s\n" % (name, ", ".join(sorted(info))))
+        return 2
+    if opts.action == "off" and any(os.environ.get(k) for k in AGENT_SESSION_ENVS) \
+            and not sys.stdin.isatty():
+        sys.stderr.write("hooks: an agent's session without a terminal cannot turn a guard off; "
+                         "a person runs `%s hooks off %s` in their own terminal\n" % (SDLC, name))
+        print("refused: turning %s off needs a person at a terminal" % name)
+        return 1
+    lines = read(path).splitlines() if os.path.isfile(path) else [
+        "# Guard hooks a person turned off (`sdlc.py hooks off <name>`), one name per line."]
+    lines = [ln for ln in lines if ln.strip() != name]
+    if opts.action == "off":
+        lines.append(name)
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    print("%s is %s%s" % (name, opts.action, "; it no longer blocks: %s" % info[name][1]
+                          if opts.action == "off" else ""))
+    return 0
+
+
 def _cmd_fix(project, opts, parser):
     """fix: safe mechanical repairs."""
     if opts.action in ("rotate-worklog", "normalise-status",
@@ -6360,7 +6411,7 @@ def register_command(name, handler, help="", configure=None, verb=None, core=Fal
 
 for _name, _handler in (
         ("status", _cmd_status), ("doctor", _cmd_doctor), ("approvals", _cmd_approvals),
-        ("approve", _cmd_approve), ("rerate", _cmd_rerate),
+        ("approve", _cmd_approve), ("rerate", _cmd_rerate), ("hooks", _cmd_hooks),
         ("finish", _cmd_finish), ("guard", _cmd_finish),
         ("notify", _cmd_notify), ("sync", _cmd_sync), ("slop", _cmd_slop), ("spec", _cmd_spec),
         ("next-id", _cmd_next_id), ("render", _cmd_render), ("item", _cmd_item),
@@ -6808,6 +6859,9 @@ def build_parser():
     bug_p.add_argument("--tier", choices=("1", "2", "3"), default="2", help="risk tier of the fix (default 2)")
     bug_p.add_argument("--status", help="status; default follows the charter's Discovered defects row")
     bug_p.add_argument("--json", action="store_true", help="print the item as JSON")
+    hk_p = sub.add_parser("hooks", help="list the guard hooks; a person turns one off or on")
+    hk_p.add_argument("action", choices=("list", "on", "off"), nargs="?", default="list")
+    hk_p.add_argument("name", nargs="?", help="hook name, as `hooks list` shows it")
     rr_p = sub.add_parser("rerate", help="a blind severity re-rating of a defect by another "
                           "agent; an agent needs one to lower an S0, S1 or S2")
     rr_p.add_argument("item", help="defect item ID")

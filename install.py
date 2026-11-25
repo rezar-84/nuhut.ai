@@ -116,7 +116,7 @@ EN = {
     "h.profile": "Compact installs the operating card, roles, templates and records, but not the numbered process/ documents. Same rules from one source -- for a small context window or a weaker model.",
     "l.profile": "Docs size",
     "q.enforce": "Enforce the rules mechanically?",
-    "h.enforce": "Off by default. Agent hooks (Claude Code; also Gemini CLI and Cursor when wired) deny a commit with no work item ID or with a credential, a write holding a credential, and edits to paths in .ai-sdlc/protected.txt. Git hooks apply to every tool and every human: pre-commit refuses staged credentials, commit-msg refuses a message without an ID. Existing hooks are chained, never replaced.",
+    "h.enforce": "Off by default. Agent hooks (Claude Code; Gemini CLI and Cursor when wired) stop an edit to a locked test or a path in .ai-sdlc/protected.txt, a file write holding a credential, and a command listed in .ai-sdlc/gates.txt. Git hooks, which come with the agent hooks, refuse a commit with no Work-Item trailer or with a staged credential, for every tool and every person; from then on each commit names its item. Inline code (heredocs, sh -c) is not guessed at; the commit check catches what it writes. A person turns any hook off with `sdlc.py hooks off <name>`; `sdlc.py hooks` lists them. Existing hooks are chained, never replaced.",
     "l.enforce": "Enforcement",
     "q.git_tools": "Should the kit's own tools (.ai-sdlc/) be committed?",
     "q.scaffold_tests": "Write a starter test plan from the detected test tooling?",
@@ -512,16 +512,25 @@ time; Epic plans several items together with one plan approval.
 Flags: --decision-style ask|guide|autopilot   --dev-method item|epic""",
     "explain.hooks": """Enforcement -- rules the tools refuse to break, not just promise
 
-  Agent hooks (--hooks)  Claude Code (and Gemini CLI, Cursor when wired) refuses a
-                         commit with no work item ID or with a credential, a file
-                         write that holds a credential, and edits to paths listed in
-                         .ai-sdlc/protected.txt.
-  Git hooks (--git-hooks) git itself refuses staged credentials (pre-commit) and a
-                         commit message without an ID (commit-msg), for every tool
-                         and every human. --git-hooks secrets installs only the first.
+  hook             runs on                    blocks
+  test-lock        agent edits, shell, commit edits to a locked reproducing test
+  protected-paths  agent edits, shell, commit edits to paths in .ai-sdlc/protected.txt
+  doc-leak-guard   agent file writes          a file write that holds a credential
+  approval-gate    agent shell and edits      commands in .ai-sdlc/gates.txt; kit files
+  work-item-id     git commit (commit-msg)    a commit with no Work-Item trailer
+  secret-guard     git commit (pre-commit)    a commit that stages a credential
 
-Both are off by default, stay silent unless they refuse something, and chain onto
-hooks you already have instead of replacing them.""",
+  --hooks installs all six: the agent hooks and the git hooks. --git-hooks installs
+  only the git hooks (--git-hooks secrets: only secret-guard).
+
+What they cannot see: inline code (heredocs, sh -c, an interpreter's -e) until it is
+committed, and commits made with --no-verify, which CI's ci-check still checks. They
+are guardrails on this machine, not proof (ADR 0004); a required CI job is the check
+that holds. Once installed, every commit names its item: the first one too.
+
+Turn one off: sdlc.py hooks off <name>, by a person in a terminal; an agent's session
+is refused. sdlc.py hooks lists each with its state. All are off by default, silent
+unless they refuse something, and chain onto hooks you already have.""",
     "explain.profile": """Docs profile -- how much an agent reads per change
 
   Full     every process document; about 22k tokens of reading for a Tier 2 change
@@ -3584,15 +3593,14 @@ class Installer(object):
         "text, re-install with `--profile full`, which adds the documents and changes\n"
         "no rule.\n")
 
+    # The commit checks (work item ID, staged credentials) run as git hooks, which read the
+    # real message and the staged diff; matching shell text for `git commit` misfired on
+    # quoted text. RETIRED_HOOKS lists what --upgrade removes from older settings.
     HOOK_SPECS = (
-        ("work-item-id.sh", "PreToolUse", "Bash", "Bash(git commit*)",
-         "Checking the commit carries a work item ID"),
         ("protected-paths.sh", "PreToolUse", "Write|Edit", None,
          "Checking the path is not single-writer"),
         ("test-lock.sh", "PreToolUse", "Write|Edit", None,
          "Checking the path is not a locked reproducing test"),
-        ("secret-guard.sh", "PreToolUse", "Bash", "Bash(git commit*)",
-         "Checking the commit adds no credential"),
         ("doc-leak-guard.sh", "PreToolUse", "Write|Edit|MultiEdit", None,
          "Checking the write holds no credential"),
         ("approval-gate.sh", "PreToolUse", "Bash|Write|Edit", None,
@@ -3649,7 +3657,9 @@ class Installer(object):
         if not self.o.hooks:
             return
         dest_dir = ensure_inside(self.target, self.target / ".claude" / "hooks")
-        for name, _, _, _, _ in self.HOOK_SPECS:
+        # The retired commit scripts stay installed (unregistered): any tool can still call
+        # them, and the git hooks share their rules.
+        for name in [spec[0] for spec in self.HOOK_SPECS] + list(RETIRED_HOOKS):
             self.install_file(SRC / "optional" / "hooks" / name, dest_dir / name)
         for name in ("lib.sh", "adapter.sh", "README.md"):
             self.install_file(SRC / "optional" / "hooks" / name, dest_dir / name)
@@ -4014,7 +4024,8 @@ class Installer(object):
         """Harness-independent guards git itself runs. The scripts are kit-managed under
         .ai-sdlc/git-hooks/; the project's own hook mechanism gets one line that calls
         them and is otherwise left alone, because that file is somebody's workflow."""
-        if not self.o.git_hooks:
+        # --hooks brings the git hooks too: the commit checks live there.
+        if not self.o.git_hooks and not self.o.hooks:
             return
         names = ["pre-commit"] if self.o.git_hooks == "secrets" else ["pre-commit", "commit-msg"]
         dest_dir = ensure_inside(self.target, self.target / ".ai-sdlc" / "git-hooks")
@@ -5119,6 +5130,13 @@ def upgrade(target, o):
             print("  %s .claude/settings.json (finish guard%s)" % (
                 "merge         " if added else "skip          ",
                 "" if added else ": already there" if added == 0 else ": not valid JSON"))
+        retired = retire_hook_commands(target)
+        if retired:
+            print("  update         .claude/settings.json (%d shell-text commit hook%s retired; "
+                  "the git hooks check commits)" % (retired, "" if retired == 1 else "s"))
+            if not (target / ".ai-sdlc" / "git-hooks" / "commit-msg").is_file():
+                notes.append("the commit checks now run as git hooks: install them with "
+                             "install.sh %s --git-hooks" % target)
         repaired = repair_hook_commands(target)
         if repaired:
             print("  update         .claude/settings.json (%d hook command%s anchored on "
@@ -5164,12 +5182,52 @@ def upgrade(target, o):
 
 # ---------------------------------------------------------------- uninstall
 
+RETIRED_HOOKS = ("work-item-id.sh", "secret-guard.sh")
+
+
 def kit_hook_command(command):
     """True for a hook command this kit registered, in any harness's settings file."""
     command = str(command or "")
     if "/.claude/hooks/adapter.sh " in command or (RUNTIME_REL + " guard ") in command:
         return True
-    return any(command.endswith(".claude/hooks/" + spec[0]) for spec in Installer.HOOK_SPECS)
+    return any(command.endswith(".claude/hooks/" + name)
+               for name in [spec[0] for spec in Installer.HOOK_SPECS] + list(RETIRED_HOOKS))
+
+
+def retire_hook_commands(target):
+    """Drop the shell-text commit hooks an older kit registered (RETIRED_HOOKS) from
+    .claude/settings.json; the git hooks do that job. Returns how many were dropped."""
+    settings = Path(target) / ".claude" / "settings.json"
+    if not settings.is_file():
+        return 0
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+    except ValueError:
+        return 0
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return 0
+    retired = lambda spec: isinstance(spec, dict) and any(
+        str(spec.get("command", "")).endswith(name) or
+        str(spec.get("command", "")).endswith(name + '"') for name in RETIRED_HOOKS)
+    dropped = 0
+    for event, entries in list(hooks.items()):
+        if not isinstance(entries, list):
+            continue
+        kept = []
+        for entry in entries:
+            specs = entry.get("hooks") if isinstance(entry, dict) else None
+            if isinstance(specs, list):
+                left = [s for s in specs if not retired(s)]
+                dropped += len(specs) - len(left)
+                if specs and not left:
+                    continue
+                entry = dict(entry, hooks=left) if len(left) != len(specs) else entry
+            kept.append(entry)
+        hooks[event] = kept
+    if dropped:
+        atomic_write_text(settings, json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return dropped
 
 
 def strip_kit_hooks(data):
@@ -5604,7 +5662,10 @@ def defaults_taken(w, inst):
     if not o.preset and not (o.effort_given or o.decision_given or o.dev_method_given):
         rows.append(("working style", "charter defaults (team)", "--preset solo|team|regulated"))
     if not (o.hooks or o.git_hooks):
-        rows.append(("enforcement", "off", "--hooks and/or --git-hooks"))
+        rows.append(("enforcement", "off", "--hooks (agent and git hooks) or --git-hooks"))
+    else:
+        rows.append(("enforcement", "on: commits need a Work-Item trailer",
+                     "sdlc.py hooks lists them; hooks off <name> (a person)"))
     rows.append(("charter", "left blank, nothing declared", "run without -y for guided setup"))
     print("")
     print("Defaults taken (no questions were asked):")

@@ -476,6 +476,36 @@ def _kit_checkout(root):
         os.path.isfile(os.path.join(root or "", "install.py"))
 
 
+HOOKS_OFF_LIST = ".ai-sdlc/hooks-off.txt"
+# Hooks a person can turn off with `sdlc.py hooks off <name>`; the finish guard has its own
+# charter row. Each: (where it runs, what it blocks, what it cannot see).
+HOOK_INFO = (
+    ("work-item-id", "git commit (commit-msg)",
+     "a commit whose message has no `Work-Item:` trailer",
+     "commits made with --no-verify; CI's ci-check still checks them"),
+    ("secret-guard", "git commit (pre-commit)",
+     "a commit that stages a credential",
+     "credentials already pushed; rotate those"),
+    ("test-lock", "agent edits and shell writes, and git commit",
+     "edits to a locked reproducing test listed in .ai-sdlc/test-lock.txt",
+     "inline code until it is committed"),
+    ("protected-paths", "agent edits and shell writes, and an agent's git commit",
+     "edits to single-writer paths listed in .ai-sdlc/protected.txt",
+     "inline code until it is committed"),
+    ("doc-leak-guard", "agent file writes",
+     "a file write that holds a credential",
+     "writes made outside the agent's edit tools"),
+    ("approval-gate", "agent shell commands and edits",
+     "commands matching .ai-sdlc/gates.txt, and edits to the kit's trust anchors",
+     "a command that does not match a glob in gates.txt"),
+)
+
+
+def hook_off(root, name):
+    """True when a person turned hook <name> off (`sdlc.py hooks off <name>`)."""
+    return name in _active_patterns(os.path.join(root, HOOKS_OFF_LIST))
+
+
 def _trust_anchors(root):
     """Paths that decide what the kit trusts or enforces. Only a human changes them: the
     extensions and their pins, the guard code and its wiring, the profile, people.json
@@ -484,7 +514,7 @@ def _trust_anchors(root):
     anchors = (
         ".ai-sdlc/extensions", ".ai-sdlc/extensions/*",
         ".ai-sdlc/local/extensions", ".ai-sdlc/local/extensions/*",
-        ".ai-sdlc/manifest.json", ".ai-sdlc/profile.json",
+        ".ai-sdlc/manifest.json", ".ai-sdlc/profile.json", HOOKS_OFF_LIST,
         ".ai-sdlc/git-hooks", ".ai-sdlc/git-hooks/*",
         docs_dir + "/project/people.json",
         docs_dir + "/project/evidence-ledger.jsonl",
@@ -779,16 +809,9 @@ def _shell_denial(cmd, cwd, root, checks):
         for target in targets:
             if _glob_hit(target, patterns):
                 return reason % target
-    if inline:
-        for patterns, _ in checks:
-            for cand in candidates:
-                if _glob_hit(cand, patterns):
-                    return (
-                        "this command runs inline code (eval, sh -c, an interpreter's -e, a "
-                        "script on stdin or a heredoc, awk, a patch) that "
-                        "names the guarded path %s, so the hook cannot see what it writes: run "
-                        "the steps directly instead." % cand
-                    )
+    # Inline code (eval, sh -c, an interpreter's -e, a heredoc, awk, a patch) is not guessed
+    # at: naming a guarded path is not writing it, and refusing on a mention blocked reads.
+    # What such code writes is caught when it is committed (run_git_pre_commit) and in CI.
     return None
 
 
@@ -928,7 +951,8 @@ def eval_approval_gate(payload, cwd, root):
         return builtin_deny
     # Shell writes to locked tests and single-writer paths: the agent-side, best-effort half.
     # The pre-commit backstop (run_git_pre_commit) is the authoritative one.
-    path_checks = _lock_checks(root) + _protected_checks(root)
+    path_checks = ([] if hook_off(root, "test-lock") else _lock_checks(root)) + \
+        ([] if hook_off(root, "protected-paths") else _protected_checks(root))
     if path_checks:
         path_deny = _shell_denial(cmd, cwd, root, path_checks)
         if path_deny:
@@ -1198,7 +1222,7 @@ def run_agent_hook(harness, rule):
         p_cwd = payload.get("cwd")
         if isinstance(p_cwd, str) and p_cwd.strip() and os.path.isdir(p_cwd):
             cwd = os.path.realpath(p_cwd)
-        reason = RULE_DISPATCH[rule](payload, cwd, root)
+        reason = None if hook_off(root, rule) else RULE_DISPATCH[rule](payload, cwd, root)
         if not reason and rule == EXTENSION_RULES_HOST:
             reason = eval_extension_rules(payload, cwd, root)
     except Exception as exc:
@@ -1259,7 +1283,8 @@ def run_git_pre_commit():
     cwd = os.path.realpath(os.getcwd())
     wt = resolve_git_worktree("", cwd, cwd)
     if not os.environ.get("AI_SDLC_APPROVAL"):
-        hits = _guarded_paths_in_commit(wt)
+        hits = [hit for hit in _guarded_paths_in_commit(wt)
+                if not hook_off(wt, "test-lock" if hit[1] == TEST_LOCK_LIST else "protected-paths")]
         if hits:
             shown = ", ".join("%s (%s)" % hit for hit in hits[:5])
             sys.stderr.write(
@@ -1268,6 +1293,8 @@ def run_git_pre_commit():
                 "set AI_SDLC_APPROVAL for a human-approved change.\n" % shown
             )
             return 1
+    if hook_off(wt, "secret-guard"):
+        return 0
     _, diff = _git_output(wt, ["diff", "--cached", "--unified=0"])
     if not diff:
         return 0
@@ -1301,7 +1328,7 @@ def run_git_commit_msg(msg_file):
     raw = _read_text(msg_path)
     lines = [line for line in raw.splitlines() if not line.startswith("#")]
     msg = "\n".join(lines).lstrip()
-    if re.match(r"^(?:Merge |Revert |fixup! |squash! )", msg):
+    if re.match(r"^(?:Merge |Revert |fixup! |squash! )", msg) or hook_off(wt, "work-item-id"):
         return 0
     reason = check_work_item_message(wt, msg)
     if reason:
