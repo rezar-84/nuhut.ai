@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "security",
-  "status": "In progress",
+  "status": "Parked",
   "depends": [],
   "touch": [
     "optional/runtime/hooks.py",
@@ -17,9 +17,17 @@
   "updated": "2026-11-25",
   "completed": "",
   "summary": "",
-  "approvers": [],
-  "waiting_on": "",
-  "park_reason": "",
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "charter",
+      "commit": "",
+      "at": ""
+    }
+  ],
+  "waiting_on": "rezar-84",
+  "park_reason": "merge approval (Tier 1): 0 of 1 (charter fallback)",
   "unblock_by": "",
   "later_when": "",
   "dropped_reason": ""
