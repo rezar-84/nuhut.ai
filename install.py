@@ -5132,12 +5132,12 @@ def upgrade(target, o):
                 "" if added else ": already there" if added == 0 else ": not valid JSON"))
         # The commit checks move to git hooks: install those first, and retire the old
         # agent registrations only once they are in place.
-        git_hooks_dir = target / ".ai-sdlc" / "git-hooks"
-        if (target / ".claude" / "hooks" / "work-item-id.sh").is_file() and \
-                not (git_hooks_dir / "commit-msg").is_file():
-            inst.o.git_hooks = inst.o.git_hooks or "all"
+        import hooks as kit_hooks
+        wired = lambda: all(kit_hooks.git_hook_wired(str(target), n) for n in ("commit-msg", "pre-commit"))
+        if (target / ".claude" / "hooks" / "work-item-id.sh").is_file() and not wired():
+            inst.o.git_hooks = "all"
             inst.install_git_hooks()
-        if (git_hooks_dir / "commit-msg").is_file() and (git_hooks_dir / "pre-commit").is_file():
+        if wired():
             retired = retire_hook_commands(target)
             if retired:
                 print("  update         .claude/settings.json (%d shell-text commit hook%s retired; "

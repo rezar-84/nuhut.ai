@@ -4183,6 +4183,29 @@ def test_hooks_command():
           and ".claude/hooks/work-item-id.sh" not in after, out[-600:])
     check("--upgrade keeps a project's own hook with the same script name (review finding 4)",
           "sh tools/work-item-id.sh" in after, after)
+    # Scripts present but git no longer calls them: upgrade wires them before retiring.
+    data = json.loads(after)
+    data["hooks"]["PreToolUse"].append({"matcher": "Bash", "hooks": [{
+        "type": "command", "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/work-item-id.sh"}]})
+    write(d, ".claude/settings.json", json.dumps(data, indent=2))
+    for hook in ("commit-msg", "pre-commit"):
+        hook_file = os.path.join(d, ".git", "hooks", hook)
+        if os.path.exists(hook_file):
+            os.remove(hook_file)
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    subprocess.call(git + ["commit", "-qm", "hooks disconnected", "--no-verify"], cwd=d)
+    code, out = run([d, "--upgrade", "-y"])
+    wired = read(os.path.join(d, ".git", "hooks"), "commit-msg") or ""
+    check("--upgrade wires disconnected git hooks before it retires the old ones (round 2, 3)",
+          code == 0 and "git-hooks/commit-msg" in wired
+          and ".claude/hooks/work-item-id.sh" not in read(d, ".claude/settings.json"), out[-600:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    write(os.path.join(d, ".git", "hooks"), "pre-commit", "#!/bin/sh\n# sh .ai-sdlc/git-hooks/pre-commit\n")
+    os.chmod(os.path.join(d, ".git", "hooks", "pre-commit"), 0o755)
+    p = subprocess.run([sys.executable, script, "hooks", "list"], cwd=d, env=person,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("a commented-out git hook call is not wired (round 2, 4)",
+          re.search(r"secret-guard\s+not wired", p.stdout) is not None, p.stdout)
     shutil.rmtree(d, ignore_errors=True)
 
 

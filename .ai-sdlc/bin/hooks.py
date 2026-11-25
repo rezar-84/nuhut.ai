@@ -501,6 +501,52 @@ HOOK_INFO = (
 )
 
 
+def git_hook_wired(root, name):
+    """True when git runs the kit's <name> git hook: the hook file git reads
+    (core.hooksPath, else the repository's hooks folder, or .husky) exists, is executable
+    where git requires it, and has an uncommented line calling .ai-sdlc/git-hooks/<name>."""
+    call = ".ai-sdlc/git-hooks/" + name
+    if not os.path.isfile(os.path.join(root, call)):
+        return False
+    folders = []
+    rc, configured = _git_output(root, ["config", "--get", "core.hooksPath"])
+    configured = configured.strip() if rc == 0 else ""
+    if configured:
+        folders.append(configured if os.path.isabs(configured) else os.path.join(root, configured))
+    else:
+        rc, common = _git_output(root, ["rev-parse", "--git-common-dir"])
+        common = common.strip() if rc == 0 else ".git"
+        folders.append(os.path.join(common if os.path.isabs(common) else os.path.join(root, common),
+                                    "hooks"))
+    folders.append(os.path.join(root, ".husky"))
+    for folder in folders:
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path):
+            continue
+        if os.path.basename(folder) != ".husky" and not os.access(path, os.X_OK):
+            continue
+        if any(call in line for line in _read_text(path).splitlines()
+               if line.strip() and not line.strip().startswith("#")):
+            return True
+    return False
+
+
+def agent_hook_wired(root, name):
+    """True when .claude/settings.json registers the kit's <name>.sh as a PreToolUse hook
+    and the script is there."""
+    if not os.path.isfile(os.path.join(root, ".claude", "hooks", name + ".sh")):
+        return False
+    try:
+        data = json.loads(_read_text(os.path.join(root, ".claude", "settings.json")) or "{}")
+    except ValueError:
+        return False
+    entries = ((data.get("hooks") or {}).get("PreToolUse") or []) if isinstance(data, dict) else []
+    return any(isinstance(spec, dict)
+               and str(spec.get("command", "")).endswith(".claude/hooks/%s.sh" % name)
+               for entry in entries if isinstance(entry, dict)
+               for spec in (entry.get("hooks") or []))
+
+
 def hook_off(root, name):
     """True when a person turned hook <name> off (`sdlc.py hooks off <name>`)."""
     return name in _active_patterns(os.path.join(root, HOOKS_OFF_LIST))
@@ -829,6 +875,8 @@ def _enforcement_files(root):
     """The files the guard hooks read to decide what they enforce: the guard lists, the
     off list, the hook scripts and their wiring, and the kit's code."""
     files = (TEST_LOCK_LIST, PROTECTED_LIST, GATES_LIST, HOOKS_OFF_LIST,
+             ".ai-sdlc/extensions", ".ai-sdlc/extensions/*",
+             ".ai-sdlc/local/extensions", ".ai-sdlc/local/extensions/*",
              ".ai-sdlc/git-hooks", ".ai-sdlc/git-hooks/*",
              ".claude/hooks", ".claude/hooks/*") + HOOK_SETTINGS
     if not _kit_checkout(root):
