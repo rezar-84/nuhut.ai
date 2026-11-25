@@ -5,7 +5,7 @@
   "tier": "3",
   "effort": "",
   "owner": "technical-writer",
-  "status": "In progress",
+  "status": "Done",
   "depends": [],
   "touch": [
     "docs/roadmap.md",
@@ -13,7 +13,7 @@
   ],
   "created": "2026-11-25",
   "updated": "2026-11-25",
-  "completed": "",
+  "completed": "2026-11-25",
   "summary": "",
   "approvers": [],
   "waiting_on": "",
