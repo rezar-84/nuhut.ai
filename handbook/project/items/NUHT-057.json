@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-057",
+  "title": "finish --commit: the item's records go in one commit with its trailers",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "In progress",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "optional/claude-commands/sdlc-finish.md",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

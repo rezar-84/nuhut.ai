@@ -4209,6 +4209,57 @@ def test_hooks_command():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_finish_commit():
+    print("finish --commit: the records finish writes go in one commit with the item's trailers")
+    d = tempfile.mkdtemp(prefix="sdlc-fincommit-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", "-b", "main", repo])
+    code, out = run([repo, "FCM", "-y"])
+    check("finish-commit repo installs", code == 0, out[-300:])
+    charter = read(repo, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| `checks\.lint` \|.*\|$", "| `checks.lint` | `true` |", charter)
+    write(repo, "docs/project/charter.md", charter)
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore: kit"], cwd=repo)
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@t", AI_SDLC_AGENT="claude-code", AI_SDLC_MODEL="claude-opus-5-5")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+    sdlc("item", "add", "FCM-1", "--title", "a change", "--tier", "2", "--status", "In progress")
+    write(repo, "src/a.py", "x = 1\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "feat(FCM-1): a\n\nWork-Item: FCM-1"], cwd=repo)
+    code, out = sdlc("verify", "--item", "FCM-1")
+    check("FCM-1 verifies", code == 0, out[-400:])
+    write(repo, "notes.txt", "unrelated work in progress\n")
+    subprocess.call(["git", "add", "notes.txt"], cwd=repo)
+    notes = ["--why", "a reason", "--not-done", "nothing deferred", "--discovered", "nothing",
+             "--decisions", "none", "--assumptions", "none", "--plan", "inline",
+             "--reviews", "software-engineer: Pass"]
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo).strip()
+    code, out = sdlc("finish", "FCM-1", "--commit", "--dry-run", *notes)
+    check("a dry run commits nothing",
+          subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo).strip() == head, out)
+    code, out = sdlc("finish", "FCM-1", "--commit", *notes)
+    msg = subprocess.check_output(["git", "log", "-1", "--format=%B"], cwd=repo).decode()
+    names = subprocess.check_output(["git", "show", "--name-only", "--format=", "HEAD"], cwd=repo).decode()
+    check("finish --commit closes the item and commits its records with the trailers",
+          code == 0 and msg.startswith("chore(FCM-1):") and "Work-Item: FCM-1" in msg
+          and "Agent: claude-code" in msg and "docs/project/items/FCM-1.json" in names
+          and "docs/project/worklog/FCM-1.md" in names and "docs/project/ledger/" in names,
+          out + msg + names)
+    staged = subprocess.check_output(["git", "diff", "--cached", "--name-only"], cwd=repo).decode()
+    check("work the person had staged is left out of the commit and stays staged",
+          "notes.txt" not in names and "notes.txt" in staged, names + staged)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_worktree_scripts():
     print("worktree scripts: setup on claim and dispatch, teardown on release, a port per worktree")
     d = tempfile.mkdtemp(prefix="sdlc-wtscripts-")
@@ -9561,7 +9612,7 @@ def main():
                  test_status_review_fixes, test_defect_awareness, test_release_defect_gate,
                  test_tier1_approval_count_and_local_approval, test_severity_downgrade_rule,
                  test_checker_fallback, test_adopt_detected_commands, test_fast_verify,
-                 test_hooks_command,
+                 test_hooks_command, test_finish_commit,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

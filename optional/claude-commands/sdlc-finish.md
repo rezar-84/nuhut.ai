@@ -49,7 +49,9 @@ $ARGUMENTS
    Discovered, Decisions, Assumptions, and for Tier 2 the plan and review verdicts.
    Replace each one with the real content. Write "nothing deferred" or "none" when that
    is the truth; never delete a section. `finish` refuses while a `TODO(finish)` is
-   left.
+   left. Run the last `finish` with `--commit`: it commits the item's shard, worklog
+   entry and ledger rows in one commit with the item's trailers, and leaves anything
+   else you staged out of it.
 
 6. **Then do the closing work no script can.** Reconcile
    `{{DOCS_DIR}}/project/assumptions-and-risks.md`. Update or mark stale the docs the change

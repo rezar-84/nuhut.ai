@@ -5079,6 +5079,45 @@ def _cmd_approve(project, opts, parser):
     return code
 
 
+def finish_record_paths(project, item):
+    """The records `finish` and `verify --item` leave for <item> that git does not have yet:
+    its shard, its worklog entry, and ledger shards named for it."""
+    base = project.docs.rstrip("/") + "/project/"
+    wanted = (base + "items/%s.json" % item, base + "worklog/%s.md" % item)
+    out = project.git("status", "--porcelain", "--untracked-files=all", "--", base)
+    paths = []
+    for line in out.splitlines():
+        path = line[3:].strip().strip('"')
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        if path in wanted or (path.startswith(base + "ledger/") and ("-%s-" % item) in path):
+            paths.append(path)
+    return paths
+
+
+def commit_finish_records(project, item, status):
+    """Commit only <item>'s records, with its trailers; whatever else is staged stays
+    staged and out of this commit. Returns (sha or '', message)."""
+    paths = finish_record_paths(project, item)
+    if not paths:
+        return "", "commit   nothing to commit: the records are already in git"
+    agent, model = identity(None, None, project)
+    tags = [("Work-Item", item)] + ([("Agent", "human")] if agent == "unknown" else
+                                    [("Agent", agent), ("Model", model)])
+    message = "chore(%s): finish records (%s)\n\n%s" % (
+        item, status, "\n".join("%s: %s" % pair for pair in tags))
+    proc = subprocess.run(["git", "add", "--"] + paths, cwd=project.root,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if proc.returncode == 0:
+        proc = subprocess.run(["git", "commit", "-q", "-m", message, "--"] + paths,
+                              cwd=project.root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if proc.returncode != 0:
+        return "", ("commit   failed (%s): commit %s yourself"
+                    % (proc.stdout.decode("utf-8", "replace").strip()[:200], ", ".join(paths)))
+    sha = project.git("rev-parse", "--short", "HEAD").strip()
+    return sha, "commit   %s: %s" % (sha, ", ".join(paths))
+
+
 def _cmd_finish(project, opts, parser):
     """finish and guard: close a work item, or run the finish guard from a hook."""
     finish_mod = runtime_module("finish")
@@ -5116,6 +5155,13 @@ def _cmd_finish(project, opts, parser):
     lines, code = finish_mod.finish(sys.modules[__name__], project, opts.item,
                                     opts.by if opts.waive else None, opts.reason,
                                     opts.dry_run, notes=notes or None)
+    if getattr(opts, "commit", False) and code == 0:
+        if opts.dry_run:
+            lines.append("commit   would commit: %s"
+                         % (", ".join(finish_record_paths(project, opts.item)) or "nothing"))
+        else:
+            status = (_shards_mod.merged_items(project).get(opts.item) or {}).get("status", "")
+            lines.append(commit_finish_records(project, opts.item, status or "closed")[1])
     if getattr(opts, "json", False):
         owed_list = [ln[5:].strip() for ln in lines if ln.startswith("OWED ")]
         cur_item = _shards_mod.merged_items(project).get(opts.item) or {}
@@ -6562,6 +6608,8 @@ def build_parser():
     fin.add_argument("--reviews", help="reviews summary when not in reviews/<ID>*.md")
     fin.add_argument("--from-json", dest="from_json", help="JSON file (or '-' for stdin) supplying worklog fields")
     fin.add_argument("--dry-run", action="store_true", help="say what it would do; write nothing")
+    fin.add_argument("--commit", action="store_true", help="commit the item's records (shard, "
+                     "worklog entry, ledger) with its trailers; other staged work stays out")
     fin.add_argument("--json", action="store_true", help="print result as JSON")
     apr = sub.add_parser("approvals", help="who approved an item's merge: the item branch's "
                          "GitHub PR reviews on its head (gh), else the charter's Approvers")
