@@ -3931,6 +3931,22 @@ def test_adopt_detected_commands():
     code, out = sdlc("doctor")
     check("doctor points blank rows with a detected command at adopt-commands",
           "fix adopt-commands" in out and "npm run test" in out, out[-1500:])
+    # One detection, not two (NUHT-050): the viewer's suggestions come from what the
+    # installer detected, where it detected something, so they match doctor and status.
+    code, out = sdlc("config", "--json")
+
+    def find_detected(node):
+        if isinstance(node, dict):
+            if isinstance(node.get("detected_commands"), dict):
+                return node["detected_commands"]
+            for v in node.values():
+                hit = find_detected(v)
+                if hit is not None:
+                    return hit
+        return None
+    suggested = find_detected(json.loads(out)) if code == 0 else None
+    check("the viewer suggests the installer's detected command, not a second guess",
+          isinstance(suggested, dict) and suggested.get("unit") == "npm run test", str(suggested))
     code, out = sdlc("status", "--json")
     setup = dict((g.get("check"), g) for g in (json.loads(out).get("setup") if code == 0 else []))
     check("status lists the detected commands as missing setup",

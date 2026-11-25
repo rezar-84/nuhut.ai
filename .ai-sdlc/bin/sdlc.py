@@ -3782,7 +3782,8 @@ def _active_lines(path):
 
 def detect_candidate_commands(project):
     """Inspect repo files to suggest candidate commands for blank checks.* stages without
-    fabricating or writing them automatically."""
+    fabricating or writing them automatically. A fallback for installs whose profile has no
+    detected commands (`detected_commands` wins); it uses the installer's command forms."""
     candidates = {}
     pkg_text = read(project.path("package.json"))
     if pkg_text:
@@ -3793,7 +3794,7 @@ def detect_candidate_commands(project):
         scripts = pkg.get("scripts") if isinstance(pkg, dict) else {}
         if isinstance(scripts, dict):
             if "test" in scripts and "no test specified" not in str(scripts.get("test", "")):
-                candidates.setdefault("unit", "npm test")
+                candidates.setdefault("unit", "npm run test")
             if "lint" in scripts:
                 candidates.setdefault("lint", "npm run lint")
             if "format" in scripts or "fmt" in scripts:
@@ -3977,7 +3978,11 @@ def kit_status(project):
 
     cmds = charter_commands(charter)
     blank_stages = [s for s in STAGES if cmds.get(s, "") == ""]
+    # What the installer detected (profile.json) wins where it found a command, so the
+    # viewer suggests the same command doctor, status and `fix adopt-commands` name. The
+    # repository scan is the fallback for installs whose profile holds no detection.
     detected_cmds = detect_candidate_commands(project)
+    detected_cmds.update(detected_commands(project))
 
     # Check safe mechanical fixables
     prof_findings = Findings()
