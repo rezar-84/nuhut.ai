@@ -96,9 +96,11 @@ def run_child(args, name, timeout):
     cmd = [sys.executable, os.path.abspath(__file__), "--module", args.module, "--child", name]
     if args.verbose:
         cmd.append("-v")
+    # Tests read NUHUT_TEST_JOBS to relax wall-clock bounds while others run alongside.
+    env = dict(os.environ, NUHUT_TEST_JOBS=str(args.jobs))
     try:
         p = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, timeout=timeout)
+                           stderr=subprocess.STDOUT, timeout=timeout, env=env)
         out = p.stdout.decode("utf-8", "replace")
     except subprocess.TimeoutExpired as exc:
         out = (exc.stdout or b"").decode("utf-8", "replace")

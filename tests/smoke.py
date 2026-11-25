@@ -6061,14 +6061,20 @@ def test_json_and_doctor_cache():
             "owner": "software-engineer", "status": "Ready", "depends": [], "touch": ["src/m%d.py" % n],
             "created": today_s, "updated": today_s,
         }))
+    t0 = time.time()
     sdlc("doctor", "--json")
+    cold_ms = (time.time() - t0) * 1000.0
     cache_path = os.path.join(d, ".ai-sdlc", "cache", "doctor.json")
     check("doctor writes .ai-sdlc/cache/doctor.json", os.path.isfile(cache_path))
     t0 = time.time()
     rc_warm, out_warm = sdlc("doctor", "--json")
     warm_ms = (time.time() - t0) * 1000.0
-    check("warm doctor run with 120 shards completes in <500ms",
-          rc_warm == 0 and warm_ms < 500.0, "took %.1fms" % warm_ms)
+    # Wall-clock limits flake on a loaded machine: under `tests/run.py --jobs N` (the fast
+    # tier) the absolute bound is relaxed, and the cache must still beat the cold run.
+    limit = 500.0 if int(os.environ.get("NUHUT_TEST_JOBS", "1") or 1) <= 1 else 2000.0
+    check("warm doctor run with 120 shards completes in <%dms and beats the cold run" % limit,
+          rc_warm == 0 and warm_ms < limit and warm_ms < cold_ms,
+          "warm %.1fms, cold %.1fms" % (warm_ms, cold_ms))
 
     # Mutating a shard invalidates the cache immediately on the next doctor run.
     write(d, "docs/project/items/JSC-050.json", json.dumps({
