@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-051",
+  "title": "Roadmap and README status describe kit-v4; add an enforced-vs-recorded table",
+  "type": "docs",
+  "tier": "3",
+  "effort": "",
+  "owner": "technical-writer",
+  "status": "In progress",
+  "depends": [],
+  "touch": [
+    "docs/roadmap.md",
+    "README.md"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

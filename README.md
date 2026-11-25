@@ -254,13 +254,31 @@ always ran, bugs got a failing test first, and work was traceable. It also cost 
 times the tokens and time of no kit, with no measured gain in correctness on a strong
 model. Some of the benchmark's own checks were biased against the kit.
 
-4.x fixes the benchmark ([v2 changes](benchmarks/kit-value/README.md#v2-changes)) and cuts
+4.x fixed the benchmark ([v2 changes](benchmarks/kit-value/README.md#v2-changes)) and cut
 what the kit makes an agent read and write. The comparison against the 3.5.0 kit (tag
-`bench-baseline-v0`) has not run yet. Until it does, no claim is made that 4.x is cheaper
-or better in practice.
+`bench-baseline-v0`) has still not run, for 4.x, 5.x or 6.0. Until it does, no claim is
+made that the kit is cheaper or better in practice.
 
 The installer, runtime, viewer, hooks and benchmark code are tested (`validate.py`,
 `tests/smoke.py`, CI).
+
+### What the kit enforces, and what it only records
+
+Everything the kit runs, runs where the agent runs. A check is only as strong as the place
+it runs:
+
+| Rule | Checked by | Can an agent in the same environment get around it? |
+| --- | --- | --- |
+| A commit names its work item (`Work-Item:` trailer) | the commit hook, then `ci-check` in CI | Locally yes; in CI only if the host requires the CI job |
+| `finish` needs a full `verify` run on the item's newest code commit | `finish`, then `ci-check` in CI | Locally yes (the ledger is a file); in CI only if required |
+| Locked tests, kit files and protected paths are not edited | the agent tool's hooks, when installed with `--hooks` | Yes, from a tool without hooks or a shell the hook cannot read |
+| Tier 1 needs approvals | `finish` reads GitHub PR reviews from people in Approvers | Only GitHub branch protection with required reviews stops a merge |
+| Local approvals, verify waivers, severity re-ratings | recorded with who and when | Yes. They are unsigned records of intent, not proof of identity |
+| A review came from another model family | the review file's Independence field | Yes. It is what the review says about itself |
+
+Enforcement that an agent cannot get around comes from outside its environment: branch
+protection on the git host with required reviews, and the kit's CI job as a required
+check. `doctor` reports when the CI job exists but nothing requires it.
 
 ## Contributing, security, licence
 
