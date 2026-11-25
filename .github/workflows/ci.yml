@@ -32,8 +32,50 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile
-        run: python -m py_compile install.py install_ui.py validate.py tests/smoke.py optional/runtime/*.py tools/semver.py tools/build_view.py tools/demo_project.py benchmarks/lib/scoring.py benchmarks/effort-modes/*.py benchmarks/kit-value/*.py
+        run: python -m py_compile install.py install_ui.py validate.py tests/smoke.py tests/run.py tests/unit/*.py optional/runtime/*.py tools/semver.py tools/build_view.py tools/demo_project.py benchmarks/lib/scoring.py benchmarks/effort-modes/*.py benchmarks/kit-value/*.py
       - name: Validate kit
         run: python validate.py
+      - name: Run unit tests
+        run: python -m unittest discover tests/unit
       - name: Run installer smoke tests
         run: python tests/smoke.py
+
+  records:
+    # The kit's own checks on this repository: doctor on every push, and on a pull
+    # request the base branch's ci-check over the PR's commits. The PR's own copy runs,
+    # with a warning, only when the base has no kit or one from before 6.0; any other
+    # failure of the base's checker fails the job. A merge pushed straight to main is
+    # not judged here: branch protection on main, which requires this job, is what
+    # stops that (history from before 6.0 predates ci-check).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: SDLC records
+        run: python3 .ai-sdlc/bin/sdlc.py doctor --strict
+      - name: PR records
+        if: github.event_name == 'pull_request'
+        run: |
+          mkdir -p "$RUNNER_TEMP/base"
+          if ! git rev-parse --verify --quiet "origin/$GITHUB_BASE_REF^{commit}" >/dev/null; then
+            echo "::error::cannot read origin/$GITHUB_BASE_REF; not falling back to this change's copy"; exit 1
+          elif [ -z "$(git ls-tree --name-only "origin/$GITHUB_BASE_REF" -- .ai-sdlc/bin/sdlc.py)" ]; then
+            echo "::warning::origin/$GITHUB_BASE_REF has no .ai-sdlc/bin/sdlc.py; running this change's own ci-check"
+            checker=.ai-sdlc/bin/sdlc.py
+          elif ! git archive "origin/$GITHUB_BASE_REF" .ai-sdlc/bin | tar -x -C "$RUNNER_TEMP/base"; then
+            echo "::error::could not extract .ai-sdlc/bin from origin/$GITHUB_BASE_REF"; exit 1
+          elif python3 "$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py" ci-check --help >/dev/null 2>&1; then
+            checker="$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py"
+          elif python3 "$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py" --help >/dev/null 2>&1 && ! python3 "$RUNNER_TEMP/base/.ai-sdlc/bin/sdlc.py" --help 2>&1 | grep -q ci-check; then
+            echo "::warning::origin/$GITHUB_BASE_REF has a kit from before 6.0 (no ci-check); running this change's own ci-check"
+            checker=.ai-sdlc/bin/sdlc.py
+          else
+            echo "::error::the ci-check on origin/$GITHUB_BASE_REF fails to start; not falling back to this change's copy"
+            exit 1
+          fi
+          python3 "$checker" --root "$GITHUB_WORKSPACE" ci-check --base "origin/$GITHUB_BASE_REF" \
+            --head event --charter-ref "origin/$GITHUB_BASE_REF"

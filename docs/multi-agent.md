@@ -19,15 +19,18 @@ progress until someone notices half a feature is gone.
 python3 .ai-sdlc/bin/sdlc.py claim ACME-12            # claim + branch ACME-12-<slug> + ../<repo>-ACME-12
 cd ../acme-shop-ACME-12                                # the item's own checkout
 # … plan, build, verify, log …
-python3 .ai-sdlc/bin/sdlc.py release ACME-12 --remove-worktree
+python3 .ai-sdlc/bin/sdlc.py unclaim ACME-12 --remove-worktree
 ```
+
+`unclaim` was called `release` before 6.0. `release` still works the same way, with one
+deprecation line on stderr, and is removed in 7.0.
 
 - **The claim is atomic.** It is a file in the repository's shared git directory
   (`<git-common-dir>/nuhut/claims/ACME-12.json`), created with an exclusive create. A
   second agent asking for ACME-12 is refused, and told who holds it and since when.
 - **Every worktree sees it.** All worktrees of a clone share the git directory, so
   parallel sessions on one machine see each other's claims. Across machines, add
-  `--sync-refs` on `claim`, `release`, `claims`, `parallel` and `next-id` to publish
+  `--sync-refs` on `claim`, `unclaim`, `claims`, `parallel` and `next-id` to publish
   compare-and-swap claim leases under `refs/nuhut/claims/<ID>` and atomic sequence
   allocations under `refs/nuhut/seq` on `origin`.
 - **Each item gets its own worktree.** Parallel sessions in one checkout overwrite each
@@ -39,11 +42,55 @@ python3 .ai-sdlc/bin/sdlc.py release ACME-12 --remove-worktree
   never touch the same line of `backlog.md`, `worklog.md`, or `evidence-ledger.jsonl`.
   Run `sdlc.py render` on the main branch when you want fresh Markdown summaries, and
   `sdlc.py fix migrate-shards --apply` to migrate an existing 4.x repository.
+- **Two branches that edit the same item merge field by field.** The installer adds
+  `docs/project/items/*.json merge=nuhut-shard` to `.gitattributes`. Run
+  `python3 .ai-sdlc/bin/sdlc.py fix merge-driver` once in each clone; it prints the
+  `git config` line and then sets it with absolute paths. From then on git hands item
+  shards to `sdlc.py merge-shard`, which keeps both sides' changes to different fields,
+  keeps every `history` entry, and takes the stricter tier. It writes conflict markers when
+  both sides changed `approvers`, `waivers`, `status`, `hotfix` or `owner` differently, so a
+  revoked approval or a status change is a person's decision. Other fields go to the newer
+  `updated`, ignoring a stamp more than 5 minutes in the future. A file it cannot parse is
+  left untouched and the merge stops.
+- **Optional: keep the rendered views out of git.** `backlog.md` and `worklog.md` are views
+  of the shards. A team that never reads them in a diff can add both to `.gitignore` and run
+  `python3 .ai-sdlc/bin/sdlc.py render` in CI (or before publishing docs) instead. `doctor`
+  reads the shards and does not fail when the two files are absent. Keep them committed if
+  people read the backlog on the hosting site without running anything.
 - **It refuses the obvious mistakes:** an item already claimed, one whose dependencies are
   unfinished, one that is Done or Dropped, or releasing a claim owned by another agent
-  without `--force`. `release --remove-worktree` refuses a worktree with uncommitted changes.
+  without `--force`. `unclaim --remove-worktree` refuses a worktree with uncommitted changes.
 
 `python3 .ai-sdlc/bin/sdlc.py claims` lists who holds what.
+
+### Worktree scripts
+
+A fresh worktree often needs work before it runs: installing dependencies, copying a
+`.env`, starting a database on its own port. The charter's optional **Worktree scripts**
+row, in the Concurrency table, names a command for each end. It is `none` by default.
+
+```sh
+python3 .ai-sdlc/bin/sdlc.py config --worktree-scripts "setup: npm ci && cp ../.env .env; teardown: docker compose down"
+python3 .ai-sdlc/bin/sdlc.py config --worktree-scripts none            # turn them off
+```
+
+- **Setup** runs in each new worktree that `claim` or `dispatch` creates. **Teardown** runs
+  in the worktree just before `release --remove-worktree` removes it (and before `dispatch`
+  removes a worker's worktree). Neither runs for `claim --no-worktree` or a plain `release`.
+- Both run through the shell with the worktree as the working directory and get
+  `NUHUT_ITEM` (the item ID), `NUHUT_PORT`, `NUHUT_WORKTREE`, `NUHUT_BRANCH` and
+  `NUHUT_MAIN_WORKTREE`.
+- **One port per worktree.** Each claim with a worktree gets the lowest port from the base
+  (4100, or `; port: <base>` in the row) that no other live claim holds and nothing on this
+  host is listening on. The port is kept in the claim record, so teardown sees the same one.
+- **Failures are reported.** A setup that exits non-zero makes `claim` exit 1 with the exit
+  code and the end of its output; the claim and the worktree are kept so you can look.
+  A failing teardown makes `release` exit 1 and release nothing; `--force` removes the
+  worktree anyway and prints the failure as a warning. In `dispatch`, a failed setup ends
+  that item as `setup_failed`, and a failed teardown is reported as `teardown_error`.
+- Commands may contain `;` themselves: a part only starts at `setup:`, `teardown:` or `port:`.
+- These are commands from the charter, run with your permissions, like the `checks.*` rows.
+  Review a change to the row as you would a change to a build script.
 
 ## What can run side by side
 
@@ -138,8 +185,8 @@ records which commit each run was on, so anyone can check.
 ## What doctor watches
 
 - A claim older than the charter's staleness window with no commit on its branch since:
-  re-claim it deliberately, or release it.
-- A claim on an item that is already Done or Dropped: a forgotten release.
+  re-claim it deliberately, or unclaim it.
+- A claim on an item that is already Done or Dropped: a forgotten unclaim.
 - Two branches for one claimed item: two agents may be on it.
 
 ## Without the runtime

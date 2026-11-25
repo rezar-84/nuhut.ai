@@ -122,9 +122,29 @@ def cross_references(errors):
     # Harnesses: every alias names a pointer the table actually knows how to write,
     # and the runtime doctor checks every pointer file the installer can wire.
     known = {rel for rel, _ in install.HARNESS_POINTERS}
-    runtime_pointers = set(runtime_sdlc.POINTER_FILES) | {".cursor/rules/agents.mdc"}
+    runtime_pointers = set(runtime_sdlc.V5_POINTER_FILES)
     for rel in sorted(known ^ runtime_pointers):
-        errors.append("install.py HARNESS_POINTERS and sdlc.py POINTER_FILES disagree on %r" % rel)
+        errors.append("the harness records and sdlc.py V5_POINTER_FILES (the fallback) disagree "
+                      "on %r" % rel)
+    # V5_AGENTS is the fallback for an install with no registry (made before 6.0), so it
+    # covers the v5 tools only. Those records must agree with it; a tool added since 6.0
+    # (OpenCode, Kiro, ACP) lives only in its built-in extension.
+    reg_agents = install.REGISTRY.agents()
+    v5_agents = dict((aid, rec) for aid, rec in reg_agents.items()
+                     if aid in runtime_sdlc.V5_AGENTS)
+    for kind in ("review", "build"):
+        if install.REGISTRY_MOD.agent_table_of(v5_agents, kind) != runtime_sdlc.v5_agent_table(kind):
+            errors.append("the agents records and sdlc.py V5_AGENTS (the fallback) disagree on "
+                          "the %s argv" % kind)
+    if install.REGISTRY_MOD.identity_env_of(v5_agents) != runtime_sdlc.v5_identity_env():
+        errors.append("the agents records and sdlc.py V5_AGENTS disagree on the identity variables")
+    for aid in sorted(set(runtime_sdlc.V5_AGENTS) - set(reg_agents)):
+        errors.append("agent %r is in sdlc.py V5_AGENTS but in no agents record" % aid)
+    for aid in sorted(set(reg_agents) - set(runtime_sdlc.V5_AGENTS)):
+        owner = reg_agents[aid].get("extension")
+        if owner in ("core", "claude", "codex", "gemini", "cursor"):
+            errors.append("agent %r is in built-in extension %s but not in sdlc.py V5_AGENTS"
+                          % (aid, owner))
     for alias, targets in sorted(install.HARNESS_ALIASES.items()):
         for rel in targets:
             if rel not in known:
@@ -432,6 +452,66 @@ def no_private_leaks(errors):
                           % (path.relative_to(ROOT), match.group(0)))
 
 
+def self_install_version(errors, version):
+    """The kit installed into this repository must carry the VERSION it was released as.
+    tools/semver.py bump restamps it; this catches a release that skipped the restamp."""
+    stamps = []
+    for rel in (".ai-sdlc/manifest.json", ".ai-sdlc/profile.json"):
+        path = ROOT / rel
+        if path.is_file():
+            try:
+                stamps.append((rel, json.loads(path.read_text(encoding="utf-8")).get("kit_version")))
+            except ValueError:
+                errors.append("%s is not valid JSON" % rel)
+    agents = ROOT / "AGENTS.md"
+    if agents.is_file():
+        found = re.search(r"<!-- Nuhut kit v([^ ]+?)\. ", agents.read_text(encoding="utf-8"))
+        if found:
+            stamps.append(("AGENTS.md", found.group(1)))
+    for rel, stamp in stamps:
+        if stamp != version:
+            errors.append("%s says kit_version %s but VERSION is %s; run python3 tools/semver.py "
+                          "restamp" % (rel, stamp, version))
+
+
+def release_matches_changelog(errors, version):
+    """CHANGELOG's Unreleased section and the docs' example extension ranges must agree
+    with the version the release job would compute (tools/semver.py next). An
+    "Upgrading to N.0" heading with no commit that makes a major would ship as a minor.
+    Skipped without full git history (an archive, a shallow CI checkout)."""
+    import subprocess
+    try:
+        shallow = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=str(ROOT),
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 universal_newlines=True)
+        if shallow.returncode != 0 or shallow.stdout.strip() != "false":
+            return
+        sys.path.insert(0, str(ROOT / "tools"))
+        import semver as _semver                       # noqa: E402
+        nxt = _semver.plan(str(ROOT))["next"]
+    except (OSError, SystemExit, subprocess.SubprocessError, ValueError):
+        return
+    finally:
+        if sys.path and sys.path[0] == str(ROOT / "tools"):
+            sys.path.pop(0)
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    unreleased = text.split("## Unreleased", 1)[-1].split("\n## ", 1)[0]
+    for major in re.findall(r"(?m)^### Upgrading to ([0-9]+)\.0\b", unreleased):
+        if nxt.split(".")[0] != major:
+            errors.append("CHANGELOG.md Unreleased says \"Upgrading to %s.0\" but the next "
+                          "release computes to %s: land a commit with a `BREAKING CHANGE:` "
+                          "footer (or `type!:`), or retitle the section" % (major, nxt))
+    import registry as _registry                       # noqa: E402  (optional/runtime)
+    for rel in ("docs/extensions.md", "handbook/project/adr/0003-extension-system.md"):
+        path = ROOT / rel
+        if not path.is_file():
+            continue
+        for spec in re.findall(r'"nuhut":\s*"(>=[^"]+)"', path.read_text(encoding="utf-8")):
+            if not _registry.version_ok(spec, nxt):
+                errors.append("%s: the example range %r refuses the next release %s, so the "
+                              "example does not install" % (rel, spec, nxt))
+
+
 def main():
     if sys.argv[1:] == ["--reading-lists"]:
         print_reading_lists()
@@ -482,6 +562,74 @@ def main():
         elif "{{" in runtime.read_text(encoding="utf-8"):
             errors.append("optional/runtime/%s contains a double brace, which the installer "
                           "would substitute; spell it '[{][{]'" % name)
+    # Built-in extensions: schema-valid, named after their directory, and always in range.
+    import registry as _registry                       # noqa: E402  (optional/runtime)
+    ext_paths = sorted((ROOT / "optional" / "extensions").glob("*/" + _registry.MANIFEST))
+    if not ext_paths:
+        errors.append("optional/extensions/ has no built-in extension manifests")
+    for path in ext_paths:
+        rel = path.relative_to(ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        if "{{" in text:
+            errors.append("%s contains a double brace, which the installer would substitute" % rel)
+        try:
+            data = json.loads(text)
+        except ValueError as exc:
+            errors.append("%s is not valid JSON: %s" % (rel, exc))
+            continue
+        problems, warnings = _registry.validate(data)
+        for field, message in problems + warnings:
+            errors.append("%s: %s: %s" % (rel, field, message))
+        if isinstance(data, dict) and data.get("id") != path.parent.name:
+            errors.append("%s: id: %r does not match its directory" % (rel, data.get("id")))
+        if isinstance(data, dict) and data.get("nuhut") != "builtin":
+            errors.append("%s: nuhut: a built-in extension says \"builtin\"" % rel)
+    release_matches_changelog(errors, version)
+    # The kit's own Claude Code plugin is generated from core's `package` block (NUHT-019).
+    core_path = ROOT / "optional" / "extensions" / "core" / _registry.MANIFEST
+    plugin_path = ROOT / ".claude-plugin" / "plugin.json"
+    if core_path.is_file() and plugin_path.is_file():
+        try:
+            core = json.loads(core_path.read_text(encoding="utf-8"))
+            want = dict(_registry.package_files(core, "claude", version))
+            want = json.loads(want[".claude-plugin/plugin.json"])
+            have = json.loads(plugin_path.read_text(encoding="utf-8"))
+        except (ValueError, KeyError, AttributeError) as exc:
+            want, have = None, None
+            errors.append(".claude-plugin/plugin.json cannot be checked against core's "
+                          "package block: %s" % exc)
+        if want is not None and want != have:
+            errors.append(".claude-plugin/plugin.json differs from what "
+                          "optional/extensions/core/nuhut-extension.json generates; edit "
+                          "core's package block, then run python3 .ai-sdlc/bin/sdlc.py ext "
+                          "package core --for claude --out .")
+    reg = _registry.load(None, kit=str(ROOT), warn=False, use_cache=False)
+    for note in reg.notes:
+        errors.append("%s: %s" % (note["path"], note["message"]))
+    # The extension catalog (`sdlc.py ext search`): every entry passes the same URL rules
+    # as `ext add`, and VERSION satisfies every non-built-in range it lists.
+    import ext as _ext                                 # noqa: E402  (optional/runtime)
+    try:
+        catalog = json.loads((ROOT / "catalog.json").read_text(encoding="utf-8"))
+    except (IOError, OSError, ValueError) as exc:
+        catalog = None
+        errors.append("catalog.json is missing or not valid JSON: %s" % exc)
+    if catalog is not None and not isinstance(catalog, list):
+        errors.append("catalog.json: expected a list of {id, url, ref, description}")
+    for n, entry in enumerate(catalog if isinstance(catalog, list) else []):
+        problem = _ext.check_entry(_registry, entry, None)
+        if problem:
+            errors.append("catalog.json[%d]: %s" % (n, problem))
+            continue
+        spec = entry.get("nuhut")
+        if spec and spec != "builtin":
+            try:
+                if not _registry.version_ok(spec, version):
+                    errors.append("catalog.json[%d] %s: nuhut %s excludes VERSION %s"
+                                  % (n, entry["id"], spec, version))
+            except ValueError as exc:
+                errors.append("catalog.json[%d] %s: nuhut: %s" % (n, entry["id"], exc))
+
     for rel in ("optional/runtime/sdlc.py", "benchmarks/effort-modes/score.py",
                 "benchmarks/effort-modes/measure.py",
                 "benchmarks/kit-value/score.py", "benchmarks/kit-value/measure.py"):
@@ -575,6 +723,7 @@ def main():
     card_fidelity(errors)
     single_viewer(errors)
     docs_stay_true(errors)
+    self_install_version(errors, version)
     reading_budget(errors)
     no_private_leaks(errors)
 

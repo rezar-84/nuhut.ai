@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-016",
+  "title": "ADR 0003 and registry.py: nuhut-extension.json manifest, loader, version range",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "architect",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    "optional/runtime/registry.py",
+    "install.py",
+    "optional/runtime/sdlc.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "Owner (rezar-84) directed implementation of the v6 roadmap on kit-v6 on 2026-11-22; merge to main stays a human approval",
+  "approvers": [],
+  "waiting_on": "rezar-84",
+  "park_reason": "Approve ADR 0003 (extension system) and the NUHT-016 plan",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

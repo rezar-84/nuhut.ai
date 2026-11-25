@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-015",
+  "title": "install.sh version floor and wording; finish swallows exceptions silently",
+  "type": "defect",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "install.sh",
+    "optional/runtime/finish.py",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

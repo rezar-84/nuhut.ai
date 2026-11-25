@@ -12,4 +12,8 @@ An S0 or S1 in production is also an incident: it gets a postmortem in `../postm
 
 | ID | Defect | Severity | Found by | Status |
 | --- | --- | --- | --- | --- |
-| | | | | |
+| NUHT-010 | Guided installer draws 40 columns on Python 3.8-3.10 when the terminal reports size 0 | unrated | — | Done |
+| NUHT-011 | Self-install kit_version drifts from VERSION after a release | unrated | — | Done |
+| NUHT-012 | finish accepts stale, stage-only or self-waived verify evidence | unrated | — | Ready |
+| NUHT-013 | Test-lock and protected-path guards miss shell writes (sed -i, redirects, tee, python -c) | unrated | — | Done |
+| NUHT-015 | install.sh version floor and wording; finish swallows exceptions silently | unrated | — | Done |

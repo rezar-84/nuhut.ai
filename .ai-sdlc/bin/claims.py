@@ -15,7 +15,7 @@ same files (from item `touch` globs, plan "Files that change", or spec deltas). 
 items still require a written plan file before scheduling; single-writer files -- the
 charter, migrations, lockfiles, and charter Single-writer globs -- always conflict.
 
-Called by sdlc.py (claim, release, claims, parallel, next-id), doctor and view.py.
+Called by sdlc.py (claim, unclaim, claims, parallel, next-id), doctor and view.py.
 Standard library only. This file must never contain two opening braces in a row.
 """
 
@@ -98,6 +98,159 @@ def main_worktree(project):
 def is_main_worktree(project):
     main = main_worktree(project)
     return bool(main) and os.path.realpath(main) == os.path.realpath(project.root)
+
+
+# ---------------------------------------------------------------- worktree scripts
+
+WORKTREE_SCRIPTS_LABEL = "Worktree scripts"
+WORKTREE_SCRIPT_KEYS = ("setup", "teardown", "port")
+DEFAULT_PORT_BASE = 4100
+SCRIPT_TIMEOUT = 1800
+_KEY_SPLIT = re.compile(r";\s*(?=(?:setup|teardown|port)\s*:)", re.I)
+
+
+def _charter_cell(text, label):
+    for line in (text or "").splitlines():
+        body = line.strip()
+        if not (body.startswith("|") and body.endswith("|")):
+            continue
+        cells = [c.strip().replace("\\|", "|") for c in re.split(r"(?<!\\)\|", body[1:-1])]
+        if len(cells) >= 2 and cells[0] == "**%s**" % label:
+            return cells[1]
+    return None
+
+
+def parse_worktree_scripts(raw):
+    """{"setup", "teardown", "port_base", "error"} from a `setup: <cmd>; teardown: <cmd>`
+    value. Blank, the template hint, or `none` means no scripts. An optional `port: <n>`
+    part sets the first port handed out (default 4100)."""
+    conf = {"setup": "", "teardown": "", "port_base": DEFAULT_PORT_BASE, "error": ""}
+    text = re.sub(r"_\([^)]*\)_", "", raw or "").strip()
+    if not text or text.strip("`").strip().lower() in ("none", "absent", "-"):
+        return conf
+    for part in _KEY_SPLIT.split(text):
+        key, sep, val = part.partition(":")
+        key = key.strip().strip("`").strip().lower()
+        val = val.strip().strip("`").strip()
+        if not sep or key not in WORKTREE_SCRIPT_KEYS:
+            conf["error"] = ("the charter's Worktree scripts row must read `setup: <cmd>; teardown: "
+                             "<cmd>` (or none), not %r" % text)
+            return conf
+        if key == "port":
+            if not val.isdigit() or not 1024 <= int(val) <= 65000:
+                conf["error"] = "Worktree scripts port must be a number from 1024 to 65000, not %r" % val
+                return conf
+            conf["port_base"] = int(val)
+        else:
+            conf[key] = val
+    return conf
+
+
+def worktree_scripts(project):
+    return parse_worktree_scripts(_charter_cell(getattr(project, "charter", "") or "",
+                                                WORKTREE_SCRIPTS_LABEL))
+
+
+def _port_free(port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def _ports_held(folder):
+    held = set()
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return held
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as h:
+                port = json.load(h).get("port")
+        except (IOError, OSError, ValueError, AttributeError):
+            continue
+        if isinstance(port, int):
+            held.add(port)
+    return held
+
+
+def allocate_port(folder, base):
+    """The lowest port from base that no live claim holds and nothing on this host listens on."""
+    held = _ports_held(folder)
+    for port in range(base, min(base + 2000, 65536)):
+        if port not in held and _port_free(port):
+            return port
+    return 0
+
+
+def run_worktree_script(project, record, which):
+    """Run the charter's setup or teardown command in the record's worktree. None when no
+    command is set; otherwise a result whose `ok` is False on any failure, never raised."""
+    conf = worktree_scripts(project)
+    if conf["error"]:
+        return {"stage": which, "command": "", "ok": False, "exit_code": None,
+                "output": "", "error": conf["error"]}
+    command = conf.get(which) or ""
+    if not command:
+        return None
+    wt = record.get("worktree") or ""
+    result = {"stage": which, "command": command, "ok": False, "exit_code": None,
+              "output": "", "error": ""}
+    if not wt or not os.path.isdir(wt):
+        result["error"] = "%s script not run: the worktree %s does not exist" % (which, wt or "(none)")
+        return result
+    env = dict(os.environ)
+    env.update({
+        "NUHUT_ITEM": record.get("id") or "",
+        "NUHUT_PORT": str(record.get("port") or ""),
+        "NUHUT_WORKTREE": wt,
+        "NUHUT_BRANCH": record.get("branch") or "",
+        "NUHUT_MAIN_WORKTREE": main_worktree(project) or project.root,
+    })
+    try:
+        p = subprocess.run(command, shell=True, cwd=wt, env=env, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=SCRIPT_TIMEOUT)
+        result["exit_code"] = p.returncode
+        result["output"] = (p.stdout or b"").decode("utf-8", "replace")[-2000:]
+        result["ok"] = p.returncode == 0
+        if not result["ok"]:
+            result["error"] = "%s script `%s` exited %d" % (which, command, p.returncode)
+    except subprocess.TimeoutExpired as exc:
+        result["output"] = (exc.output or b"").decode("utf-8", "replace")[-2000:]
+        result["error"] = "%s script `%s` timed out after %ds" % (which, command, SCRIPT_TIMEOUT)
+    except OSError as exc:
+        result["error"] = "%s script `%s` could not start: %s" % (which, command, exc)
+    return result
+
+
+def _save_record(project, record):
+    folder = registry(project)
+    if not folder:
+        return
+    kept = dict((k, v) for k, v in record.items() if k not in ("setup_result", "teardown_result"))
+    try:
+        with open(os.path.join(folder, record["id"] + ".json"), "w", encoding="utf-8") as h:
+            json.dump(kept, h, indent=2)
+    except (IOError, OSError):
+        pass
+
+
+def run_setup(project, record):
+    """Run setup for a fresh claim and note the outcome on the claim record. Returns the
+    script result (None when no setup command is set)."""
+    res = run_worktree_script(project, record, "setup")
+    if res is not None:
+        record["setup"] = {"ok": res["ok"], "exit_code": res["exit_code"]}
+        record["setup_result"] = res
+        _save_record(project, record)
+    return res
 
 
 # ---------------------------------------------------------------- git CAS helpers
@@ -445,8 +598,13 @@ def _existing_item_branch(project, item):
 
 
 def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark=False,
-          base=None, sync_refs=False, remote="origin"):
-    """Returns (record, error)."""
+          base=None, sync_refs=False, remote="origin", person=None, run_setup_script=True):
+    """Returns (record, error). <person> is the people.json handle of the human behind
+    the agent (sdlc.person_identity), or None when it is not known: recorded as null,
+    never guessed. With a worktree and the charter's Worktree scripts set, the record
+    carries a port, and setup runs in the new worktree unless run_setup_script is False
+    (the caller then calls run_setup). A failed setup keeps the claim; the record's
+    `setup` says so and the caller reports it."""
     backlog = items(project, view_mod)
     it = backlog.get(item)
     if not it:
@@ -483,6 +641,7 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
     record = {
         "id": item,
         "agent": agent,
+        "person": person or None,
         "branch": branch,
         "worktree": path or "",
         "since": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -491,11 +650,30 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
     }
     if sync_refs:
         record["synced"] = True
+    scripts = worktree_scripts(project) if path else None
+    wants_port = bool(scripts and (scripts["setup"] or scripts["teardown"]))
 
+    if path and not base and not _git(project, "rev-parse", "--verify", "--quiet", "HEAD").strip():
+        # On an unborn HEAD `git worktree add -b` makes an empty orphan checkout: none of
+        # the kit's files, nothing to build on.
+        return None, ("this repository has no commits yet, so a worktree would be empty: "
+                      "commit the kit first (`git add -A && git commit`), or claim with "
+                      "--no-worktree")
     target = os.path.join(folder, item + ".json")
+    port_lock = os.path.join(folder, ".ports.lock")
+    locked = _acquire_lock(port_lock) if wants_port else False
+    if wants_port and not locked:
+        # Without the lock, the port pick and the claim file are not atomic between
+        # claims, and two worktrees could get the same NUHUT_PORT.
+        return None, ("could not take %s within 5 s to allocate a port: another claim holds it. "
+                      "Try again; a lock left by a crashed claim clears after 15 s" % port_lock)
     try:
+        if wants_port:
+            record["port"] = allocate_port(folder, scripts["port_base"]) or None
         fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
     except FileExistsError:
+        if locked:
+            os.unlink(port_lock)
         try:
             with open(target, encoding="utf-8") as h:
                 held = json.load(h)
@@ -506,6 +684,11 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
         )
     with os.fdopen(fd, "w", encoding="utf-8") as h:
         json.dump(record, h, indent=2)
+    if locked:
+        try:
+            os.unlink(port_lock)
+        except OSError:
+            pass
 
     if sync_refs:
         commit_sha, c_err = _commit_json_blob(
@@ -559,6 +742,8 @@ def claim(project, view_mod, item, agent, worktree=None, no_worktree=False, mark
             return None, "git branch failed: %s" % (err_s or out_s)
     if mark:
         mark_status(project, item, it, "In progress")
+    if path and run_setup_script:
+        run_setup(project, record)
     return record, None
 
 
@@ -639,6 +824,8 @@ def release(project, item, remove_worktree=False, agent=None, force=False,
             record = remote_rec
 
     if not record:
+        if item not in shards.merged_items(project):
+            return None, shards.not_found(project, item, "is not in the backlog")
         return None, "%s is not claimed" % item
 
     if not force:
@@ -654,6 +841,15 @@ def release(project, item, remove_worktree=False, agent=None, force=False,
         ok, status_out, _ = _git_ok(wt, "status", "--porcelain")
         if status_out:
             return None, "the worktree %s has uncommitted changes; commit or stash them first" % wt
+        down = run_worktree_script(project, record, "teardown")
+        if down is not None:
+            record["teardown"] = {"ok": down["ok"], "exit_code": down["exit_code"]}
+            record["teardown_result"] = down
+            if not down["ok"] and not force:
+                tail = down["output"].strip()
+                return None, ("%s; nothing was released and the worktree is kept. Fix it and "
+                              "release again, or pass --force to remove the worktree anyway%s" % (
+                                  down["error"], ("\n" + tail) if tail else ""))
         ok, out_s, err_s = _git_ok(project.root, "worktree", "remove", wt)
         if not ok:
             return None, "git worktree remove failed: %s" % (err_s or out_s)
@@ -755,11 +951,18 @@ def parallel(project, rt, view_mod, sync_refs=False, remote="origin"):
     backlog = items(project, view_mod)
     held = set(c["id"] for c in list_claims(project, sync_refs=sync_refs, remote=remote))
     custom_sw = _charter_single_writers(project, rt)
-    candidates, no_plan = [], []
+    candidates, no_plan, built = [], [], []
+    commits = rt.commit_index(project)
     for item, it in backlog.items():
         if it["column"] != "Next" or item in held:
             continue
         if any(d in backlog and backlog[d]["column"] != "Done" for d in it["depends"]):
+            continue
+        # A Ready item whose own commits already change code was built and not finished:
+        # scheduling it again would build it twice. Records-only commits (a plan) don't count.
+        if any(not rt.records_path(project, path)
+               for sha, _, _ in commits.get(item, ()) for path in rt.commit_paths(project, sha)):
+            built.append({"id": item, "title": it["title"], "tier": it.get("tier") or "2"})
             continue
         plan_paths = rt.planned_paths(plan_text(project, item, rt) or "")
         # Tier 1 items always owe a written plan before scheduling, even if touch globs exist.
@@ -813,6 +1016,7 @@ def parallel(project, rt, view_mod, sync_refs=False, remote="origin"):
         "candidates": candidates,
         "conflicts": conflicts,
         "plan_first": sorted(no_plan, key=lambda x: x["id"]),
+        "built": sorted(built, key=lambda x: x["id"]),
         "claimed": sorted(held),
     }
 
@@ -833,8 +1037,8 @@ def check(project, out, view_mod, window_days, today=None):
                 "warn",
                 "claims",
                 where,
-                "%s is %s but still claimed by %s; release it: "
-                "python3 .ai-sdlc/bin/sdlc.py release %s"
+                "%s is %s but still claimed by %s; unclaim it: "
+                "python3 .ai-sdlc/bin/sdlc.py unclaim %s"
                 % (c["id"], it["status"], c.get("agent", "?"), c["id"]),
             )
             continue
@@ -850,7 +1054,7 @@ def check(project, out, view_mod, window_days, today=None):
                 "claims",
                 where,
                 "claimed by %s %d days ago with no commit on %s since; "
-                "re-claim it deliberately or release it"
+                "re-claim it deliberately or unclaim it"
                 % (c.get("agent", "?"), (today - since).days, c.get("branch", "?")),
             )
     branches = _git(project, "for-each-ref", "--format=%(refname:short)", "refs/heads").split()

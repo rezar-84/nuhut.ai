@@ -120,6 +120,9 @@ python3 .ai-sdlc/bin/sdlc.py claim ACME-12   # atomic claim, its branch, its own
 python3 .ai-sdlc/bin/sdlc.py parallel        # which Ready items can run side by side
 ```
 
+Joining a project someone else set up? [The joining checklist](docs/joining.md) ends
+with `sdlc.py status`, which says what to do next on your branch.
+
 Claims are shared by every worktree, so a second agent is refused. `parallel` groups
 Ready items whose plans touch different files, and treats migrations, lockfiles and the
 charter as single-writer. [Multi-agent work](docs/multi-agent.md).
@@ -153,12 +156,15 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 
 | | |
 | --- | --- |
-| **Records and checks** | `doctor` audit the records · `verify` run the checks, keep the evidence · `bite` prove a test catches the change · `plan-check` diff vs plan (`--pre` before the build) · `finish` close an item: evidence, review, worklog draft, status · `render` materialise `backlog.md` and `worklog.md` from shards |
-| **Viewer and reports** | `view` the project as one page (`--serve` live) · `lens` stack, build, security, deploy, env, agents · `audit` vulnerable packages · `metrics` process measures |
-| **Work items and agents** | `item` per-item shards · `next-id` atomic ID allocation · `claim` / `release` / `claims` · `parallel` · `dispatch` headless multi-worker queue execution · `trailers` commit trailers · `sync` behind the remote? conflicts? · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run |
+| **Start here** | `status` what to do next: missing setup, your items and the step each owes, Parked on you, Ready to take |
+| **Records and checks** | `doctor` audit the records · `verify` run the checks, keep the evidence · `bite` prove a test catches the change · `plan-check` diff vs plan (`--pre` before the build) · `ci-check` a pull request's trailers, ledger records, Tier 1 reviews and tier floor · `finish` close an item: evidence, review, worklog draft, status · `approvals` merge approvals from the item branch's GitHub PR reviews · `approve` an approver approves in their own terminal · `render` materialise `backlog.md` and `worklog.md` from shards · `merge-shard` the git merge driver for item shards (`fix merge-driver` turns it on) |
+| **Viewer and reports** | `view` the project as one page (`--serve` live) · `lens` stack, build, security, deploy, env, agents · `audit` vulnerable packages · `metrics` process and DORA delivery measures |
+| **Work items and agents** | `item` per-item shards · `hotfix` the hotfix fast path, retroactive review owed · `bug` report a defect with its severity; open S0–S2 defects show at session start and in `status` · `rerate` a blind severity re-rating by another agent, needed before an agent lowers S0–S2 · `next-id` atomic ID allocation · `claim` / `unclaim` / `claims` (`release` is the deprecated old name) · `parallel` · `dispatch` headless multi-worker queue execution · `trailers` commit trailers · `sync` behind the remote? conflicts? · `review` independent review · `log` worklog lines from commits · `guard` the finish reminder the session hooks run · `mcp` the records as read-only MCP tools (`install.sh --mcp` registers it) |
+| **Releases and deploys** | `deploy record` which version went to which environment, with its commits and items · `deploy list` what runs where |
 | **Specs** | `spec list \| show \| validate \| apply` |
 | **Writing** | `slop` find the phrasings that read as machine-written (`--strict` fails the file) |
-| **Setup** | `config` see or change the charter's constraints · `fix` safe repairs |
+| **Setup** | `config` see or change the charter's constraints · `fix` safe repairs · `ext` add, update, remove, search and package [extensions](docs/extensions.md) as Claude Code, Gemini, Codex or Kiro plugins · `notify` the webhook for items that wait on a person (`--test` sends one) |
+| **Extension commands** | `issues pull` park GitHub issues that no item maps to · `issues push` open issues for the items you name (the `github-issues` built-in, through `gh`) |
 
 In Claude Code: `/sdlc-plan`, `/sdlc-build`, `/sdlc-verify`, `/sdlc-review`, `/sdlc-finish`, `/sdlc-log`,
 `/sdlc-doctor`, `/sdlc-slop`. Every flag: [command reference](docs/cli.md).
@@ -248,13 +254,31 @@ always ran, bugs got a failing test first, and work was traceable. It also cost 
 times the tokens and time of no kit, with no measured gain in correctness on a strong
 model. Some of the benchmark's own checks were biased against the kit.
 
-4.x fixes the benchmark ([v2 changes](benchmarks/kit-value/README.md#v2-changes)) and cuts
+4.x fixed the benchmark ([v2 changes](benchmarks/kit-value/README.md#v2-changes)) and cut
 what the kit makes an agent read and write. The comparison against the 3.5.0 kit (tag
-`bench-baseline-v0`) has not run yet. Until it does, no claim is made that 4.x is cheaper
-or better in practice.
+`bench-baseline-v0`) has still not run, for 4.x, 5.x or 6.0. Until it does, no claim is
+made that the kit is cheaper or better in practice.
 
 The installer, runtime, viewer, hooks and benchmark code are tested (`validate.py`,
 `tests/smoke.py`, CI).
+
+### What the kit enforces, and what it only records
+
+Everything the kit runs, runs where the agent runs. A check is only as strong as the place
+it runs:
+
+| Rule | Checked by | Can an agent in the same environment get around it? |
+| --- | --- | --- |
+| A commit names its work item (`Work-Item:` trailer) | the commit hook, then `ci-check` in CI | Locally yes; in CI only if the host requires the CI job |
+| `finish` needs a full `verify` run on the item's newest code commit | `finish`, then `ci-check` in CI | Locally yes (the ledger is a file); in CI only if required |
+| Locked tests, kit files and protected paths are not edited | the agent tool's hooks, when installed with `--hooks` | Yes, from a tool without hooks or a shell the hook cannot read |
+| Tier 1 needs approvals | `finish` reads GitHub PR reviews from people in Approvers | Only GitHub branch protection with required reviews stops a merge |
+| Local approvals, verify waivers, severity re-ratings | recorded with who and when | Yes. They are unsigned records of intent, not proof of identity |
+| A review came from another model family | the review file's Independence field | Yes. It is what the review says about itself |
+
+Enforcement that an agent cannot get around comes from outside its environment: branch
+protection on the git host with required reviews, and the kit's CI job as a required
+check. `doctor` reports when the CI job exists but nothing requires it.
 
 ## Contributing, security, licence
 

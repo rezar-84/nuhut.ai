@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-027",
+  "title": "Release records and deploy ledger (environment, version, items); rename claim release to unclaim",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "devops-sre",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    "optional/runtime/"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 3 (delivery): after Phase 2",
+  "dropped_reason": ""
+}

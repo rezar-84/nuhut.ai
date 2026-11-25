@@ -24,11 +24,13 @@ Before starting, take the item. With the runtime installed that is one command:
 - The claim is a file in the repository's shared git directory, which every worktree of
   the clone sees. It is created atomically, so a second agent asking for the same item is
   refused.
-- The command also creates the item's branch and its own worktree.
+- The command also creates the item's branch and its own worktree, and runs the
+  charter's **Worktree scripts** setup there when that row is set.
 - `--mark` sets the backlog row to `In progress`, from the main worktree only. Marking
   rows in several worktrees produces conflicting backlog edits at merge time.
 
-`sdlc.py claims` lists who holds what, and `sdlc.py release <ID>` frees an item.
+`sdlc.py claims` lists who holds what, and `sdlc.py unclaim <ID>` frees an item
+(`release` is its deprecated old name, removed in 7.0).
 
 Without the runtime, take the claim by hand: set the backlog row's **Owner** column to your
 agent identity and its status to `In progress`, and commit that edit on its own. Taking an

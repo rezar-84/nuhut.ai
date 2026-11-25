@@ -64,6 +64,11 @@ STATUS_ALIASES = {
 
 ITEM_TYPES = ("feat", "fix", "defect", "chore", "docs", "refactor", "test")
 EFFORT_MODES = ("", "Lean", "Normal", "Beast")
+APPROVER_FIELDS = ("handle", "login", "source", "commit", "at")
+SEVERITIES = ("S0", "S1", "S2", "S3", "S4")
+# Severities an agent is told about at session start and in status (CARD.md: S0 stop,
+# S1 release blocker, S2 blocker unless waived).
+URGENT_SEVERITIES = ("S0", "S1", "S2")
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*-[0-9]+$")
 INLINE_TOUCH_RE = re.compile(r"(?:^|\b)touch\s*:\s*([^|;\n]+)", re.I)
 INLINE_EFFORT_RE = re.compile(r"(?:^|\beffort\s*:\s*)(Lean|Normal|Beast)\b", re.I)
@@ -233,8 +238,14 @@ def normalize_item(data, today=None):
     approvers = data.get("approvers") or []
     if isinstance(approvers, str):
         approvers = [a.strip() for a in approvers.split(",") if a.strip()]
+    # A name (before 6.0) or an approval record {"handle", "login", "source", "commit",
+    # "at"} (NUHT-024); anything else is dropped.
+    approvers = [a if isinstance(a, str) else
+                 dict((k, str(a.get(k) or "")) for k in APPROVER_FIELDS)
+                 for a in (approvers if isinstance(approvers, list) else [])
+                 if isinstance(a, str) or (isinstance(a, dict) and a.get("handle"))]
 
-    return {
+    out = {
         "id": raw_id,
         "title": str(data.get("title") or raw_id).strip(),
         "type": itype,
@@ -255,6 +266,131 @@ def normalize_item(data, today=None):
         "later_when": str(data.get("later_when") or "").strip(),
         "dropped_reason": str(data.get("dropped_reason") or "").strip(),
     }
+    # Hotfix fields are written only on a hotfix, so ordinary shards keep their shape.
+    if is_hotfix(data):
+        out["hotfix"] = True
+        out["hotfix_at"] = str(data.get("hotfix_at") or "").strip()
+        retro = str(data.get("retro_review") or "").strip()
+        if retro:
+            out["retro_review"] = retro
+    # The linked tracker issue number (NUHT-030, the github-issues extension), written only
+    # once an item has one.
+    issue = issue_number(data.get("issue"))
+    if issue:
+        out["issue"] = issue
+    # Severity (NUHT-040) is written only once an item has one, so other shards keep their
+    # shape.
+    severity = severity_of(data.get("severity"))
+    if severity:
+        out["severity"] = severity
+    found_by = str(data.get("found_by") or "").strip()
+    if found_by:
+        out["found_by"] = found_by
+    # Approvals given in a terminal (`sdlc.py approve`), severity changes and blind
+    # re-ratings: written only once there is one, each a list of flat string records.
+    for key, fields, needed in (("local_approvals", LOCAL_APPROVAL_FIELDS, ("handle", "commit")),
+                                ("severity_history", SEVERITY_CHANGE_FIELDS, ("from", "to")),
+                                ("severity_reviews", SEVERITY_REVIEW_FIELDS, ("rated",))):
+        rows = _flat_records(data.get(key), fields, needed)
+        if rows:
+            out[key] = rows
+    return out
+
+
+LOCAL_APPROVAL_FIELDS = ("handle", "commit", "at", "as")
+SEVERITY_CHANGE_FIELDS = ("from", "to", "by", "how", "review", "reason", "at")
+SEVERITY_REVIEW_FIELDS = ("by", "model", "family", "requester", "requester_family",
+                          "independent", "rated", "for", "report", "file", "at")
+
+
+def _flat_records(value, fields, needed):
+    """A list of {field: str} dicts from <value>, keeping only rows that have every
+    <needed> field."""
+    rows = []
+    for row in value if isinstance(value, list) else []:
+        if not isinstance(row, dict):
+            continue
+        flat = dict((k, str(row.get(k) or "")) for k in fields)
+        if all(flat[k] for k in needed):
+            rows.append(flat)
+    return rows
+
+
+def severity_of(value):
+    """'S0'..'S4' from 'S2', 's2' or '2'; '' for anything else."""
+    text = str(value or "").strip().upper()
+    if re.match(r"^[0-4]$", text):
+        text = "S" + text
+    return text if text in SEVERITIES else ""
+
+
+OPEN_EXCLUDED = ("done", "dropped")
+
+
+def open_defects(items, severities=None):
+    """The defect items not Done or Dropped, most severe first (no severity last), then by
+    ID. severities limits the list, e.g. URGENT_SEVERITIES."""
+    out = []
+    for item_id, it in (items or {}).items():
+        if it.get("type") != "defect":
+            continue
+        if str(it.get("status") or "").strip().lower() in OPEN_EXCLUDED:
+            continue
+        sev = it.get("severity") or ""
+        if severities is not None and sev not in severities:
+            continue
+        out.append(it)
+    order = dict((s, i) for i, s in enumerate(SEVERITIES))
+    out.sort(key=lambda it: (order.get(it.get("severity") or "", len(SEVERITIES)),
+                             _id_sort_key(it["id"])))
+    return out
+
+
+def defects_touching(items, paths):
+    """Open defects whose touch globs match one of paths (repo-relative, / separated):
+    [(item, [matched paths])]."""
+    import fnmatch
+    hits = []
+    for it in open_defects(items):
+        globs = it.get("touch") or []
+        matched = [p for p in paths for g in globs
+                   if fnmatch.fnmatch(p, g) or fnmatch.fnmatch(g, p) or p == g.rstrip("/") or
+                   (g.endswith("/**") and p.startswith(g[:-3].rstrip("/") + "/"))]
+        if matched:
+            hits.append((it, sorted(set(matched))))
+    return hits
+
+
+def defect_summary_lines(items, severities=URGENT_SEVERITIES, limit=8):
+    """One line per open defect at the given severities, for status and session start."""
+    rows = open_defects(items, severities)
+    lines = []
+    for it in rows[:limit]:
+        touch = it.get("touch") or []
+        lines.append("%s %s · %s%s" % (it["severity"], it["id"], it.get("title", ""),
+                                       (" (touches %s)" % ", ".join(touch[:3])) if touch else ""))
+    if len(rows) > limit:
+        lines.append("… and %d more: sdlc.py item list" % (len(rows) - limit))
+    return lines
+
+
+def issue_number(value):
+    """A positive issue number from an int or a digit string (an optional leading #), or
+    None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    m = re.match(r"^\s*#?(\d{1,9})\s*$", str(value or ""))
+    return int(m.group(1)) or None if m else None
+
+
+def is_hotfix(data):
+    """True when an item shard (or its raw JSON) is marked as a hotfix."""
+    value = (data or {}).get("hotfix")
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "1")
+    return value is True
 
 
 def _atomic_write_text(path, content):
@@ -416,6 +552,26 @@ def parse_raw_backlog_items(raw_backlog, prefix="", legacy_prefixes=None):
             today=date_guess,
         )
     return out
+
+
+def near_id(known, item_id):
+    """The ID in <known> that <item_id> means when only the number's zero padding differs
+    (DEMO-1 for DEMO-001), else None."""
+    m = re.match(r"^([A-Za-z][A-Za-z0-9]*)-0*([0-9]+)$", str(item_id or ""))
+    if not m:
+        return None
+    for other in known:
+        o = re.match(r"^([A-Za-z][A-Za-z0-9]*)-0*([0-9]+)$", str(other))
+        if o and o.group(1).upper() == m.group(1).upper() and o.group(2) == m.group(2) \
+                and other != item_id:
+            return other
+    return None
+
+
+def not_found(project, item_id, what="not found"):
+    """"<ID> not found", with the ID it probably means when one differs only in padding."""
+    near = near_id(merged_items(project), item_id)
+    return "%s %s%s" % (item_id, what, "; did you mean %s?" % near if near else "")
 
 
 def merged_items(project, raw_backlog=None):
@@ -845,13 +1001,24 @@ def render(project, check_only=False):
 
     want_backlog = render_backlog_markdown(project, raw_backlog=cur_backlog)
     want_worklog = render_worklog_markdown(project, raw_worklog=cur_worklog)
+    defects_path = os.path.join(pdir, "defects", "README.md")
+    try:
+        with open(defects_path, encoding="utf-8") as handle:
+            cur_defects = handle.read()
+    except (IOError, OSError):
+        cur_defects = None
+    want_defects = render_defects_index(project, cur_defects) if cur_defects is not None else None
 
     drift = []
     files = []
     for rel_name, path, cur, want in (
         (os.path.join(project.docs, "project", "backlog.md"), backlog_path, cur_backlog, want_backlog),
         (os.path.join(project.docs, "project", "worklog.md"), worklog_path, cur_worklog, want_worklog),
+        (os.path.join(project.docs, "project", "defects", "README.md"), defects_path, cur_defects,
+         want_defects),
     ):
+        if want is None:
+            continue
         changed = cur != want
         if changed:
             drift.append(rel_name)
@@ -869,6 +1036,42 @@ def render(project, check_only=False):
         "drift": drift,
         "files": files,
     }
+
+
+DEFECT_INDEX_HEAD = "| ID | Defect | Severity | Found by | Status |"
+
+
+def _md_cell(text):
+    return str(text or "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def render_defects_index(project, current):
+    """defects/README.md with its Index table built from the defect items (NUHT-040). Rows
+    for IDs that are not items are kept, so a hand-written row is never lost. Returns the
+    text unchanged when there is no Index table to fill."""
+    lines = current.split("\n")
+    try:
+        head = next(i for i, l in enumerate(lines) if l.strip() == DEFECT_INDEX_HEAD)
+    except StopIteration:
+        return current
+    end = head + 2
+    while end < len(lines) and lines[end].strip().startswith("|"):
+        end += 1
+    items = merged_items(project)
+    defects = sorted((it for it in items.values() if it.get("type") == "defect"),
+                     key=lambda it: _id_sort_key(it["id"]))
+    rows = ["| %s | %s | %s | %s | %s |" % (it["id"], _md_cell(it.get("title")),
+                                             it.get("severity") or "unrated",
+                                             _md_cell(it.get("found_by")) or "—", it["status"])
+            for it in defects]
+    known = set(it["id"] for it in defects)
+    for line in lines[head + 2:end]:
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if cells and cells[0] and cells[0] not in known:
+            rows.append(line)
+    if not rows:
+        rows = ["| | | | | |"]
+    return "\n".join(lines[:head + 2] + rows + lines[end:])
 
 
 def migrate_shards(rt, project, apply=False):
@@ -950,3 +1153,225 @@ def migrate_shards(rt, project, apply=False):
         )
     )
     return report
+
+
+# ---------------------------------------------------------------------------
+# Field-level 3-way merge of items/<ID>.json, run by git as the "nuhut-shard" merge driver:
+#   git config merge.nuhut-shard.driver "<python> <sdlc.py> merge-shard %O %A %B"
+# The result is written to %A. Exit 0 = merged cleanly, 1 = conflict markers written,
+# 2 = a file could not be read or parsed (then %A is left exactly as it was).
+
+MERGE_DRIVER_NAME = "nuhut-shard"
+# A governance field both sides changed differently is a human decision, never a merge.
+MERGE_CONFLICT_FIELDS = ("approvers", "waivers", "status", "hotfix", "owner", "issue")
+# Append-only history: the union keeps every entry either side recorded.
+MERGE_HISTORY_FIELDS = ("history",)
+# An 'updated' stamp further ahead of this machine's clock than this is ignored.
+MERGE_FUTURE_SLACK = datetime.timedelta(minutes=5)
+MERGE_MAX_BYTES = 4 * 1024 * 1024
+_ABSENT = object()
+
+
+class ShardMergeError(Exception):
+    pass
+
+
+def _merge_load(path, allow_empty=False):
+    try:
+        if os.path.getsize(path) > MERGE_MAX_BYTES:
+            raise ShardMergeError("%s is larger than %d bytes" % (path, MERGE_MAX_BYTES))
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        text = raw.decode("utf-8")
+    except (IOError, OSError, UnicodeDecodeError) as exc:
+        raise ShardMergeError("cannot read %s: %s" % (path, exc))
+    if allow_empty and not text.strip():
+        return {}
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ShardMergeError("%s is not valid JSON: %s" % (path, exc))
+    if not isinstance(data, dict):
+        raise ShardMergeError("%s is not a JSON object" % path)
+    return data
+
+
+def _merge_when(value, now):
+    """Parse an 'updated' stamp to a naive local datetime; None when absent, unparseable,
+    or more than MERGE_FUTURE_SLACK ahead of now (a skewed or forged clock never wins)."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    when = None
+    try:
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+            when = datetime.datetime.strptime(raw, "%Y-%m-%d")
+        else:
+            iso = raw[:-1] + "+00:00" if raw.endswith(("Z", "z")) else raw
+            when = datetime.datetime.fromisoformat(iso.replace(" ", "T", 1))
+            if when.tzinfo is not None:
+                when = when.astimezone().replace(tzinfo=None)
+    except (ValueError, OverflowError):
+        return None
+    if when > now + MERGE_FUTURE_SLACK:
+        return None
+    return when
+
+
+def _merge_key(value):
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def _merge_union(base, ours, theirs):
+    out, seen = [], set()
+    for seq in (base, ours, theirs):
+        for entry in seq:
+            k = _merge_key(entry)
+            if k not in seen:
+                seen.add(k)
+                out.append(entry)
+    return out
+
+
+def _merge_set(base, ours, theirs):
+    """3-way set merge: an entry stays unless a side removed it; additions from both sides
+    are kept. Order follows base, then ours, then theirs."""
+    bk = set(_merge_key(x) for x in base)
+    ok_ = set(_merge_key(x) for x in ours)
+    tk = set(_merge_key(x) for x in theirs)
+    out, seen = [], set()
+    for seq in (base, ours, theirs):
+        for entry in seq:
+            k = _merge_key(entry)
+            if k in seen:
+                continue
+            seen.add(k)
+            if k in bk and (k not in ok_ or k not in tk):
+                continue
+            out.append(entry)
+    return out
+
+
+def _merge_tier(ours, theirs):
+    """Tier 1 is the strictest. None when either value is not a readable tier."""
+    found = []
+    for value in (ours, theirs):
+        m = re.search(r"[123]", str(value)) if isinstance(value, (str, int)) else None
+        if not m:
+            return None
+        found.append((int(m.group(0)), value))
+    return min(found, key=lambda pair: pair[0])[1]
+
+
+def merge_item_dicts(base, ours, theirs, now=None):
+    """Return (merged_dict, conflicts) where conflicts is [(key, ours_value, theirs_value)];
+    a value is _ABSENT when that side has no such key."""
+    now = now or datetime.datetime.now()
+    keys = []
+    for src in (ours, theirs, base):
+        for k in src:
+            if k not in keys:
+                keys.append(k)
+    t_ours = _merge_when(ours.get("updated"), now)
+    t_theirs = _merge_when(theirs.get("updated"), now)
+    merged, conflicts = {}, []
+    for key in keys:
+        o = base.get(key, _ABSENT)
+        a = ours.get(key, _ABSENT)
+        b = theirs.get(key, _ABSENT)
+        if _merge_key_or_absent(a) == _merge_key_or_absent(b):
+            value = a
+        elif _merge_key_or_absent(a) == _merge_key_or_absent(o):
+            value = b
+        elif _merge_key_or_absent(b) == _merge_key_or_absent(o):
+            value = a
+        elif key == "updated":
+            stamps = [(t, v) for t, v in ((t_ours, a), (t_theirs, b)) if t is not None]
+            value = max(stamps, key=lambda pair: pair[0])[1] if stamps else (o if o is not _ABSENT else a)
+        elif key == "id":
+            raise ShardMergeError("the two sides disagree on the item ID")
+        elif key in MERGE_HISTORY_FIELDS and all(isinstance(v, list) for v in (a, b)):
+            value = _merge_union(o if isinstance(o, list) else [], a, b)
+        elif key == "tier" and _merge_tier(a, b) is not None:
+            value = _merge_tier(a, b)
+        elif key in MERGE_CONFLICT_FIELDS or key == "tier":
+            conflicts.append((key, a, b))
+            value = a
+        elif isinstance(a, list) and isinstance(b, list):
+            value = _merge_set(o if isinstance(o, list) else [], a, b)
+        elif t_ours is not None and (t_theirs is None or t_ours > t_theirs):
+            value = a
+        elif t_theirs is not None and (t_ours is None or t_theirs > t_ours):
+            value = b
+        else:
+            conflicts.append((key, a, b))
+            value = a
+        if value is not _ABSENT:
+            merged[key] = value
+    return merged, conflicts
+
+
+def _merge_key_or_absent(value):
+    return "\0absent" if value is _ABSENT else _merge_key(value)
+
+
+def _merge_field_line(key, value, indent_rest=True):
+    body = json.dumps(value, indent=2, ensure_ascii=False) if indent_rest else \
+        json.dumps(value, ensure_ascii=False)
+    return "  %s: %s" % (json.dumps(key, ensure_ascii=False), body.replace("\n", "\n  "))
+
+
+def render_merge_conflict(merged, conflicts, marker_size=7):
+    """JSON-shaped text with git-style markers around each truly conflicting field."""
+    by_key = dict((k, (a, b)) for k, a, b in conflicts)
+    keys = list(merged.keys())
+    for k in by_key:
+        if k not in keys:
+            keys.append(k)
+    lines = ["{"]
+    for i, key in enumerate(keys):
+        comma = "," if i < len(keys) - 1 else ""
+        if key in by_key:
+            a, b = by_key[key]
+            lines.append("<" * marker_size + " ours")
+            if a is not _ABSENT:
+                lines.append(_merge_field_line(key, a, indent_rest=False) + comma)
+            lines.append("=" * marker_size)
+            if b is not _ABSENT:
+                lines.append(_merge_field_line(key, b, indent_rest=False) + comma)
+            lines.append(">" * marker_size + " theirs")
+        else:
+            lines.append(_merge_field_line(key, merged[key]) + comma)
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def merge_shard_files(base_path, ours_path, theirs_path, now=None, marker_size=7):
+    """Merge three versions of an item shard into ours_path. Returns (exit_code, message)."""
+    # git passes %A relative to the worktree root (".merge_file_XXXX").
+    base_path, ours_path, theirs_path = [os.path.abspath(p) for p in (base_path, ours_path, theirs_path)]
+    try:
+        base = _merge_load(base_path, allow_empty=True)
+        ours = _merge_load(ours_path)
+        theirs = _merge_load(theirs_path)
+        ids = set(str(d.get("id") or "") for d in (base, ours, theirs) if d)
+        if len(ids) != 1 or not list(ids)[0]:
+            raise ShardMergeError("the three versions do not name one item ID (%s)"
+                                  % ", ".join(sorted(repr(i) for i in ids)))
+        merged, conflicts = merge_item_dicts(base, ours, theirs, now=now)
+        if conflicts:
+            text = render_merge_conflict(merged, conflicts, marker_size)
+        else:
+            text = json.dumps(merged, indent=2, ensure_ascii=False) + "\n"
+        mode = os.stat(ours_path).st_mode & 0o777
+        _atomic_write_text(ours_path, text)
+        os.chmod(ours_path, mode)
+    except ShardMergeError as exc:
+        return 2, "merge-shard: %s; left the file unchanged" % exc
+    except (IOError, OSError) as exc:
+        return 2, "merge-shard: cannot write the result: %s; left the file unchanged" % exc
+    item_id = list(ids)[0]
+    if conflicts:
+        return 1, "merge-shard: %s conflicts on %s; resolve the markers, then git add the file" % (
+            item_id, ", ".join(k for k, _, _ in conflicts))
+    return 0, "merge-shard: %s merged" % item_id

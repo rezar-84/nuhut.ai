@@ -15,12 +15,16 @@ This file must never contain two opening braces in a row (see sdlc.py).
 """
 
 import datetime
+import errno
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
+import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -602,6 +606,19 @@ def _build_inner(rt, project):
         model["claims"], model["parallel"] = [], {"groups": [], "conflicts": [], "plan_first": [], "candidates": [],
                                                   "error": str(exc)}
     try:
+        # people.json (default branch): a claim's person and a handle owner show by name.
+        model["people"] = dict((h, {"name": e.get("name", ""), "github": e.get("github", ""),
+                                    "roles": e.get("roles", [])})
+                               for h, e in rt.people_entries(project).items())
+    except Exception:
+        model["people"] = {}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import releases as releases_mod
+        model["deploys"] = releases_mod.view_model(project)
+    except Exception as exc:  # a broken ledger never stops the page opening
+        model["deploys"] = {"envs": {}, "skipped": 0, "records": {}, "error": str(exc)}
+    try:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import shards as shards_mod
         import dispatch as dispatch_mod
@@ -1017,6 +1034,183 @@ def read_log(rt, project, kind, run_id, stage):
     return text
 
 
+# ---------------------------------------------------------------- DORA
+
+DORA_WINDOW_DAYS = 90       # every DORA measure looks back this far
+DORA_FAILURE_DAYS = 7       # a hotfix or defect opened this soon after a deploy marks it failed
+DORA_MAX_COMMITS = 2000     # commits read per deploy range, so one huge range cannot stall a page
+PRODUCTION_ENVS = ("production", "prod", "prd", "live")
+DORA_SHA = re.compile(r"^[0-9a-f]{40,64}$")
+
+
+def _when(value):
+    """A UTC datetime from an ISO date or timestamp, or None. A bare date is midnight."""
+    m = re.match(r"^\s*(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?", str(value or ""))
+    if not m:
+        return None
+    try:
+        return datetime.datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                                 int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0))
+    except ValueError:
+        return None
+
+
+def _days(value):
+    text = "%.1f days" % value
+    return "%.1f hours" % (value * 24) if value < 1 else text
+
+
+def _n(count, word):
+    return "%d %s%s" % (count, word, "" if count == 1 else "s")
+
+
+def _failure_item(it):
+    """A hotfix (NUHT-028) or a defect item: the records that say a change went wrong."""
+    try:
+        import shards as shards_mod
+        if shards_mod.is_hotfix(it):
+            return True
+    except Exception:
+        if it.get("hotfix") is True:
+            return True
+    return str(it.get("type") or "").strip().lower() in ("defect", "bug", "incident", "hotfix")
+
+
+def dora(rt, project, now=None, env=None):
+    """The four DORA delivery measures, from the deploy ledger (sdlc.py deploy record),
+    commit dates and hotfix/defect items. Each says "not enough data" rather than guess.
+    Ledger lines are hand-editable, so a commit is passed to git only when it is a full SHA."""
+    now = now or datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
+    since = now - datetime.timedelta(days=DORA_WINDOW_DAYS)
+    out = {"env": None, "envs": [], "window_days": DORA_WINDOW_DAYS,
+           "failure_days": DORA_FAILURE_DAYS, "measures": []}
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import releases as releases_mod
+        lines, _ = releases_mod.ledger_lines(project)
+    except Exception:
+        lines = []
+    dated = []
+    for line in lines:
+        at = _when(line.get("date"))
+        if at is not None and at <= now + datetime.timedelta(minutes=5):
+            dated.append((at, line))
+    envs = sorted(set(line["env"] for _, line in dated))
+    out["envs"] = envs
+    if env is None:
+        env = next((e for e in PRODUCTION_ENVS if e in envs), None)
+        if env is None and len(envs) == 1:
+            env = envs[0]
+    out["env"] = env
+    window = "the last %d days" % DORA_WINDOW_DAYS
+
+    def add(name, value, basis, data=None):
+        out["measures"].append({"name": name, "kind": "lagging", "group": "dora", "value": value,
+                                "basis": basis, "data": data or {}})
+
+    if not envs:
+        why = "not enough data: no deploys recorded (sdlc.py deploy record --version <v> --env <env>)"
+    elif env is None:
+        why = ("not enough data: no production environment in the ledger (envs: %s); "
+               "run sdlc.py metrics --env <env>" % ", ".join(envs))
+    else:
+        why = None
+    deploys = sorted([(at, line) for at, line in dated if line["env"] == env], key=lambda p: p[0])
+    recent = [(at, line) for at, line in deploys if at >= since]
+    if why is None and not recent:
+        why = "not enough data: no deploys to %s in %s" % (env, window)
+
+    # Deploy frequency
+    if why:
+        add("Deploy frequency", why, "deploys.jsonl lines for the production environment")
+    else:
+        per_week = round(len(recent) * 7.0 / DORA_WINDOW_DAYS, 2)
+        add("Deploy frequency", "%s to %s in %s (%s per week)" % (
+            _n(len(recent), "deploy"), env, window, per_week),
+            "deploys.jsonl lines for %s; other environments are left out" % env,
+            {"env": env, "deploys": len(recent), "per_week": per_week})
+
+    # Lead time for changes: each commit's date to the first deploy whose range holds it.
+    leads, seen, ranged = [], set(), 0
+    for at, line in recent:
+        frm, to = str(line.get("from") or ""), str(line.get("to") or "")
+        if not (DORA_SHA.match(frm) and DORA_SHA.match(to)):
+            continue
+        ranged += 1
+        log = project.git("log", "--format=%H %ct", "-n", str(DORA_MAX_COMMITS), "%s..%s" % (frm, to))
+        for row in log.splitlines():
+            sha, _, stamp = row.partition(" ")
+            if sha in seen or not stamp.strip().isdigit():
+                continue
+            seen.add(sha)
+            committed = datetime.datetime.fromtimestamp(int(stamp), datetime.timezone.utc).replace(tzinfo=None)
+            if committed <= at:
+                leads.append((at - committed).total_seconds() / 86400.0)
+    lead = _median(leads)
+    basis = ("each commit's date to the %s deploy that shipped it; a deploy with no starting "
+             "commit (the first one) is left out" % (env or "production"))
+    if why:
+        add("Lead time for changes", why, basis)
+    elif lead is None:
+        add("Lead time for changes", "not enough data: no deploy to %s in %s names a commit range"
+            % (env, window), basis)
+    else:
+        add("Lead time for changes", "median %s over %s in %s" % (
+            _days(lead), _n(len(leads), "commit"), _n(ranged, "deploy")), basis,
+            {"env": env, "commits": len(leads), "deploys": ranged, "median_days": round(lead, 2)})
+
+    # Change failure rate: a failure item is laid at the newest deploy before it opened.
+    try:
+        import shards as shards_mod
+        items = shards_mod.merged_items(project)
+    except Exception:
+        items = {}
+    failures = []
+    for iid, it in items.items():
+        if not _failure_item(it) or it.get("status") == "Dropped":
+            continue
+        opened = _when(it.get("hotfix_at")) or _when(it.get("created"))
+        if opened is not None:
+            failures.append((iid, it, opened))
+    failed, culprits = {}, []
+    for iid, _, opened in sorted(failures, key=lambda f: f[2]):
+        before = [p for p in deploys if p[0] <= opened]
+        if not before:
+            continue
+        at, line = before[-1]
+        if at < since or (opened - at).days >= DORA_FAILURE_DAYS:
+            continue
+        failed.setdefault(id(line), []).append(iid)
+        culprits.append(iid)
+    basis = ("deploys to %s followed within %d days by a hotfix or defect item (laid at the "
+             "newest deploy before it opened)" % (env or "production", DORA_FAILURE_DAYS))
+    if why:
+        add("Change failure rate", why, basis)
+    else:
+        rate = 100 * len(failed) // len(recent)
+        add("Change failure rate", "%d of %d deploys (%d%%)%s" % (
+            len(failed), len(recent), rate, (": " + ", ".join(sorted(culprits)[:8])) if culprits else ""),
+            basis, {"env": env, "deploys": len(recent), "failed": len(failed), "rate": rate,
+                    "items": sorted(culprits)})
+
+    # Time to restore: a hotfix or defect item from open to Done.
+    restores, restored = [], []
+    for iid, it, opened in failures:
+        done = _when(it.get("completed"))
+        if it.get("status") != "Done" or done is None or done < since or done.date() < opened.date():
+            continue
+        restores.append(float((done.date() - opened.date()).days))
+        restored.append(iid)
+    ttr = _median(restores)
+    basis = "hotfix and defect items, hotfix time (else created date) to their Completed date"
+    if ttr is None:
+        add("Time to restore", "not enough data: no hotfix or defect item done in %s" % window, basis)
+    else:
+        add("Time to restore", "median %.1f days over %s" % (ttr, _n(len(restores), "item")), basis,
+            {"items": sorted(restored), "median_days": round(ttr, 2)})
+    return out
+
+
 def metrics(rt, project, model, today=None):
     """Process measures computed only from what the records and git already hold. Each is
     labelled leading (moves early) or lagging (confirms later), and says what it is from."""
@@ -1125,6 +1319,11 @@ def metrics(rt, project, model, today=None):
             revised += 1
     add("Plans updated after build started", "lagging", str(revised),
         "plan files changed after the item's first commit: deviations that were recorded")
+    try:
+        model["dora"] = dora(rt, project)
+    except Exception as exc:  # a broken ledger never stops the page or the report
+        model["dora"] = {"env": None, "envs": [], "measures": [], "error": str(exc)}
+    out.extend(model["dora"]["measures"])
     return out
 
 
@@ -1140,6 +1339,13 @@ def render(model, template):
 
 def print_metrics(rt, project, opts):
     model = build(rt, project)
+    env = getattr(opts, "env", None)
+    if env:
+        if not re.match(r"^[a-z0-9][a-z0-9_-]{0,31}$", env):
+            sys.stderr.write("metrics: invalid --env %r: lower-case letters, digits, _ and -\n" % (env,))
+            return 2
+        model["dora"] = dora(rt, project, env=env)
+        model["metrics"] = [m for m in model["metrics"] if m.get("group") != "dora"] + model["dora"]["measures"]
     if getattr(opts, "json", False):
         print(json.dumps(model["metrics"], indent=2))
         return 0
@@ -1204,8 +1410,9 @@ class Live(object):
     """The current model, rebuilt only when the fingerprint moves, and at most once per
     interval however many tabs are polling."""
 
-    def __init__(self, rt, project, template, interval):
+    def __init__(self, rt, project, template, interval, actions=True):
         self.rt, self.project, self.template, self.interval = rt, project, template, interval
+        self.actions = actions
         self.lock = threading.RLock()
         self.refreshing = False
         self.token = hashlib.sha256(os.urandom(32)).hexdigest()[:32]
@@ -1312,7 +1519,7 @@ class Live(object):
             if self.lens_full is not None:
                 model["lens"] = lens_summary(self.lens_full)
             model["live_interval"] = self.interval
-            model["live_actions"] = True
+            model["live_actions"] = self.actions
             new_json = json.dumps(model, ensure_ascii=False,
                                   separators=(",", ":")).encode("utf-8")
             new_page = render(model, self.template).encode("utf-8")
@@ -1340,25 +1547,106 @@ def _parse_host(raw_host):
     return raw.split(":", 1)[0]
 
 
-def _session_cookie(raw_cookie):
+def _session_cookie(raw_cookie, name="nuhut_session"):
     for part in (raw_cookie or "").split(";"):
         if "=" in part:
             k, v = part.split("=", 1)
-            if k.strip() == "nuhut_session":
+            if k.strip() == name:
                 return v.strip()
     return ""
 
 
-def _valid_origin(raw_origin, port):
+def _valid_origin(raw_origin, port, own_host=None):
+    """The Origin of a POST must be this server. Local mode knows its own addresses; remote
+    mode (own_host given) has no fixed name behind a proxy, so it compares the Origin with
+    the request's own Host header."""
     origin = (raw_origin or "").strip().lower().rstrip("/")
     if not origin:
         return False
+    if own_host is not None:
+        host = own_host.strip().lower()
+        return bool(host) and origin in ("http://" + host, "https://" + host)
     allowed = (
         "http://127.0.0.1:%d" % port,
         "http://localhost:%d" % port,
         "http://[::1]:%d" % port,
     )
     return origin in allowed
+
+
+def _query(path):
+    query = {}
+    for pair in (path.split("?", 1) + [""])[1].split("&"):
+        if "=" in pair:
+            k, v = pair.split("=", 1)
+            query[k] = v
+    return query
+
+
+TAILNET = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
+
+
+def _tailscale_ip():
+    """This machine's Tailscale IPv4 address from `tailscale ip -4`."""
+    candidates = ["tailscale"]
+    if sys.platform == "darwin":  # the Mac app ships its CLI inside the bundle
+        candidates.append("/Applications/Tailscale.app/Contents/MacOS/Tailscale")
+    missing = True
+    for exe in candidates:
+        try:
+            proc = subprocess.run([exe, "ip", "-4"], stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        missing = False
+        for line in proc.stdout.decode("utf-8", "replace").split():
+            try:
+                return str(ipaddress.IPv4Address(line.strip()))
+            except ValueError:
+                continue
+    if missing:
+        raise SystemExit("view: --host tailscale needs the tailscale command; install "
+                         "Tailscale, or pass the address with --host <ip>")
+    raise SystemExit("view: tailscale reports no IPv4 address for this machine; run "
+                     "`tailscale up`, or pass the address with --host <ip>")
+
+
+def bind_address(spec):
+    """--host as (address, is loopback). Raises SystemExit on a value that is not one."""
+    spec = (spec or "127.0.0.1").strip()
+    if spec.lower() == "localhost":
+        spec = "127.0.0.1"
+    if spec.lower() == "tailscale":
+        spec = _tailscale_ip()
+    try:
+        addr = ipaddress.ip_address(spec.strip("[]"))
+    except ValueError:
+        raise SystemExit("view: --host takes 127.0.0.1, tailscale, 0.0.0.0 or an IP address "
+                         "of this machine, not %r" % spec)
+    return str(addr), addr.is_loopback
+
+
+def _reachable_names():
+    """What another machine might use to reach a server bound to every interface: the host
+    name and the address of the default route, found without sending a packet."""
+    names = []
+    try:
+        names.append(socket.gethostname())
+    except OSError:
+        pass
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 9))  # TEST-NET-1: a UDP connect only picks a route
+        names.append(probe.getsockname()[0])
+    except OSError:
+        pass
+    finally:
+        probe.close()
+    return [n for i, n in enumerate(names) if n and n not in names[:i]]
+
+
+def _url_host(addr):
+    return "[%s]" % addr if ":" in addr else addr
 
 
 def _kill_proc_tree(proc):
@@ -1383,7 +1671,14 @@ def serve(rt, project, template, opts):
     except ImportError:  # Python < 3.7
         raise SystemExit("--serve needs Python 3.7 or newer")
     interval = max(1, int(getattr(opts, "interval", 2) or 2))
-    live = Live(rt, project, template, interval)
+    addr, loopback = bind_address(getattr(opts, "host", None))
+    # Remote mode: any bind another machine can reach. NUHUT_VIEW_REMOTE_TEST turns it on
+    # for a loopback bind too, so the smoke tests can drive it on any OS; it only adds checks.
+    remote = not loopback or os.environ.get("NUHUT_VIEW_REMOTE_TEST") == "1"
+    allow_actions = bool(getattr(opts, "allow_actions", False))
+    # The key is printed once and kept in memory only: never in a file, a log or the page.
+    access_key = secrets.token_urlsafe(32) if remote else ""
+    live = Live(rt, project, template, interval, actions=allow_actions or not remote)
     live.github = bool(getattr(opts, "github", False))
     live.include_user = not getattr(opts, "no_user", False)
 
@@ -1410,13 +1705,31 @@ def serve(rt, project, template, opts):
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
+        def _gate(self):
+            """None when the request may go on, else the reason it may not. Local mode
+            refuses any Host but this machine, so a web page cannot reach it through DNS
+            rebinding. Remote mode takes any Host (a proxy, a tailnet name) and asks for the
+            access key instead: ?k= in the address or the cookie a valid ?k= sets."""
+            if not remote:
+                host = _parse_host(self.headers.get("Host"))
+                return None if host in ("127.0.0.1", "localhost", "::1") else "forbidden"
+            given = _query(self.path).get("k", "") or _session_cookie(
+                self.headers.get("Cookie"), "nuhut_key")
+            if given and hmac.compare_digest(given.encode("utf-8", "replace"),
+                                             access_key.encode("ascii")):
+                return None
+            return "the access key is missing or wrong; open the link view --serve printed"
+
         def do_GET(self):
-            # The page carries the records' contents. Refuse any Host but this machine,
-            # so a web page cannot reach it through DNS rebinding.
-            host = _parse_host(self.headers.get("Host"))
-            if host not in ("127.0.0.1", "localhost", "::1"):
-                return self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
+            refused = self._gate()
+            if refused:
+                return self._send(403, (refused + "\n").encode("utf-8"), "text/plain; charset=utf-8")
             path = self.path.split("?", 1)[0]
+            if remote and path in ("/", "/index.html") and "k" in _query(self.path):
+                # Trade the key in the address for a cookie, and take it out of the address bar.
+                cookie = "nuhut_key=%s; HttpOnly; SameSite=Strict; Path=/" % access_key
+                return self._send(303, b"", "text/plain; charset=utf-8",
+                                  extra_headers=(("Set-Cookie", cookie), ("Location", "./")))
             if path in ("/", "/index.html"):
                 live.refresh()
                 cookie = "nuhut_session=%s; HttpOnly; SameSite=Strict; Path=/" % live.token
@@ -1436,11 +1749,7 @@ def serve(rt, project, template, opts):
                 body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
                 return self._send(200, body, "application/json; charset=utf-8")
             if path == "/api/log":
-                query = {}
-                for pair in (self.path.split("?", 1) + [""])[1].split("&"):
-                    if "=" in pair:
-                        k, v = pair.split("=", 1)
-                        query[k] = v
+                query = _query(self.path)
                 text = read_log(rt, live.project, query.get("kind", ""), query.get("id", ""),
                                 query.get("stage", ""))
                 if text is None:
@@ -1451,11 +1760,19 @@ def serve(rt, project, template, opts):
         do_HEAD = do_GET
 
         def do_POST(self):
-            host = _parse_host(self.headers.get("Host"))
-            if host not in ("127.0.0.1", "localhost", "::1"):
-                return self._send(403, b"forbidden\n", "text/plain; charset=utf-8")
+            refused = self._gate()
+            if refused:
+                body = json.dumps({"ok": False, "error": refused}).encode("utf-8")
+                return self._send(403, body, "application/json; charset=utf-8")
+            if not live.actions:
+                return self._send(
+                    403,
+                    b'{"ok":false,"error":"this server is read-only; start it with view --serve --allow-actions to run commands or change settings from the page"}\n',
+                    "application/json; charset=utf-8",
+                )
             port = self.server.server_address[1]
-            if not _valid_origin(self.headers.get("Origin"), port):
+            own_host = (self.headers.get("Host") or "") if remote else None
+            if not _valid_origin(self.headers.get("Origin"), port, own_host):
                 return self._send(403, b'{"ok":false,"error":"invalid or missing Origin"}\n',
                                   "application/json; charset=utf-8")
             cookie_tok = _session_cookie(self.headers.get("Cookie"))
@@ -1637,19 +1954,42 @@ def serve(rt, project, template, opts):
         def log_message(self, *args):  # the terminal shows rebuilds, not every poll
             pass
 
+    if ":" in addr:
+        LocalServer.address_family = socket.AF_INET6
     port = int(getattr(opts, "port", 8765))
     server = None
     for candidate in ([port] if port == 0 else range(port, port + 10)):
         try:
-            server = LocalServer(("127.0.0.1", candidate), Handler)
+            server = LocalServer((addr, candidate), Handler)
             break
-        except OSError:
+        except OSError as exc:
+            if exc.errno == errno.EADDRNOTAVAIL:
+                raise SystemExit("view: cannot listen on %s: it is not an address of this "
+                                 "machine" % addr)
             continue
     if server is None:
         raise SystemExit("view: ports %d-%d are all in use; pass --port" % (port, port + 9))
-    url = "http://127.0.0.1:%d/" % server.server_address[1]
-    print("view: live at %s (local only). The page follows the records as they change; "
-          "Ctrl+C stops it." % url)
+    bound = server.server_address[1]
+    if not remote:
+        url = "http://127.0.0.1:%d/" % bound
+        print("view: live at %s (local only). The page follows the records as they change; "
+              "Ctrl+C stops it." % url)
+    else:
+        ip = ipaddress.ip_address(addr)
+        hosts = _reachable_names() if ip.is_unspecified else [_url_host(addr)]
+        urls = ["http://%s:%d/?k=%s" % (h, bound, access_key) for h in hosts]
+        mode = ("actions allowed: the page can run kit commands" if allow_actions else
+                "read-only; start with --allow-actions to run commands from the page")
+        print("view: live at %s (remote, %s). Anyone with this link can read the records; "
+              "Ctrl+C stops it." % (urls[0] if urls else "port %d" % bound, mode))
+        for other in urls[1:]:
+            print("      also %s" % other)
+        if not loopback and (ip.is_unspecified or not any(ip in net for net in TAILNET
+                                                          if net.version == ip.version)):
+            sys.stderr.write("view: warning: traffic is plain HTTP; anyone on the network path "
+                             "can read the page and the key. Prefer --host tailscale.\n")
+        url = "http://%s:%d/?k=%s" % ("127.0.0.1" if ip.is_unspecified else _url_host(addr),
+                                      bound, access_key)
     sys.stdout.flush()
     if not getattr(opts, "no_open", False):
         webbrowser.open(url)

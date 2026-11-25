@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-023",
+  "title": "People registry: owner and claims name humans",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "product-manager",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "optional/runtime/shards.py",
+    "optional/runtime/claims.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 2 (team): after v6.0 ships",
+  "dropped_reason": ""
+}

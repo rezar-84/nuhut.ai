@@ -71,13 +71,13 @@ needs network access; the kit does not.
 **`claim`: "already claimed by …"**
 Another agent holds the item. `sdlc.py claims` shows who and since when. Pick another item
 (`sdlc.py parallel`). If the claim is stale, re-claim it deliberately, after
-`sdlc.py release <ID>`.
+`sdlc.py unclaim <ID>`.
 
 **`claim --mark`: "only the main worktree may do"**
 Backlog edits from several worktrees conflict at merge. Run `--mark` from the main
 checkout, or leave the row alone: the claim itself is what other agents check.
 
-**`release --remove-worktree`: "has uncommitted changes"**
+**`unclaim --remove-worktree`: "has uncommitted changes"**
 Commit or stash the work in that worktree first. The kit never deletes uncommitted work.
 
 **`spec apply`: "… not found" or "found 2 times"**

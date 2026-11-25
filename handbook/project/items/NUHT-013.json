@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-013",
+  "title": "Test-lock and protected-path guards miss shell writes (sed -i, redirects, tee, python -c)",
+  "type": "defect",
+  "tier": "2",
+  "effort": "",
+  "owner": "security",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "optional/runtime/hooks.py",
+    "tests/smoke.py",
+    "template/docs/process/05-change-control.md"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

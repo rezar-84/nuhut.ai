@@ -1,0 +1,33 @@
+{
+  "id": "NUHT-043",
+  "title": "Tier 1 approvals row (1 or 2), sdlc.py approve in a terminal, GitHub reviews only from Approvers",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Parked",
+  "depends": [],
+  "touch": [
+    "optional/runtime/finish.py",
+    "optional/runtime/sdlc.py",
+    "optional/runtime/shards.py"
+  ],
+  "created": "2026-11-23",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "Owner decisions 2026-11-23: approver count per project config (1 or 2); finding 18 resolved to the safer rule",
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "charter",
+      "commit": "",
+      "at": ""
+    }
+  ],
+  "waiting_on": "rezar-84",
+  "park_reason": "merge approval (Tier 1): 0 of 2 (charter fallback)",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-012",
+  "title": "finish accepts stale, stage-only or self-waived verify evidence",
+  "type": "defect",
+  "tier": "1",
+  "effort": "",
+  "owner": "qa",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    "optional/runtime/finish.py",
+    "optional/runtime/sdlc.py",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "Owner (rezar-84) directed implementation of the v6 roadmap on kit-v6 on 2026-11-22; merge to main stays a human approval",
+  "approvers": [],
+  "waiting_on": "rezar-84",
+  "park_reason": "Tightens a Tier 1 governance gate (AGENTS.md section 9)",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

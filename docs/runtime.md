@@ -82,4 +82,7 @@ credentials and a `commit-msg` that refuses a message with no work item ID
 directory gets one line appended and is otherwise left alone, and with pre-commit.com
 or lefthook the entry to add is printed instead. `git commit --no-verify` bypasses them,
 deliberately and visibly. The enforcement nobody can skip is CI: `--scaffold-ci` puts
-`sdlc.py doctor --strict` before the quality commands.
+`sdlc.py doctor --strict` before the quality commands, and on GitHub runs the base
+branch's `sdlc.py ci-check` on every pull request (trailers, ledger records, Tier 1
+reviews, the tier floor). It binds only with branch protection requiring `quality` and
+CODEOWNERS on `.github/workflows/**` and `.ai-sdlc/**`.

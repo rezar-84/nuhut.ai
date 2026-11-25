@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-050",
+  "title": "Two check-command detectors disagree (install.py detect vs sdlc.py detect_candidate_commands)",
+  "type": "refactor",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "install.py"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "2026-11-25",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

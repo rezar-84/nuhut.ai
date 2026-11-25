@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-038",
+  "title": "CI context beyond GitHub: GitLab, Bitbucket, Gitea and NUHUT_BASE/NUHUT_HEAD; more --scaffold-ci targets; doctor reports advisory-only repos",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "optional/runtime/registry.py",
+    "install.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

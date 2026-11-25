@@ -3,6 +3,7 @@
 ## Get started
 
 - [Getting started](getting-started.md): install, check the setup, open the viewer, take a first work item from plan to close.
+- [Joining a project](joining.md): the checklist for a clone of a project that already has the kit.
 - [Try the demo](../README.md#try-it-in-one-minute): a fictional project with every view populated, built in seconds.
 
 ## Use it day to day
@@ -24,6 +25,7 @@
 ## Design
 
 - [What the kit is, and is not](design.md): scope, and how it relates to Spec Kit, OpenSpec, Kiro and the app builders.
+- [Landscape and the v6 direction](landscape.md): similar tools (T3 Code, Spec Kit, OpenSpec, BMAD, Kiro and others), the gaps they show, and the extension system.
 - [Roadmap, findings and known gaps](roadmap.md): why 4.x changed what it did, what comes next, and what is still missing.
 - [Benchmarks](../benchmarks/kit-value/README.md): the protocol for measuring whether the kit is worth its cost.
 - [Changelog](../CHANGELOG.md) · [Contributing](../CONTRIBUTING.md) · [Security](../SECURITY.md)

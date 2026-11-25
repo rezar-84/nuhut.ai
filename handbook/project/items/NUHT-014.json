@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-014",
+  "title": "Release pipeline: skip docs-only pushes, serialize runs, rebase before bot push, drop dead release.yml",
+  "type": "fix",
+  "tier": "1",
+  "effort": "",
+  "owner": "devops-sre",
+  "status": "Ready",
+  "depends": [],
+  "touch": [
+    ".github/workflows/version.yml",
+    ".github/workflows/release.yml",
+    "tools/semver.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "Owner (rezar-84) directed implementation of the v6 roadmap on kit-v6 on 2026-11-22; merge to main stays a human approval",
+  "approvers": [],
+  "waiting_on": "rezar-84",
+  "park_reason": "Edits .github/workflows/release.yml and the release process (AGENTS.md section 9)",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

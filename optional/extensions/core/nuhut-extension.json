@@ -1,0 +1,304 @@
+{
+  "schema": 1,
+  "id": "core",
+  "version": "1.0.0",
+  "nuhut": "builtin",
+  "description": "Nuhut core: the agent tools without an extension of their own, and the install presets",
+  "overrides": null,
+  "package": {
+    "name": "ai-sdlc",
+    "title": "Nuhut",
+    "version": "kit",
+    "description": "Make a coding agent work like a delivery team: risk tiers, role reviews, an evidence doctrine that covers measured results, and traceability. Provides the /sdlc-* commands; run ./install.sh to install the documentation kit and the per-project skills into a repository.",
+    "author": {
+      "name": "rezar-84",
+      "url": "https://github.com/rezar-84/nuhut.ai"
+    },
+    "homepage": "https://github.com/rezar-84/nuhut.ai",
+    "license": "MIT",
+    "keywords": [
+      "sdlc",
+      "process",
+      "code-review",
+      "evidence",
+      "traceability",
+      "governance",
+      "spec-driven",
+      "mlops",
+      "data-engineering",
+      "performance",
+      "multi-agent"
+    ],
+    "commands": "./optional/claude-commands"
+  },
+  "provides": {
+    "harnesses": [
+      {
+        "id": "copilot",
+        "order": 3,
+        "title": "GitHub Copilot",
+        "native": false,
+        "pointer": [
+          {
+            "path": ".github/copilot-instructions.md",
+            "header": "# Copilot instructions\n\n"
+          }
+        ],
+        "markers": [
+          ".github/copilot-instructions.md",
+          ".github/instructions"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [],
+          "mcp": []
+        }
+      },
+      {
+        "id": "windsurf",
+        "order": 5,
+        "title": "Windsurf",
+        "native": false,
+        "pointer": [
+          {
+            "path": ".windsurfrules",
+            "header": ""
+          }
+        ],
+        "markers": [
+          ".windsurfrules",
+          ".windsurf"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [
+            ".windsurf"
+          ],
+          "mcp": []
+        }
+      },
+      {
+        "id": "cline",
+        "order": 6,
+        "title": "Cline",
+        "native": false,
+        "pointer": [
+          {
+            "path": ".clinerules",
+            "header": ""
+          }
+        ],
+        "markers": [
+          ".clinerules"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [
+            ".clinerules"
+          ],
+          "mcp": []
+        }
+      },
+      {
+        "id": "roo",
+        "order": 7,
+        "title": "Roo Code",
+        "native": false,
+        "pointer": [
+          {
+            "path": ".roo/rules/agents.md",
+            "header": "# Project instructions\n\n"
+          }
+        ],
+        "markers": [
+          ".roo",
+          ".roomodes"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [
+            ".roo"
+          ],
+          "mcp": []
+        }
+      },
+      {
+        "id": "amp",
+        "order": 8,
+        "title": "Amp",
+        "native": false,
+        "pointer": [
+          {
+            "path": "AGENT.md",
+            "header": "# Project instructions\n\n"
+          }
+        ],
+        "markers": [
+          "AGENT.md"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [],
+          "mcp": []
+        }
+      },
+      {
+        "id": "aider",
+        "order": 9,
+        "title": "Aider",
+        "native": false,
+        "pointer": [
+          {
+            "path": "CONVENTIONS.md",
+            "header": "# Conventions\n\n"
+          }
+        ],
+        "markers": [
+          "CONVENTIONS.md",
+          ".aider.conf.yml"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [],
+          "mcp": []
+        }
+      },
+      {
+        "id": "jules",
+        "order": 11,
+        "title": "Jules",
+        "native": true,
+        "pointer": null,
+        "markers": [],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [],
+          "mcp": []
+        }
+      },
+      {
+        "id": "zed",
+        "order": 12,
+        "title": "Zed",
+        "native": true,
+        "pointer": null,
+        "markers": [],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [],
+          "mcp": []
+        }
+      },
+      {
+        "id": "factory",
+        "order": 13,
+        "title": "Factory",
+        "native": true,
+        "pointer": null,
+        "markers": [],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [],
+          "mcp": []
+        }
+      },
+      {
+        "id": "antigravity",
+        "order": 15,
+        "title": "Google Antigravity",
+        "native": true,
+        "pointer": null,
+        "markers": [],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": null,
+          "settings": null,
+          "events": {}
+        },
+        "lens": {
+          "dirs": [],
+          "mcp": []
+        }
+      }
+    ],
+    "agents": [],
+    "checks": [],
+    "presets": [
+      {
+        "id": "solo",
+        "help": "one person moving fast: lean effort, the agent recommends and you decide",
+        "settings": {
+          "effort_mode": "lean",
+          "decision_style": "guide",
+          "dev_method": "item",
+          "tier_rules": "standard"
+        }
+      },
+      {
+        "id": "team",
+        "help": "several people, normal depth -- the kit's own defaults",
+        "settings": {
+          "effort_mode": "normal",
+          "decision_style": "guide",
+          "dev_method": "item",
+          "tier_rules": "standard"
+        }
+      },
+      {
+        "id": "regulated",
+        "help": "audited or high-stakes work: every material choice asked, strict tiers",
+        "settings": {
+          "effort_mode": "normal",
+          "decision_style": "ask",
+          "dev_method": "item",
+          "tier_rules": "strict"
+        }
+      }
+    ]
+  }
+}

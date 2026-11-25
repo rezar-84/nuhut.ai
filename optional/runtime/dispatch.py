@@ -22,11 +22,9 @@ import time
 
 import shards
 
-BUILD_HARNESSES = {
-    "claude": (["claude", "-p", "{prompt}", "--permission-mode", "acceptEdits", "--output-format", "text"], "--model"),
-    "codex": (["codex", "exec", "--full-auto", "{prompt}"], "--model"),
-    "gemini": (["gemini", "-p", "{prompt}", "-y"], "--model"),
-}
+# The builder and reviewer CLIs come from the agents records of the built-in extensions
+# through sdlc.agent_table(project, "build" | "review"): one record per tool, so the two
+# tables always name the same tools.
 
 MAX_DISPATCH_RUNS = 50
 
@@ -80,20 +78,30 @@ def _save_dispatch_run(rt, project, record):
     return os.path.relpath(path, project.root)
 
 
-def _validate_harness(spec, role_label="builder"):
+def _build_table(rt, project):
+    return rt.agent_table(project, "build")
+
+
+def _validate_harness(spec, role_label="builder", table=None, broken=None):
+    table = table or {}
     if not spec:
-        return None, "--by is required unless --dry-run (claude, codex, gemini, or cmd:<command>)"
+        return None, "--by is required unless --dry-run (%s)" % ", ".join(
+            sorted(table) + ["or cmd:<command>"])
     if spec.startswith("cmd:"):
         cmd = spec[4:].strip()
         if not cmd:
             return None, "%s cmd: requires a non-empty command" % role_label
         return ("cmd", cmd), None
-    if spec in BUILD_HARNESSES:
-        exe = BUILD_HARNESSES[spec][0][0]
+    if broken:
+        message = broken(spec)
+        if message:
+            return None, message
+    if spec in table:
+        exe = table[spec][0][0]
         if shutil.which(exe) is None:
             return None, "%s %r is not installed (no %r on PATH)" % (role_label, spec, exe)
         return (spec, None), None
-    return None, "%s must be claude, codex, gemini, or cmd:<command>" % role_label
+    return None, "%s must be %s, or cmd:<command>" % (role_label, ", ".join(sorted(table)))
 
 
 def _may_auto_merge(project, rt, pr_mode=False, no_merge=False):
@@ -294,7 +302,8 @@ def _extract_builder_notes(stdout_text, title):
     return summary, discovered
 
 
-def _run_builder_turn(rt, harness_kind, harness_cmd, model, prompt, wt_path, item_meta, attempt, timeout):
+def _run_builder_turn(rt, harness_kind, harness_cmd, model, prompt, wt_path, item_meta, attempt, timeout,
+                      table=None):
     env = dict(os.environ)
     env["NUHUT_DISPATCH_WORKER"] = "1"
     env["NUHUT_ITEM_ID"] = item_meta["id"]
@@ -310,7 +319,7 @@ def _run_builder_turn(rt, harness_kind, harness_cmd, model, prompt, wt_path, ite
             harness_cmd, cwd=wt_path, timeout=timeout, shell=True, input_text=prompt, env=env
         )
     else:
-        args_tpl, model_flag = BUILD_HARNESSES[harness_kind]
+        args_tpl, model_flag = (table or rt.v5_agent_table("build"))[harness_kind]
         args = [part.replace("{prompt}", prompt) for part in args_tpl]
         if model:
             args += [model_flag, model]
@@ -439,7 +448,9 @@ def run_dispatch(rt, project, opts):
         return preview, 0
 
     by_spec = getattr(opts, "by", None) or ""
-    parsed_builder, err = _validate_harness(by_spec, "builder")
+    build_table = _build_table(rt, project)
+    broken = (lambda spec: rt.broken_agent(project, spec)) if hasattr(rt, "broken_agent") else None
+    parsed_builder, err = _validate_harness(by_spec, "builder", build_table, broken)
     if err:
         return {"error": err}, 2
     harness_kind, harness_cmd = parsed_builder
@@ -449,7 +460,10 @@ def run_dispatch(rt, project, opts):
 
     reviewer_spec = getattr(opts, "reviewer", None) or ""
     if reviewer_spec:
-        _, rev_err = _validate_harness(reviewer_spec, "reviewer")
+        # The reviewer runs through rt.review(), which reads the review argv: check it
+        # against that table, not the builder's.
+        _, rev_err = _validate_harness(reviewer_spec, "reviewer",
+                                       rt.agent_table(project, "review"), broken)
         if rev_err:
             return {"error": rev_err}, 2
     reviewer_model = getattr(opts, "reviewer_model", None) or ""
@@ -461,13 +475,29 @@ def run_dispatch(rt, project, opts):
     os.makedirs(wt_base, exist_ok=True)
 
     auto_merge = _may_auto_merge(project, rt, pr_mode=pr_mode, no_merge=no_merge)
+    # The human who started the run, recorded on every worker's claim (None when unknown).
+    who = rt.person_identity(project, warn=not getattr(opts, "json", False)) \
+        if hasattr(rt, "person_identity") else {"person": None}
     dispatched = []
     discovered_filed = []
     attempted_ids = set()
     waves_executed = []
 
     def execute_one(item_id, wave_index):
+        teardowns = []
+        res = _execute_one(item_id, wave_index, teardowns)
+        failed = [t for t in teardowns if t and not t.get("ok")]
+        if failed:
+            res["teardown_error"] = "; ".join(t.get("error") or "teardown failed" for t in failed)
+        return res
+
+    def _execute_one(item_id, wave_index, teardowns):
         started_item = time.time()
+
+        def release_item():
+            rec, _ = claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+            teardowns.append((rec or {}).get("teardown_result"))
+
         worker_agent = "%s-w%d" % (agent_name, wave_index + 1)
         wt_path = os.path.join(wt_base, item_id)
         provisioned_aisdlc = False
@@ -483,6 +513,7 @@ def run_dispatch(rt, project, opts):
                 claim_rec, c_err = claims_mod.claim(
                     project, view_mod, item_id, worker_agent, worktree=wt_path,
                     base=base_sha, mark=False, sync_refs=sync_refs,
+                    person=who.get("person"), run_setup_script=False,
                 )
                 if c_err:
                     return {
@@ -492,6 +523,17 @@ def run_dispatch(rt, project, opts):
 
             branch = claim_rec["branch"]
             provisioned_aisdlc = _provision_worktree_kit(project, wt_path)
+            setup = claims_mod.run_setup(project, claim_rec)
+            if setup is not None and not setup["ok"]:
+                tail = (setup.get("output") or "").strip()
+                _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
+                with coord_lock:
+                    release_item()
+                return {
+                    "item": item_id, "ok": False, "status": "setup_failed", "branch": branch,
+                    "error": (setup["error"] + ("\n" + tail if tail else ""))[:1500],
+                    "seconds": round(time.time() - started_item, 2),
+                }
             wt_project = rt.Project(wt_path)
             merged_map = shards.merged_items(wt_project)
             item_meta = dict(merged_map.get(item_id) or {"id": item_id, "title": item_id, "tier": "2", "type": "feat"})
@@ -510,7 +552,8 @@ def run_dispatch(rt, project, opts):
                 attempts_used = attempt
                 prompt = _build_prompt(rt, wt_project, item_meta, attempt=attempt, failure_report=last_diag)
                 rc, out_s, err_s, timed_out = _run_builder_turn(
-                    rt, harness_kind, harness_cmd, builder_model, prompt, wt_path, item_meta, attempt, timeout
+                    rt, harness_kind, harness_cmd, builder_model, prompt, wt_path, item_meta, attempt, timeout,
+                    table=build_table,
                 )
                 last_stdout = out_s
                 wt_project.__init__(wt_path)
@@ -542,7 +585,7 @@ def run_dispatch(rt, project, opts):
             if not verified_ok:
                 _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
                 with coord_lock:
-                    claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                    release_item()
                 return {
                     "item": item_id, "ok": False, "status": "verify_failed", "branch": branch,
                     "attempts": attempts_used, "verify_run": verify_run_id,
@@ -594,7 +637,7 @@ def run_dispatch(rt, project, opts):
                 if rev_err:
                     _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
                     with coord_lock:
-                        claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                        release_item()
                     return {
                         "item": item_id, "ok": False, "status": "review_failed", "branch": branch,
                         "attempts": attempts_used, "error": rev_err,
@@ -604,7 +647,7 @@ def run_dispatch(rt, project, opts):
                     _stage_and_commit(wt_path, "docs(%s): record blocking review" % item_id, trailers_text)
                     _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
                     with coord_lock:
-                        claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                        release_item()
                     return {
                         "item": item_id, "ok": False, "status": "review_blocked", "branch": branch,
                         "attempts": attempts_used, "review": rev_rel,
@@ -631,7 +674,7 @@ def run_dispatch(rt, project, opts):
             if fin_code != 0:
                 _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
                 with coord_lock:
-                    claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                    release_item()
                 return {
                     "item": item_id, "ok": False, "status": "finish_blocked", "branch": branch,
                     "attempts": attempts_used, "error": "\n".join(fin_lines),
@@ -646,7 +689,7 @@ def run_dispatch(rt, project, opts):
 
             _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
             with coord_lock:
-                claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                release_item()
 
             return {
                 "item": item_id,
@@ -666,7 +709,7 @@ def run_dispatch(rt, project, opts):
                 _cleanup_worktree_before_release(wt_path, provisioned_aisdlc)
             if claim_rec:
                 with coord_lock:
-                    claims_mod.release(project, item_id, remove_worktree=True, force=True, sync_refs=sync_refs)
+                    release_item()
             return {
                 "item": item_id, "ok": False, "status": "exception",
                 "error": str(exc), "seconds": round(time.time() - started_item, 2),
@@ -833,8 +876,10 @@ def format_dispatch_report(report):
             ))
         else:
             lines.append("  FAIL  %-10s %-14s %s" % (
-                r["item"], r.get("status", "failed"), (r.get("error") or "").splitlines()[0][:120]
+                r["item"], r.get("status", "failed"), ((r.get("error") or "").splitlines() or [""])[0][:120]
             ))
+        if r.get("teardown_error"):
+            lines.append("  WARN  %-10s teardown failed: %s" % (r["item"], r["teardown_error"][:120]))
     if report.get("discovered_filed"):
         lines.append("  discovered defects filed (Parked): %s" % ", ".join(report["discovered_filed"]))
     if report.get("telemetry_path"):

@@ -1,0 +1,27 @@
+{
+  "id": "NUHT-018",
+  "title": "ext CLI: list, add, remove, update, search, validate; overlays; catalog",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Done",
+  "depends": [
+    "NUHT-016"
+  ],
+  "touch": [
+    "optional/runtime/registry.py",
+    "optional/runtime/sdlc.py",
+    "docs/cli.md"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 1: after ADR 0003 (extension system) is approved",
+  "dropped_reason": ""
+}

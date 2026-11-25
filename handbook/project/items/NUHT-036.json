@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-036",
+  "title": "Run the kit-value benchmark against bench-baseline-v0 and publish results",
+  "type": "chore",
+  "tier": "3",
+  "effort": "",
+  "owner": "qa",
+  "status": "Deferred",
+  "depends": [],
+  "touch": [
+    "benchmarks/"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "",
+  "summary": "Needs real agent sessions; not part of the automated v6 build",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "Before v6 release notes make benefit claims",
+  "dropped_reason": ""
+}

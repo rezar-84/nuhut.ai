@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-026",
+  "title": "status / next: one-line next actions in the CLI",
+  "type": "feat",
+  "tier": "3",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 2 (team): after v6.0 ships",
+  "dropped_reason": ""
+}

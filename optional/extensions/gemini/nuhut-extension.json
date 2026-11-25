@@ -1,0 +1,74 @@
+{
+  "schema": 1,
+  "id": "gemini",
+  "version": "1.0.0",
+  "nuhut": "builtin",
+  "description": "Gemini CLI support",
+  "overrides": null,
+  "provides": {
+    "harnesses": [
+      {
+        "id": "gemini",
+        "order": 4,
+        "title": "Gemini CLI",
+        "native": false,
+        "pointer": [
+          {
+            "path": "GEMINI.md",
+            "header": "# Project instructions\n\n"
+          }
+        ],
+        "markers": [
+          "GEMINI.md",
+          ".gemini"
+        ],
+        "skills_dir": ".agents/skills",
+        "hooks": {
+          "dialect": "gemini",
+          "settings": ".gemini/settings.json",
+          "events": {
+            "pre_tool": "BeforeTool"
+          }
+        },
+        "lens": {
+          "dirs": [
+            ".gemini"
+          ],
+          "mcp": [
+            ".gemini/settings.json"
+          ]
+        }
+      }
+    ],
+    "agents": [
+      {
+        "id": "gemini",
+        "order": 2,
+        "family": "gemini",
+        "review": [
+          "gemini",
+          "-p",
+          "{prompt}"
+        ],
+        "build": [
+          "gemini",
+          "-p",
+          "{prompt}",
+          "-y"
+        ],
+        "model_flag": "--model",
+        "identity": {
+          "agent": "gemini-cli",
+          "env": [
+            "GEMINI_CLI"
+          ],
+          "model_env": [
+            "GEMINI_MODEL"
+          ]
+        }
+      }
+    ],
+    "checks": [],
+    "presets": []
+  }
+}

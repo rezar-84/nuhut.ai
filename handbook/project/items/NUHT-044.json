@@ -1,0 +1,33 @@
+{
+  "id": "NUHT-044",
+  "title": "NUHT-038 follow-ups: other hosts' CI files are Tier 1, advisory is info without a remote, 5.x base falls back, this repo's CI runs ci-check",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Parked",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "install.py",
+    ".github/workflows/ci.yml"
+  ],
+  "created": "2026-11-23",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "Owner: take the recommended option for each NUHT-038 point, 2026-11-23",
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "charter",
+      "commit": "",
+      "at": ""
+    }
+  ],
+  "waiting_on": "rezar-84",
+  "park_reason": "merge approval (Tier 1): 0 of 2 (charter fallback)",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

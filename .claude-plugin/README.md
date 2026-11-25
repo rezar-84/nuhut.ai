@@ -25,3 +25,12 @@ the per-project skills are chosen from the project's own facts:
 That is where the documentation, the charter, and the selected skills land. The two are
 complementary: the plugin makes the loop available, the installer makes it true of a
 specific repository.
+
+## Where plugin.json comes from
+
+`plugin.json` is generated from the `package` block of
+`optional/extensions/core/nuhut-extension.json`, and `validate.py` fails when they
+disagree. Edit the block, then run
+`python3 .ai-sdlc/bin/sdlc.py ext package core --for claude --out .`.
+The same command packages any extension for Gemini, Codex or Kiro: see
+[docs/extensions.md](../docs/extensions.md).

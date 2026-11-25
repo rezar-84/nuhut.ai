@@ -3,9 +3,11 @@
 Stack and dependencies, build errors from the last verify run, vulnerable packages from
 the last `sdlc.py audit`, deployment and CI, containers, environment variable names, the
 agentic stack (skills, commands, subagents, hooks, MCP servers, plugins, harness files,
-other kits) and the security findings across all of them.
+other kits) and the security findings across all of them. Asked for
+(`--area standards`), it also reads the coding conventions the code already follows.
 
-It never runs a tool and never touches the network: build errors come from logs `verify`
+It never runs a tool (beyond a read-only `git log` for the commit convention) and
+never touches the network: build errors come from logs `verify`
 kept, vulnerabilities from the result `audit` kept. It never reads a secret: environment
 files are read for variable *names* only (and only templates; a real .env is checked for
 existence and whether git ignores it), MCP servers are reported by name and transport,
@@ -22,6 +24,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 
 SKIP_DIRS = {".git", "node_modules", ".next", "dist", "build", "out", "coverage", ".venv", "venv",
              "__pycache__", ".turbo", ".cache", "vendor", "target", ".ai-sdlc", ".idea", ".vscode"}
@@ -597,6 +600,35 @@ def _mcp_from(data, path, source):
     return out
 
 
+# The v5 lists, for when the extension registry is missing or cannot be loaded:
+# (path, harness id, hook dialect, title), as registry.lens_files() returns them.
+V5_LENS_DIRS = ((".claude", "claude", "claude", "Claude Code"), (".cursor", "cursor", "cursor", "Cursor"),
+                (".gemini", "gemini", "gemini", "Gemini CLI"), (".windsurf", "windsurf", None, "Windsurf"),
+                (".clinerules", "cline", None, "Cline"), (".roo", "roo", None, "Roo Code"))
+V5_LENS_MCP = ((".claude/settings.json", "claude", "claude", "Claude Code"),
+               (".claude/settings.local.json", "claude", "claude", "Claude Code"),
+               (".mcp.json", "claude", "claude", "Claude Code"),
+               (".cursor/mcp.json", "cursor", "cursor", "Cursor"),
+               (".gemini/settings.json", "gemini", "gemini", "Gemini CLI"))
+
+
+def harness_lens_files(project):
+    """(tool dirs, MCP files) from the harness records' `lens` fields, or the v5 lists."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import registry
+        reg = registry.load(project.root, version=(getattr(project, "manifest", None) or {}).get("kit_version"),
+                            warn=False)
+        if not reg.missing:
+            dirs, mcp = registry.lens_files(reg)
+            return list(dirs), list(mcp)
+    except Exception:  # the lens must render without the registry
+        pass
+    return list(V5_LENS_DIRS), list(V5_LENS_MCP)
+
+
 def agents(project, kit, include_user=False):
     """Skills, commands, subagents, hooks, MCP servers, plugins and harness files: kit,
     project, user (only when asked) and other kits found in the repository."""
@@ -622,21 +654,21 @@ def agents(project, kit, include_user=False):
         items += _skills_in(project.path(rel), "project", owner_of)
     items += _md_items(project.path(".claude/commands"), "command", "project", owner_of)
     items += _md_items(project.path(".claude/agents"), "subagent", "project", owner_of)
-    for rel in (".claude/settings.json", ".claude/settings.local.json"):
-        if os.path.exists(project.path(rel)):
+    tool_dirs, mcp_files = harness_lens_files(project)
+    claude_dirs = tuple(d + "/" for d, _, dialect, _ in tool_dirs if dialect == "claude")
+    for rel, _, dialect, _ in mcp_files:
+        data = _json(project.path(rel))
+        if not data:
+            continue
+        # A Claude-dialect settings file also carries hooks and plugins.
+        if dialect == "claude" and rel.startswith(claude_dirs):
             items += _hooks_from_settings(project.path(rel), "project")
-            data = _json(project.path(rel)) or {}
             items += _mcp_from(data, project.path(rel), "project")
             for plugin, on in sorted((data.get("enabledPlugins") or {}).items()):
                 items.append({"kind": "plugin", "name": plugin, "description": "enabled" if on else "disabled",
                               "source": "project", "path": project.path(rel), "owner": ""})
-    items += _mcp_from(_json(project.path(".mcp.json")), project.path(".mcp.json"), "project")
-    gem = _json(project.path(".gemini/settings.json"))
-    if gem:
-        items += _mcp_from(gem, project.path(".gemini/settings.json"), "project")
-    cursor_mcp = _json(project.path(".cursor/mcp.json"))
-    if cursor_mcp:
-        items += _mcp_from(cursor_mcp, project.path(".cursor/mcp.json"), "project")
+            continue
+        items += _mcp_from(data, project.path(rel), "project")
     for rule in sorted(glob.glob(project.path(".cursor/rules/*.mdc"))):
         fm = _frontmatter(_read(rule, 20000))
         items.append({"kind": "rule", "name": os.path.basename(rule), "description": fm.get("description", ""),
@@ -647,8 +679,12 @@ def agents(project, kit, include_user=False):
                           "source": "project", "path": project.path(h["file"]),
                           "owner": "kit" if h.get("wired") else "project", "detail": {"wired": bool(h.get("wired"))}})
     other = []
-    for rel, label in ((".specify", "Spec Kit"), ("openspec", "OpenSpec"), (".sdlc", "sdlc skills (.sdlc)"),
-                       (".kiro", "Kiro"), (".windsurf", "Windsurf"), (".roo", "Roo"), (".clinerules", "Cline")):
+    # Other kits, then the directories of tools whose files this lens does not read
+    # itself (no hook dialect), from their harness records.
+    others = [(".specify", "Spec Kit"), ("openspec", "OpenSpec"), (".sdlc", "sdlc skills (.sdlc)"),
+              (".kiro", "Kiro")]
+    others += [(rel, title) for rel, _, dialect, title in tool_dirs if dialect is None]
+    for rel, label in others:
         if os.path.exists(project.path(rel)):
             count = sum(1 for _ in _walk(project.path(rel), max_depth=4)) if os.path.isdir(project.path(rel)) else 1
             other.append({"name": label, "path": rel, "files": count})
@@ -786,6 +822,298 @@ def security_reviews(project, model):
 
 
 # ---------------------------------------------------------------- assembly
+
+# ---------------------------------------------------------------- coding standards
+
+# (tool, kind, file names or globs at the root). pyproject/setup.cfg sections are read below.
+STANDARD_CONFIGS = (
+    ("EditorConfig", "editor", (".editorconfig",)),
+    ("Prettier", "formatter", (".prettierrc", ".prettierrc.*", "prettier.config.*")),
+    ("ESLint", "linter", (".eslintrc", ".eslintrc.*", "eslint.config.*")),
+    ("Biome", "formatter", ("biome.json", "biome.jsonc")),
+    ("Stylelint", "linter", (".stylelintrc", ".stylelintrc.*", "stylelint.config.*")),
+    ("TypeScript", "types", ("tsconfig.json",)),
+    ("Ruff", "linter", ("ruff.toml", ".ruff.toml")),
+    ("Black", "formatter", ()),
+    ("isort", "formatter", (".isort.cfg",)),
+    ("Flake8", "linter", (".flake8",)),
+    ("mypy", "types", ("mypy.ini", ".mypy.ini")),
+    ("Pylint", "linter", (".pylintrc", "pylintrc")),
+    ("RuboCop", "linter", (".rubocop.yml",)),
+    ("rustfmt", "formatter", ("rustfmt.toml", ".rustfmt.toml")),
+    ("Clippy", "linter", ("clippy.toml", ".clippy.toml")),
+    ("golangci-lint", "linter", (".golangci.yml", ".golangci.yaml", ".golangci.toml")),
+    ("clang-format", "formatter", (".clang-format",)),
+    ("PHP CS Fixer", "formatter", (".php-cs-fixer.php", ".php-cs-fixer.dist.php")),
+    ("PHP_CodeSniffer", "linter", ("phpcs.xml", "phpcs.xml.dist")),
+    ("SwiftLint", "linter", (".swiftlint.yml",)),
+    ("markdownlint", "linter", (".markdownlint.json", ".markdownlint.yaml", ".markdownlint.yml", ".markdownlintrc")),
+    ("pre-commit", "hooks", (".pre-commit-config.yaml",)),
+    ("Husky", "hooks", (".husky",)),
+    ("commitlint", "hooks", ("commitlint.config.*", ".commitlintrc", ".commitlintrc.*")),
+)
+PY_SECTIONS = (("Ruff", r"^\[tool\.ruff"), ("Black", r"^\[tool\.black\]"), ("isort", r"^\[tool\.isort\]"),
+               ("mypy", r"^\[tool\.mypy\]|^\[mypy\]"), ("Pylint", r"^\[tool\.pylint"), ("Flake8", r"^\[flake8\]"))
+PKG_KEYS = (("Prettier", "prettier"), ("ESLint", "eslintConfig"), ("Stylelint", "stylelint"), ("commitlint", "commitlint"))
+
+NAMING_LANGS = {
+    ".py": "Python", ".js": "JavaScript/TypeScript", ".jsx": "JavaScript/TypeScript", ".mjs": "JavaScript/TypeScript",
+    ".cjs": "JavaScript/TypeScript", ".ts": "JavaScript/TypeScript", ".tsx": "JavaScript/TypeScript",
+    ".go": "Go", ".rb": "Ruby", ".rs": "Rust", ".java": "Java", ".kt": "Kotlin", ".cs": "C#", ".php": "PHP",
+}
+# (function names, type names) per language; the first non-empty group is the name.
+NAMING_RES = {
+    "Python": (r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)", r"^\s*class\s+([A-Za-z_]\w*)"),
+    "JavaScript/TypeScript": (
+        r"\bfunction\s+([A-Za-z_$][\w$]*)|\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?"
+        r"(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>",
+        r"\bclass\s+([A-Za-z_$][\w$]*)|\b(?:interface|type)\s+([A-Z][\w$]*)\b"),
+    "Go": (r"^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)", r"^type\s+([A-Za-z_]\w*)\s+(?:struct|interface)"),
+    "Ruby": (r"^\s*def\s+(?:self\.)?([A-Za-z_]\w*)", r"^\s*(?:class|module)\s+([A-Z]\w*)"),
+    "Rust": (r"\bfn\s+([A-Za-z_]\w*)", r"\b(?:struct|enum|trait)\s+([A-Za-z_]\w*)"),
+    "Java": (r"^\s*(?:public|private|protected)\s+(?:static\s+)?(?:final\s+)?[\w<>\[\],\s]+?\s+([a-zA-Z_]\w*)\s*\(",
+             r"\b(?:class|interface|enum|record)\s+([A-Za-z_]\w*)"),
+    "Kotlin": (r"\bfun\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?([A-Za-z_]\w*)", r"\b(?:class|interface|object)\s+([A-Za-z_]\w*)"),
+    "C#": (r"^\s*(?:public|private|protected|internal)\s+(?:static\s+|async\s+|override\s+|virtual\s+)*"
+           r"[\w<>\[\],?\s]+?\s+([A-Za-z_]\w*)\s*\(", r"\b(?:class|interface|struct|record|enum)\s+([A-Za-z_]\w*)"),
+    "PHP": (r"\bfunction\s+([A-Za-z_]\w*)", r"\b(?:class|interface|trait)\s+([A-Za-z_]\w*)"),
+}
+TEST_FILE = re.compile(r"^(test_.+\.py|.+_test\.py|.+\.(?:test|spec)\.[cm]?[jt]sx?|.+_test\.go|.+_spec\.rb|"
+                       r"Test\w+\.(?:java|kt)|\w+Tests?\.(?:java|kt|cs))$")
+TEST_PATTERNS = (("test_*.py", r"^test_.+\.py$"), ("*_test.py", r"_test\.py$"), ("*.test.*", r"\.test\.[cm]?[jt]sx?$"),
+                 ("*.spec.*", r"\.spec\.[cm]?[jt]sx?$"), ("*_test.go", r"_test\.go$"), ("*_spec.rb", r"_spec\.rb$"),
+                 ("Test* / *Test", r"^Test\w+\.|Tests?\.(?:java|kt|cs)$"))
+TEST_DIRS = ("tests", "test", "__tests__", "spec", "specs", "testing")
+CONVENTIONAL = re.compile(r"^([a-z]+)(\(([^)]*)\))?!?: \S")
+TICKET = re.compile(r"^\[?[A-Z][A-Z0-9]+-\d+\]?[:\s]")
+MAX_STANDARD_FILES = 1500
+GENERIC_STEMS = ("index", "__init__", "__main__", "main", "mod", "lib", "conftest", "setup")
+
+
+def _case(name):
+    n = name.strip("_$")
+    if not n or n.isdigit():
+        return None
+    if re.match(r"^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$", n):
+        return "SCREAMING_SNAKE_CASE"
+    if re.match(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$", n):
+        return "snake_case"
+    if re.match(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$", n):
+        return "kebab-case"
+    if re.match(r"^[a-z][a-z0-9]*(?:[A-Z][a-z0-9]*)+$", n):
+        return "camelCase"
+    if re.match(r"^[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*$", n):
+        return "PascalCase"
+    return None  # one lowercase word, or all capitals: says nothing about a style
+
+
+def _dominant(names):
+    counts = {}
+    for n in names:
+        c = _case(n)
+        if c:
+            counts[c] = counts.get(c, 0) + 1
+    if not counts:
+        return "", counts
+    return max(sorted(counts), key=lambda k: counts[k]), counts
+
+
+def _tooling(project):
+    found, seen = [], set()
+
+    def add(tool, kind, path, via=""):
+        if tool not in seen:
+            seen.add(tool)
+            found.append({"tool": tool, "kind": kind, "path": path, "via": via})
+    for tool, kind, names in STANDARD_CONFIGS:
+        for pattern in names:
+            hits = sorted(glob.glob(project.path(pattern)))
+            if hits:
+                add(tool, kind, _rel(project, hits[0]))
+                break
+    kinds = dict((t, k) for t, k, _ in STANDARD_CONFIGS)
+    for cfg in ("pyproject.toml", "setup.cfg", "tox.ini"):
+        text = _read(project.path(cfg), 400000)
+        for tool, pattern in PY_SECTIONS:
+            if text and re.search(pattern, text, re.M):
+                add(tool, kinds.get(tool, "linter"), cfg, "section")
+    pkg = _json(project.path("package.json"))
+    if isinstance(pkg, dict):
+        for tool, key in PKG_KEYS:
+            if key in pkg:
+                add(tool, kinds.get(tool, "linter"), "package.json", key)
+        scripts = pkg.get("scripts") if isinstance(pkg.get("scripts"), dict) else {}
+        for name in ("format", "lint", "typecheck"):
+            if name in scripts:
+                found.append({"tool": "npm script: " + name, "kind": "script", "path": "package.json",
+                              "via": str(scripts[name])[:120]})
+    return found
+
+
+def _test_layout(test_files):
+    in_dirs, beside, dirs, patterns = 0, 0, {}, set()
+    for rel in test_files:
+        parts = rel.split("/")
+        hit = next((p for p in parts[:-1] if p in TEST_DIRS), None)
+        if hit:
+            in_dirs += 1
+            dirs[hit] = dirs.get(hit, 0) + 1
+        else:
+            beside += 1
+        for pat, rx in TEST_PATTERNS:
+            if re.search(rx, parts[-1]):
+                patterns.add(pat)
+    top = max(sorted(dirs), key=lambda k: dirs[k]) if dirs else ""
+    if not test_files:
+        layout = "no test files found"
+    elif in_dirs and not beside:
+        layout = "separate %s/ directory" % top
+    elif beside and not in_dirs:
+        layout = "next to the source"
+    else:
+        layout = "mixed: %d in %s/, %d next to the source" % (in_dirs, top, beside)
+    return {"layout": layout, "count": len(test_files), "dirs": sorted(dirs), "patterns": sorted(patterns),
+            "examples": test_files[:5]}
+
+
+def _commits(git_log):
+    subjects = [s.strip() for s in (git_log or "").splitlines() if s.strip()]
+    types, scopes, conv, ticket = {}, {}, 0, 0
+    for s in subjects:
+        m = CONVENTIONAL.match(s)
+        if m:
+            conv += 1
+            types[m.group(1)] = types.get(m.group(1), 0) + 1
+            if m.group(3):
+                scopes[m.group(3)] = scopes.get(m.group(3), 0) + 1
+        elif TICKET.match(s):
+            ticket += 1
+    n = len(subjects)
+    if not n:
+        convention = "no commits"
+    elif conv * 10 >= n * 6:
+        convention = "Conventional Commits"
+    elif ticket * 10 >= n * 6:
+        convention = "ticket-prefixed"
+    else:
+        convention = "free-form"
+    return {"sampled": n, "convention": convention, "conventional": conv, "ticket_prefixed": ticket,
+            "types": types, "scopes": dict(sorted(scopes.items(), key=lambda x: (-x[1], x[0]))[:10]),
+            "examples": subjects[:5]}
+
+
+def standards(project, git_log=None):
+    """The conventions the code already follows: formatter and linter configs, naming style
+    by language, test layout, import style and the commit convention. Read-only: walks the
+    tree (skipping vendored and generated directories) and reads the last 200 commit
+    subjects through `git log`; it never runs a formatter or linter."""
+    names, imports, test_files, scanned = {}, {}, [], 0
+    for path in _walk(project.root, max_depth=6):
+        base = os.path.basename(path)
+        lang = NAMING_LANGS.get(os.path.splitext(base)[1].lower())
+        if not lang:
+            continue
+        scanned += 1
+        if scanned > MAX_STANDARD_FILES:
+            break
+        is_test = bool(TEST_FILE.match(base))
+        if is_test:
+            test_files.append(_rel(project, path))
+        text = _read(path, 200000)
+        slot = names.setdefault(lang, {"functions": [], "classes": [], "files": []})
+        stem = base.split(".")[0]
+        if stem not in GENERIC_STEMS and not is_test:
+            slot["files"].append(stem)
+        fn_re, cls_re = NAMING_RES[lang]
+        for regex, key in ((fn_re, "functions"), (cls_re, "classes")):
+            for m in re.finditer(regex, text, re.M):
+                name = next((g for g in m.groups() if g), "")
+                if name and not name.startswith("__") and not (key == "functions" and name.startswith("test")):
+                    slot[key].append(name)
+        if lang in ("Python", "JavaScript/TypeScript"):
+            c = imports.setdefault(lang, {"language": lang, "absolute": 0, "relative": 0, "alias": 0})
+            if lang == "Python":
+                c["relative"] += len(re.findall(r"^\s*from\s+\.", text, re.M))
+                c["absolute"] += len(re.findall(r"^\s*(?:from\s+[A-Za-z_]|import\s+[A-Za-z_])", text, re.M))
+            else:
+                for spec in re.findall(r"(?:\bfrom\s+|\bimport\s+|\brequire\()\s*['\"]([^'\"]+)['\"]", text):
+                    if spec.startswith("."):
+                        c["relative"] += 1
+                    elif spec[:2] in ("@/", "~/") or spec.startswith("#"):
+                        c["alias"] += 1
+                    else:
+                        c["absolute"] += 1
+    naming = []
+    for lang in sorted(names):
+        slot = names[lang]
+        if not (slot["functions"] or slot["classes"]):
+            continue
+        row = {"language": lang}
+        for key in ("functions", "classes", "files"):
+            row[key], row[key + "_counts"] = _dominant(slot[key])
+        row["samples"] = sorted(set(n for n in slot["functions"] if _case(n) == row["functions"]))[:6]
+        row["class_samples"] = sorted(set(n for n in slot["classes"] if _case(n) == row["classes"]))[:4]
+        naming.append(row)
+    for c in imports.values():
+        total = c["absolute"] + c["relative"] + c["alias"]
+        c["style"] = ("none found" if not total else "mostly relative" if c["relative"] * 2 > total
+                      else "mostly path aliases" if c["alias"] * 2 > total else "mostly absolute")
+    if git_log is None:
+        git_log = project.git("log", "-n", "200", "--no-merges", "--format=%s") if hasattr(project, "git") else ""
+    return {"generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "tooling": _tooling(project), "naming": naming, "tests": _test_layout(test_files),
+            "imports": [imports[k] for k in sorted(imports)], "commits": _commits(git_log),
+            "files_scanned": min(scanned, MAX_STANDARD_FILES)}
+
+
+def standards_markdown(std):
+    """A draft standards page from what the code does today: a starting point for people
+    to correct, never a ruling. Every line says what was observed."""
+    out = ["# Coding standards", "",
+           "> Draft, written by `sdlc.py lens --area standards --write` on %s from what the code "
+           "does today." % std["generated"][:10],
+           "> Review it: correct what is wrong, keep what the team agrees to, then remove this note.", "",
+           "## Formatting and linting", ""]
+    if std["tooling"]:
+        for t in std["tooling"]:
+            extra = (" - `%s`" % t["via"]) if t["kind"] == "script" else (" (%s)" % t["via"] if t["via"] else "")
+            out.append("- **%s** (%s): `%s`%s" % (t["tool"], t["kind"], t["path"], extra))
+        out += ["", "Run the configured tools rather than formatting by hand against them."]
+    else:
+        out.append("- No formatter or linter config found. Unknown: choose one and record it here.")
+    out += ["", "## Naming", ""]
+    for n in std["naming"]:
+        bits = ["functions %s" % (n["functions"] or "unclear"), "types %s" % (n["classes"] or "unclear")]
+        if n["files"]:
+            bits.append("files %s" % n["files"])
+        line = "- **%s**: %s." % (n["language"], ", ".join(bits))
+        seen = n["samples"][:4] + n["class_samples"][:2]
+        if seen:
+            line += " Seen: %s." % ", ".join("`%s`" % s for s in seen)
+        out.append(line)
+    if not std["naming"]:
+        out.append("- No source files sampled.")
+    t = std["tests"]
+    out += ["", "## Tests", "", "- Layout: %s (%d test file(s))." % (t["layout"], t["count"])]
+    if t["patterns"]:
+        out.append("- File names: %s." % ", ".join("`%s`" % p for p in t["patterns"]))
+    out += ["", "## Imports", ""]
+    for i in std["imports"]:
+        out.append("- **%s**: %s (%d absolute, %d relative, %d alias)." % (
+            i["language"], i["style"], i["absolute"], i["relative"], i["alias"]))
+    if not std["imports"]:
+        out.append("- No imports sampled.")
+    c = std["commits"]
+    out += ["", "## Commits", "", "- Convention: %s (%d of the last %d subjects follow Conventional Commits)." % (
+        c["convention"], c["conventional"], c["sampled"])]
+    if c["types"]:
+        out.append("- Types in use: %s." % ", ".join(
+            "`%s` %d" % (k, v) for k, v in sorted(c["types"].items(), key=lambda x: (-x[1], x[0]))))
+    if c["scopes"]:
+        out.append("- Common scopes: %s." % ", ".join("`%s`" % k for k in c["scopes"]))
+    out.append("")
+    return "\n".join(out)
+
 
 def lens(rt, project, model=None, include_user=False, detect_mod=None):
     if detect_mod is None:

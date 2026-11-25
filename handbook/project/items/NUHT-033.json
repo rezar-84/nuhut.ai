@@ -1,0 +1,21 @@
+{
+  "id": "NUHT-033",
+  "title": "Standards discovery: extract codebase conventions via lens",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "architect",
+  "status": "Done",
+  "depends": [],
+  "touch": [],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v7 Phase 4 (integrations as extensions): after the extension system ships",
+  "dropped_reason": ""
+}

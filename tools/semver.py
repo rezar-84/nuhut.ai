@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 """The kit's next semantic version, worked out from the commits since VERSION last changed.
 
-Commit subjects follow Conventional Commits, as the kit's history already does:
-`feat(...)` is a minor bump, a `!` after the type or a `BREAKING CHANGE:` footer is a
-major one, and anything else (fix, docs, chore, refactor, ...) is a patch. A subject may
-carry several types (`docs,feat(kit): ...`); the largest wins. The release commit this
-script writes (`chore(release): vX.Y.Z`) is never counted.
+Commit subjects follow Conventional Commits, as the kit's history already does. Only the
+types in RELEASE_TYPES release: `feat` is a minor bump; `fix`, `perf`, `refactor` and
+`revert` are a patch. A `!` after any type, or a `BREAKING CHANGE:` line in the footer
+(the body's trailing footer block), is a major one. Every other type (docs, chore, test, ci,
+style, build, ...) and any subject that is not a Conventional Commit releases nothing. A
+subject may carry several types (`docs,feat(kit): ...`); the largest wins. The release
+commit this script writes (`chore(release): vX.Y.Z`) is never counted.
 
     python3 tools/semver.py next [--json]          the version a merge to main would get
     python3 tools/semver.py next --prerelease      X.Y.Z-dev.N+sha, for a branch build
-    python3 tools/semver.py bump [--dry-run]       write VERSION, plugin.json, CHANGELOG.md
+    python3 tools/semver.py restamp                the self-install's version stamps = VERSION
+    python3 tools/semver.py bump [--dry-run]       write VERSION, plugin.json, CHANGELOG.md, self-install stamps
 
 Standard library only; runs on Python 3.8.
 """
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -24,6 +28,9 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEVELS = ("none", "patch", "minor", "major")
+# The one list of commit types that cut a release. Anything not here is level "none".
+RELEASE_TYPES = {"feat": "minor", "fix": "patch", "perf": "patch", "refactor": "patch", "revert": "patch"}
+BREAKING_FOOTER = re.compile(r"^BREAKING[ -]CHANGE:")
 HEADER = re.compile(r"^(?P<types>[a-z]+(?:\s*,\s*[a-z]+)*)(?:\([^)]*\))?(?P<bang>!)?:\s*(?P<desc>.+)$")
 RELEASE_SUBJECT = re.compile(r"^chore\(release\):\s*v?[0-9]+\.[0-9]+\.[0-9]+")
 VERSION_RE = re.compile(r"^([0-9]+)\.([0-9]+)\.([0-9]+)$")
@@ -64,16 +71,47 @@ def commits_since(root, base):
     return out
 
 
+FOOTER_LINE = re.compile(r"^(BREAKING[ -]CHANGE|[A-Za-z][A-Za-z0-9-]*)(: | #)")
+
+
+def _footer_only(paragraph):
+    """True when every line of <paragraph> is a footer line (`Token: value`, `Token #value`)
+    or an indented continuation of one, as git trailers are. A paragraph that starts with
+    a token and goes on in prose is body text."""
+    lines = [line for line in paragraph.splitlines() if line.strip()]
+    return bool(lines) and FOOTER_LINE.match(lines[0]) is not None and all(
+        FOOTER_LINE.match(line) or line[:1] in (" ", "\t") for line in lines)
+
+
+def footer(body):
+    """The footer block, where Conventional Commit footers and git trailers live: the
+    body's last paragraph, plus, when that paragraph is all footer lines, the paragraphs
+    just before it that are too. A harness often appends `Co-Authored-By:` as a paragraph
+    of its own after the other footers, and that must not hide `BREAKING CHANGE:`."""
+    paragraphs = [p for p in re.split(r"\n[ \t]*\n", (body or "").strip()) if p.strip()]
+    if not paragraphs:
+        return ""
+    block = [paragraphs[-1]]
+    if _footer_only(paragraphs[-1]):
+        for para in reversed(paragraphs[:-1]):
+            if not _footer_only(para):
+                break
+            block.insert(0, para)
+    return "\n".join(block)
+
+
 def level_of(subject, body):
-    if re.search(r"^BREAKING[ -]CHANGE:", body or "", re.M):
+    # Only a footer line that starts with the token counts; quoted or inline mentions
+    # (`> BREAKING CHANGE:`, "says BREAKING CHANGE: ...") and body paragraphs do not.
+    if any(BREAKING_FOOTER.match(line) for line in footer(body).splitlines()):
         return "major"
     m = HEADER.match(subject)
     if not m:
-        return "patch"
+        return "none"
     if m.group("bang"):
         return "major"
     types = [t.strip() for t in m.group("types").split(",")]
-    return "minor" if "feat" in types else "patch"
+    return max((RELEASE_TYPES.get(t, "none") for t in types), key=LEVELS.index)
 
 
 def bump(version, level):
@@ -141,17 +179,62 @@ def write_release(root, info, today=None):
     changelog = os.path.join(root, "CHANGELOG.md")
     if os.path.isfile(changelog):
         write_changelog(changelog, version, info["subjects"], today)
+    stamp_self_install(root, version)
     return version
+
+
+AGENTS_BEGIN = "<!-- ai-sdlc:kit-begin"
+AGENTS_END = "<!-- ai-sdlc:kit-end -->"
+SELF_INSTALL_FILES = ("AGENTS.md", ".ai-sdlc/manifest.json", ".ai-sdlc/profile.json")
+
+
+def stamp_self_install(root, version):
+    """Restamp the kit installed into its own repository with the new version.
+
+    Only the version stamps change: the manifest and profile kit_version, and the
+    "Nuhut kit vX" line inside the AGENTS.md managed region, whose hash the manifest
+    records (install.py agents_split), so it is recomputed and upgrade sees no edit."""
+    manifest_path = os.path.join(root, ".ai-sdlc", "manifest.json")
+    if not os.path.isfile(manifest_path):
+        return
+    with open(manifest_path, encoding="utf-8") as h:
+        manifest = json.load(h)
+    manifest["kit_version"] = version
+    agents_path = os.path.join(root, "AGENTS.md")
+    if os.path.isfile(agents_path):
+        with open(agents_path, encoding="utf-8") as h:
+            text = h.read()
+        text = re.sub(r"(<!-- Nuhut kit v)[0-9][^. ]*(?:\.[0-9][^. ]*)*(\. )", r"\g<1>%s\g<2>" % version, text, count=1)
+        with open(agents_path, "w", encoding="utf-8") as h:
+            h.write(text)
+        start, end = text.find(AGENTS_BEGIN), text.find(AGENTS_END)
+        if 0 <= start <= end and "AGENTS.md" in (manifest.get("regions") or {}):
+            region = text[start:end + len(AGENTS_END)]
+            manifest["regions"]["AGENTS.md"] = hashlib.sha256(region.encode("utf-8")).hexdigest()
+    with open(manifest_path, "w", encoding="utf-8") as h:
+        h.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    profile_path = os.path.join(root, ".ai-sdlc", "profile.json")
+    if os.path.isfile(profile_path):
+        with open(profile_path, encoding="utf-8") as h:
+            profile = json.load(h)
+        profile["kit_version"] = version
+        with open(profile_path, "w", encoding="utf-8") as h:
+            h.write(json.dumps(profile, indent=2, sort_keys=True) + "\n")
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("command", choices=("next", "bump"))
+    ap.add_argument("command", choices=("next", "bump", "restamp"))
     ap.add_argument("--root", default=ROOT)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--prerelease", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
+    if args.command == "restamp":
+        version = current_version(args.root)
+        stamp_self_install(args.root, version)
+        print(version)
+        return 0
     info = plan(args.root)
     if args.command == "next":
         if args.prerelease:
@@ -162,7 +245,8 @@ def main(argv=None):
             print(info.get("prerelease") or info["next"])
         return 0
     if info["level"] == "none":
-        print("nothing to release: no commits since VERSION last changed (%s)" % info["current"])
+        print("nothing to release: no feat, fix, perf, refactor or revert commits since VERSION "
+              "last changed (%s)" % info["current"])
         return 0
     if args.dry_run:
         print("would bump %s -> %s (%s, %d commits)" % (info["current"], info["next"], info["level"], info["commits"]))

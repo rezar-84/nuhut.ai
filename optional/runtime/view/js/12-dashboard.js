@@ -196,7 +196,7 @@
     held.slice(0, 4).forEach(function (c) {
       var open = function () { openItemDrawer(c.id); };
       var row = el("div", { cls: "sum-row", role: "listitem" }, [claimChip(c), el("strong", { text: c.id }), el("span", { cls: "muted sum-txt", text: c.branch })]);
-      row.addEventListener("click", open); makeInteractive(row, open, c.id + " claimed by " + c.agent);
+      row.addEventListener("click", open); makeInteractive(row, open, c.id + " claimed by " + claimPerson(c) + " via " + c.agent);
       parRows.appendChild(row);
     });
     if (par.groups && par.groups.length) parRows.appendChild(el("p", { style: "font-size: 12.5px; margin: 8px 0 0;" },
@@ -207,6 +207,37 @@
     var facNote = fac.sharded ? " · " + plural(fac.item_shards || 0, "item shard") : "";
     grid.appendChild(ckCard("parallel", "Parallel work", plural(held.length, "claim") + "; " + plural((par.candidates || []).length, "Ready item") + " scoped" + ((par.plan_first || []).length ? ", " + (par.plan_first || []).length + " unscoped" : "") + facNote + ".",
       [parRows, el("a", { cls: "view-all", href: "#/dashboard/parallel", text: "Plan parallel work →" })]));
+
+    // Environments: which version runs where, from the deploy ledger (sdlc.py deploy).
+    // Ledger text is untrusted, so everything below is a text node.
+    var dep = M.deploys || {}, depEnvs = dep.envs || {}, depNames = Object.keys(depEnvs).sort();
+    var depRows = el("div", { role: "list" });
+    depNames.forEach(function (env) {
+      var line = depEnvs[env] || {}, rec = (dep.records || {})[line.version] || null;
+      var n = rec && rec.items ? rec.items.length : null;
+      var meta = [String(line.date || "").slice(0, 10), line.by || "", n === null ? "" : plural(n, "item")].filter(Boolean).join(" · ");
+      var open = function () { openDeployDrawer(env, line, rec); };
+      var row = el("div", { cls: "sum-row", role: "listitem" }, [el("span", { cls: "chip", text: env }), el("strong", { text: String(line.version || "") }), el("span", { cls: "muted sum-txt", text: meta })]);
+      row.addEventListener("click", open); makeInteractive(row, open, env + " runs " + line.version);
+      depRows.appendChild(row);
+    });
+    if (!depNames.length) depRows.appendChild(el("p", { cls: "muted" }, ["Nothing deployed on record yet. After a deploy, run ", el("code", { text: "python3 .ai-sdlc/bin/sdlc.py deploy record --version <v> --env <env>" })]));
+    if (dep.skipped) depRows.appendChild(el("p", { cls: "muted", style: "font-size: 12px; margin: 6px 0 0;", text: plural(dep.skipped, "malformed ledger line") + " skipped in deploys.jsonl." }));
+    grid.appendChild(ckCard("deploys", "Environments", depNames.length ? plural(depNames.length, "environment") + " on record." : null, [depRows]));
+
+    // Delivery (DORA): the four measures from the deploy ledger, commit dates and hotfix
+    // or defect items. A measure without the records says "not enough data", never a guess.
+    var dora = M.dora || {}, doraMs = dora.measures || [];
+    var doraRows = el("div", { role: "list" });
+    doraMs.forEach(function (m) {
+      var empty = /^not enough data/.test(String(m.value || ""));
+      doraRows.appendChild(el("div", { cls: "sum-row", role: "listitem", title: String(m.basis || "") }, [
+        el("strong", { text: String(m.name || "") }),
+        el("span", { cls: empty ? "muted sum-txt" : "sum-txt", text: String(m.value || "") })]));
+    });
+    if (!doraMs.length) doraRows.appendChild(el("p", { cls: "muted", text: "not enough data: the delivery measures could not be read" + (dora.error ? " (" + dora.error + ")" : "") + "." }));
+    var doraNote = dora.env ? "Deploys to " + dora.env + ", last " + (dora.window_days || 90) + " days." : null;
+    grid.appendChild(ckCard("dora", "Delivery (DORA)", doraNote, [doraRows]));
 
     // Project stats
     var colRows = ["Now", "Next", "Blocked", "Parked", "Later", "Done"].map(function (c) { return [c, f.counts[c] || 0, "var(--c-" + c + ")"]; });
@@ -246,3 +277,33 @@
     }
   }
 
+
+  // One environment's release record beside the dashboard: its range, who, and the items.
+  function openDeployDrawer(env, line, rec) {
+    var r = rec || {};
+    var facts = [["Environment", env], ["Version", line.version], ["Deployed", line.date], ["By", line.by || "unknown"],
+      ["Tool", line.agent || "unknown"], ["Commit", String(line.to || "").slice(0, 12)],
+      ["Range", r.from ? String(r.from).slice(0, 12) + ".." + String(r.to || "").slice(0, 12) : "whole history"],
+      ["Commits", r.commits === undefined ? "?" : String(r.commits)], ["Also in", (r.envs || []).filter(function (e) { return e !== env; }).join(", ") || "none"]];
+    var tb = el("table", { style: "font-size: 13px;" });
+    facts.forEach(function (f) { tb.appendChild(el("tr", null, [el("th", { style: "text-align: left; padding-right: 12px;", text: f[0] }), el("td", { text: String(f[1] === undefined || f[1] === null ? "" : f[1]) })])); });
+    var items = el("div", { style: "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;" });
+    (r.items || []).forEach(function (id) {
+      var c = el("span", { cls: "chip" + (ITEMS[id] ? " link" : ""), text: String(id) });
+      if (ITEMS[id]) { var open = function () { openItemDrawer(id); }; c.addEventListener("click", open); makeInteractive(c, open, "Open " + id); }
+      items.appendChild(c);
+    });
+    var box = el("div", { style: "display: flex; flex-direction: column; height: 100%;" }, [
+      el("div", { cls: "drawer-header" }, [
+        el("strong", { text: "Release " + line.version + " · " + env }),
+        el("button", { cls: "drawer-close", "aria-label": "Close release", text: "✕", on: { click: closeDrawer } })
+      ]),
+      el("div", { cls: "drawer-body" }, [
+        tb,
+        el("h3", { style: "margin: 16px 0 0; font-size: 13px;", text: rec ? plural((r.items || []).length, "work item") + " (Work-Item trailers)" : "No release record found for this version" }),
+        items,
+        el("p", { cls: "muted", style: "font-size: 12px; margin-top: 16px;" }, ["Every environment: ", el("code", { text: "python3 .ai-sdlc/bin/sdlc.py deploy list" })])
+      ])
+    ]);
+    openDrawer(box, { quiet: true });
+  }

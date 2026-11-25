@@ -1,0 +1,34 @@
+{
+  "id": "NUHT-053",
+  "title": "Fast verify: Tier 2 and 3 close on the charter's fast stages; CI and Tier 1 run every stage",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Parked",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "optional/runtime/finish.py",
+    "template/docs/project/charter.md",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "",
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "charter",
+      "commit": "",
+      "at": ""
+    }
+  ],
+  "waiting_on": "rezar-84",
+  "park_reason": "merge approval (Tier 1): 0 of 2 (charter fallback)",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

@@ -1,0 +1,21 @@
+{
+  "id": "NUHT-045",
+  "title": "Signed approvals: verify local approvals, waivers and defect acceptances against an allowed-signers file on the default branch",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Dropped",
+  "depends": [],
+  "touch": [],
+  "created": "2026-11-23",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "rezar-84",
+  "park_reason": "Escalated S0 from the NUHT-041/043 security reviews: decide whether approvals must be signed (git SSH/GPG signing) before local approvals ship as more than opt-in",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": "ADR 0004: authentication comes from the git host, not from records in the agent's environment"
+}

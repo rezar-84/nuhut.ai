@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "github-issues",
+  "version": "1.0.0",
+  "nuhut": "builtin",
+  "description": "GitHub Issues sync through gh: `sdlc.py issues pull` parks unmapped issues as items, `sdlc.py issues push` opens issues for items you name",
+  "overrides": null,
+  "provides": {
+    "commands": [
+      {
+        "id": "issues",
+        "file": "issues.py"
+      }
+    ]
+  }
+}

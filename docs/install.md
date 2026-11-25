@@ -164,8 +164,8 @@ in this mode — without a terminal there is nobody to ask. Other flags: `--docs
 to install the docs under a different directory, `--harness <list>`, `--profile
 <full|compact>`, `--effort-mode <lean|normal|beast>`, `--dev-method <item|epic>`,
 `--decision-style <ask|guide|autopilot>`, `--specs <on|off>`, `--slop-filter <off|on|strict>`, `--acquisition-profile <standard|advanced>`,
-`--hooks`, `--git-hooks [all|secrets]`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
-`--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab>`, `--deploy <list>`,
+`--hooks`, `--git-hooks [all|secrets]`, `--mcp`, `--gitignore-tools`, `--git-exclude`, `--create`, `--no-skills`, `--dry-run`,
+`--lang <code>`, `--scaffold-tests`, `--scaffold-ci <github|gitlab|bitbucket|gitea|generic>`, `--deploy <list>`,
 `--plain`, `--sections <list>`, `--upgrade`, `--repair` and `--uninstall`.
 
 **Living specs.** The Process section asks *Keep living specs of what the system does?*
@@ -240,15 +240,44 @@ Two explicit flags turn detection into project-owned starting files:
 ./install.sh /path/to/project ACME -y --scaffold-tests
 ./install.sh /path/to/project ACME -y --scaffold-ci github
 ./install.sh /path/to/project ACME -y --scaffold-ci gitlab
+./install.sh /path/to/project ACME -y --scaffold-ci bitbucket
+./install.sh /path/to/project ACME -y --scaffold-ci gitea
+./install.sh /path/to/project ACME -y --scaffold-ci generic
 ```
 
 `--scaffold-tests` creates `docs/project/test-plan.md` and
 `.ai-sdlc/testing-profile.json`, both marked as detected and requiring confirmation.
-`--scaffold-ci` creates `.github/workflows/quality.yml` or `.gitlab-ci.yml` from the
-project's detected/confirmed commands. It refuses an empty command set. Scaffolding never
+`--scaffold-ci` creates one CI file from the project's detected/confirmed commands:
+
+| Provider | File | What runs |
+| --- | --- | --- |
+| `github` | `.github/workflows/quality.yml` | on `pull_request`: doctor, the base branch's `ci-check`, the commands |
+| `gitea` | `.gitea/workflows/nuhut.yml` | the same workflow (Gitea and Forgejo Actions run GitHub Actions syntax), with `ci-check --head env` |
+| `gitlab` | `.gitlab-ci.yml` | a `records` job on merge requests (`GIT_DEPTH: 0`): doctor and the target branch's `ci-check`; a manual-only `quality` job with the commands |
+| `bitbucket` | `bitbucket-pipelines.yml` | on pull requests (`clone: depth: full`): doctor, the destination branch's `ci-check`, the commands |
+| `generic` | `ci/nuhut-check.sh` | an executable shell script for any other CI (Azure Pipelines, Jenkins, Buildkite, ...): it unshallows the clone, fetches `origin/$NUHUT_BASE`, runs doctor and the target branch's `ci-check --head env`. Set `NUHUT_BASE` to the target branch, and `NUHUT_HEAD` when the checkout is not the change's last commit |
+
+Every `ci-check` step takes the checker from the target branch's `.ai-sdlc/bin` (it
+warns and runs the change's own copy when the target has none) and reads the target
+branch and head commit from the CI's own variables; see `ci-check` in
+[cli.md](cli.md). `doctor` reports `enforcement: advisory` until one of these files, or
+another CI file the kit recognises, runs `sdlc.py`. With none, it still writes the `doctor --strict`
+and `ci-check` steps and a TODO naming `sdlc.py config --set-check`. Scaffolding never
 overwrites an existing file, never installs a dependency, and leaves runtime and service
-version confirmation to the project charter. Generated jobs are manual-only until a
-human confirms the commands and deliberately enables push or pull-request triggers.
+version confirmation to the project charter. The GitLab `quality` job is manual-only
+until a human confirms the commands and makes it automatic.
+
+The GitHub workflow runs on `pull_request` (never `pull_request_target`, so a fork gets
+no secrets and a read-only token) and on `workflow_dispatch`. It checks out the full
+history, runs `sdlc.py doctor --strict`, then `sdlc.py ci-check` taken from the base
+branch (`git archive "origin/$GITHUB_BASE_REF" .ai-sdlc/bin`), so a pull request is
+judged by the checker and the charter it is merging into; when the base has no
+`.ai-sdlc/bin/sdlc.py` yet, it runs the PR's own copy and warns. It also writes
+`.github/pull_request_template.md`. Confirm the generated commands against the charter
+before relying on it. The check binds only when branch protection on the default branch
+requires the `quality` status and CODEOWNERS assigns `.github/workflows/**` and
+`.ai-sdlc/**` to the people who approve Tier 1 work; without both, a pull request can
+edit or skip the job.
 
 The installer copies `AGENTS.md` to the project root, `docs/` into the project, the six
 slash commands into `.claude/commands/`, and the selected skills into `.claude/skills/`;
@@ -350,6 +379,8 @@ optional/
 install.py                   the installer; install.sh is a wrapper around it
 validate.py                  source and installed-output validation
 tests/smoke.py               installer boundary and workflow tests
+tests/run.py                 runs chosen smoke tests by name, optionally in parallel
+tests/unit/                  fast unittest tests for pure parsers
 benchmarks/effort-modes/     optional isolated-run protocol and measurement scorer
 benchmarks/kit-value/        does the kit change agent behaviour? no kit vs kit vs kit + hooks
 .github/workflows/           continuous validation and tag-based releases
@@ -395,6 +426,38 @@ replaces them, and stops — like any other managed file — if they were edited
 charter row, the upgrade inserts it blank, in its own table, and lists it. An existing row
 is never changed. Skills the project did not choose are not added by an upgrade — `ls
 optional/skills` shows what a newer version ships.
+
+### Upgrading to 6.0
+
+These rules get stricter. Each one can stop work that used to pass on an existing project:
+
+- **Commits are attributed by trailer only.** A commit belongs to an item only when it
+  carries a `Work-Item: <ID>` trailer. A mention in the subject or body no longer counts,
+  so items committed without trailers lose their commits, and `doctor` lists them as an
+  info finding. Fix: commit further work with the trailer (`sdlc.py trailers <ID>` prints
+  it); old commits stay unattributed.
+- **Only an approver can waive verify.** `finish --waive verify --by <name>` must name
+  someone in the charter's **Approvers** row as it stands on the default branch. Fix: put
+  the people who may waive in that row and merge it.
+- **A placeholder Approvers row refuses every waiver.** Fix: fill the row. The upgrade
+  prints a notice when it is still blank.
+- **An agent's session cannot waive.** Without a terminal, a process that carries an
+  agent tool's environment (`CLAUDECODE`, `GEMINI_CLI`, ...) cannot record a waiver or
+  close an item on one already in the ledger, whatever `NUHUT_USER` or `git user.name`
+  says. Fix: the approver runs the waiver in their own terminal.
+- **Agents cannot edit the kit's code, wiring or evidence.** The hooks now deny agent
+  edits and shell writes to `.ai-sdlc/bin/**`, `.ai-sdlc/profile.json`,
+  `.ai-sdlc/git-hooks/**`, `.claude/settings.json`, `.gemini/settings.json`,
+  `.cursor/hooks.json` and the evidence ledger. Fix: make those changes yourself.
+- **`ext update` asks before new code of an allowed extension runs.** Without a terminal
+  it refuses unless given `--yes`. Fix: add `--yes` to scripts.
+
+With `--git-hooks`, `pre-commit` refuses a commit that changes a path in
+`.ai-sdlc/protected.txt` only when the commit comes from an agent's session, as the list
+bound only agent edits in 5.x; `test-lock.txt` binds every committer.
+
+`finish` also needs a full verify run (no `--stage`) on the item's newest code commit.
+Fix: run `sdlc.py verify --item <ID>` again after the last code change.
 
 ### Repairing an install
 
@@ -443,5 +506,5 @@ Installing from a branch that is ahead of the last release (for example `kit-v5`
 merges) still stamps `VERSION` into the manifest and `AGENTS.md`, so a later `--upgrade`
 compares versions correctly. The installer's banner says so, for example
 `v4.0.0 + 30 unreleased commits (next release: 5.0.0)`. The version changes when the branch
-merges to `main` and the release workflow tags it; bumping `VERSION` by hand would stop
-that workflow from tagging the release.
+merges to `main` and the release job in `.github/workflows/version.yml` tags it; bumping
+`VERSION` by hand would stop that job from tagging the release.

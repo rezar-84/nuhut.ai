@@ -158,6 +158,7 @@ line and saves a corrupted backlog. Rules: `../process/10-multi-agent.md`.
 | **Claiming a work item** | _(how an agent takes and releases a backlog row — default: set Owner and status `In progress`, committed on its own)_ |
 | **Single-writer files** | _(beyond the charter, migrations, lockfiles, and generated files, which always are)_ |
 | **May merge to the default branch** | _(yes / no — pull requests only)_ |
+| **Worktree scripts** | none _(optional; default none. `setup: <cmd>; teardown: <cmd>`, plus `; port: <base>` if 4100 is taken. Setup runs in each worktree `sdlc.py claim` or `dispatch` creates; teardown runs before `release --remove-worktree` removes it. Both get `NUHUT_ITEM` and `NUHUT_PORT`, one port per worktree, and a failure is reported. Set with `sdlc.py config --worktree-scripts`)_ |
 
 ## Budgets
 
@@ -254,14 +255,19 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | **Decision style** | `Ask` · `Guide` · `Autopilot` _(default: Guide. How much the agent decides for the person and how much it says in chat; it never lifts a Tier 1 stop or a gated command, and never thins a record. See `process/14-decision-style.md`)_ |
 | **Tier rules** | `Standard` · `Strict` _(default on a new install: Standard — tier by blast radius and reversibility; Tier 3's record is the commit; Tier 2 commits and continues. Strict keeps the 3.x rules, and an upgrade from 3.x sets it so nothing changes silently. See `../CARD.md`, "Tiers")_ |
 | **Acquisition profile** | `Standard` · `Advanced` _(advanced tools require an owned or explicitly authorised target and never grant permission)_ |
-| **Always Tier 1 here** | _(the surfaces that are high-risk in this project specifically)_ |
+| **Always Tier 1 here** | _(surfaces, and backticked path globs such as `infra/**` that ci-check enforces)_ |
 | **Never Tier 1 here** | _(surfaces from the `AGENTS.md` Tier 1 list that genuinely do not apply — e.g. "no PII: this project holds no personal data, see Data categories held". Without this, "when in doubt, tier up" makes almost everything Tier 1.)_ |
 | **Human approval required for** | _(list — mirrors the "Human approval required for" line in `AGENTS.md`, "Project overrides")_ |
 | **Independent review required for** | `none` · `Tier 1` · `Tier 1 and 2` _(default: none — off unless manually turned on for Tier 1 or Tier 1 and 2. When enabled, `sdlc.py doctor` fails such an item, once built, if no review came from a model family other than the author's; a same-family review is a self-check and clears nothing. Judged only on commits that carry Agent or Model trailers)_ |
 | **Discovered defects** | `Parked` · `Auto-Ready (bite)` _(default: Parked — discovered bugs wait for human triage; Auto-Ready lets a Tier 2 or 3 defect with a passing `bite` test enter `Ready`)_ |
+| **Retroactive review within** | _(default: 2 days. A hotfix (`sdlc.py hotfix <ID>`) finishes without its pre-merge review and owes a review file `project/reviews/<ID>-retro-<role>.md` within this many days of being marked; `sdlc.py doctor` fails it after that. See `process/05-change-control.md`, "Rollback and hotfix")_ |
 | **Finish guard** | `on` · `off` _(default: on where the installer registered it (Claude Code). When the agent stops, it names a Tier 1 or 2 item this session committed that is not yet Done or Parked, once per item, and asks for `sdlc.py finish <ID>`. It never blocks a tool call. CI's `sdlc.py doctor --strict` is the check that holds for every tool)_ |
 | **Agent budget per tier** | _(optional, e.g. "Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h". `sdlc.py metrics` reports usage from Tokens and Minutes commit trailers against it; nothing is enforced)_ |
-| **Approvers** | _(names for Tier 1's two approvals)_ |
+| **Approvers** | _(people.json handles for Tier 1's two approvals; GitHub PR reviews count first, these names are the fallback; see project/people.json)_ |
+| **Tier 1 approvals** | `2` _(or `1` for a one-person project)_ |
+| **Local approvals** | `off` _(`on` allows `sdlc.py approve` in a terminal: an unsigned record, for a project without GitHub reviews)_ |
+| **Verify at finish** | `full` _(or `fast: lint, unit, build`: Tier 2 and 3 items run only those stages, and CI runs every stage. Tier 1 always runs every stage)_ |
+| **Extensions allowed** | _(ids of project extensions whose code may run: agent and check commands, hook rules, doctor checks, lifecycle hooks. Read from the default branch, so adding an id on a branch has no effect until it merges. Set with `sdlc.py config --allow-extension <id>`; blank means none)_ |
 | **Staleness threshold** | _(e.g. 90 days — after this, a `project/` doc is treated as a hypothesis)_ |
 
 ## Standards & targets

@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-021",
+  "title": "Split sdlc.py command routing into a command table",
+  "type": "refactor",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "Done",
+  "depends": [
+    "NUHT-016"
+  ],
+  "touch": [
+    "optional/runtime/sdlc.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 1: after ADR 0003 (extension system) is approved",
+  "dropped_reason": ""
+}

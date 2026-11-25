@@ -27,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent
@@ -73,7 +74,9 @@ RETIRED_STATE = "dashboard-state.js"
 RUNTIME_REL = ".ai-sdlc/bin/sdlc.py"
 # Everything under optional/runtime/, installed side by side in .ai-sdlc/bin/.
 RUNTIME_FILES = ("sdlc.py", "view.py", "view.html", "detect.py", "lens.py", "claims.py", "specs.py",
-                 "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py")
+                 "finish.py", "slop.py", "sync.py", "hooks.py", "shards.py", "dispatch.py",
+                 "registry.py", "status.py", "skillgen.py", "ext.py", "net.py", "releases.py",
+                 "notify.py", "mcp_server.py")
 
 # Writing direction is derived from the language tag, never asked: a project that lists
 # `fa` is right-to-left whether or not anyone remembered to say so.
@@ -120,7 +123,7 @@ EN = {
     "h.scaffold_tests": "Creates docs/project/test-plan.md and .ai-sdlc/testing-profile.json, both marked as detected and needing confirmation. Never installs a dependency.",
     "l.scaffold_tests": "Starter test plan",
     "q.scaffold_ci": "Write a starter CI workflow?",
-    "h.scaffold_ci": "Built from the check commands above. Jobs are manual-only until you confirm the commands and enable push or pull-request triggers. Refused if there are no commands.",
+    "h.scaffold_ci": "Built from the check commands above. Jobs are manual-only until you confirm the commands and enable push or pull-request triggers. With no commands, only the record checks are written, with a TODO.",
     "l.scaffold_ci": "Starter CI",
     "review.command": "Same install choices without questions (charter answers stay in the charter):",
     "sec.dest": "Destination",
@@ -631,19 +634,19 @@ How the agent works  (all project defaults, changeable later in the charter)
   --slop-filter <mode>   off | on | strict       -- hold prose to a no-AI-tells standard
 
 Which AI tools read it
-  --harness <list>       claude, cursor, copilot, gemini, windsurf, cline, roo, amp,
-                         aider, or all (default: claude). Codex, Jules, Zed, Factory,
-                         opencode and Antigravity read AGENTS.md and need nothing.
+  --harness <list>       claude, cursor, copilot, gemini, windsurf, cline, roo, amp, aider,
+                         or all (default: claude); --list harnesses names the rest
 
 Enforcement  (off unless asked for)
   --hooks                Claude Code hooks that refuse unsafe commits and edits
   --git-hooks [secrets]  git hooks every agent and human inherits
+  --mcp                  register the read-only MCP server in .mcp.json (Claude Code)
 
 What gets installed
   --deploy <list>        platform checklists, e.g. vercel,cloudflare-edge (or none)
   --profile <name>       full (default) | compact -- shorter docs for small models
   --no-skills            no skills in .claude/skills/
-  --scaffold-tests, --scaffold-ci github|gitlab   a starter test plan, a starter CI
+  --scaffold-tests, --scaffold-ci github|gitlab|bitbucket|gitea|generic   test plan, CI
   --gitignore-tools | --git-exclude    keep .ai-sdlc/ out of git (shared | local only)
   --acquisition-profile  standard | advanced -- for scrapers and crawlers
 
@@ -690,7 +693,11 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
   --no-skills        do not install anything into .claude/skills/
   --scaffold-tests   create a detected project test plan and machine-readable profile
   --scaffold-ci <provider>
-                     create CI for github or gitlab from detected quality commands
+                     create CI from detected quality commands: github
+                     (.github/workflows/quality.yml), gitlab (.gitlab-ci.yml),
+                     bitbucket (bitbucket-pipelines.yml), gitea
+                     (.gitea/workflows/nuhut.yml) or generic (ci/nuhut-check.sh, a
+                     shell script any CI can run with NUHUT_BASE set)
   --hooks            install the opt-in Claude Code hooks: deny a commit with no work
                      item ID or with a credential in it, a file write that holds a
                      credential (and a warning for personal data in a record), an edit to a path in
@@ -719,7 +726,12 @@ USAGE_FULL = """usage: install.sh <target-project-dir> [PREFIX] [options]
                      core.hooksPath directory gets a one-line call appended, never
                      replaced. With pre-commit.com or lefthook the entry to add is
                      printed instead. Never implied by another flag.
-  --preset <name>    solo, team or regulated: sets effort mode, decision style,
+  --mcp              register the kit's MCP server (`sdlc.py mcp`) as "nuhut" in
+                     .mcp.json, which Claude Code reads. Merged into an existing file;
+                     an existing "nuhut" entry or an unreadable file is left alone. The
+                     tools are read-only; the verify tool needs --allow-verify added to
+                     the entry's args by hand.
+  --preset <name>   solo, team or regulated: sets effort mode, decision style,
                      development method and tier rules together (solo: lean, guide,
                      item, standard; team: normal, guide, item, standard; regulated:
                      normal, ask, item, strict). Any of those flags given as well wins.
@@ -841,6 +853,7 @@ class Options(object):
         self.decision_given = False
         self.acquisition_given = False
         self.hooks = False
+        self.mcp = False            # --mcp: register the MCP server in .mcp.json
         self.finish_guard = None   # None: on for a fresh Claude Code install, off on upgrade
         self.preset = ""
         self.tier_rules = "standard"
@@ -978,12 +991,14 @@ def parse_args(argv):
         elif arg == "--scaffold-tests":
             o.scaffold_tests = True
         elif arg == "--scaffold-ci":
-            if i + 1 >= len(argv) or argv[i + 1] not in ("github", "gitlab"):
-                bad_value("--scaffold-ci requires github or gitlab")
+            if i + 1 >= len(argv) or argv[i + 1] not in CI_PROVIDERS:
+                bad_value("--scaffold-ci requires one of: %s" % ", ".join(CI_PROVIDERS))
             o.scaffold_ci = argv[i + 1]
             i += 1
         elif arg == "--hooks":
             o.hooks = True
+        elif arg == "--mcp":
+            o.mcp = True
         elif arg == "--git-hooks":
             o.git_hooks = "all"
             if i + 1 < len(argv) and argv[i + 1] in ("all", "secrets"):
@@ -1100,60 +1115,10 @@ from detect import *  # noqa: E402,F401,F403  (detect(), Detected, Repo, DEPLOY_
 
 
 # Every agent tool looks for its instructions in a different file, and they nearly all
-# now also read AGENTS.md. So AGENTS.md stays the single source of truth and each of
-# these is a pointer to it — never a copy, which would drift within a release.
-# (relative path, header written when the file is created)
-HARNESS_POINTERS = (
-    ("CLAUDE.md", "# Project instructions\n\n"),                     # Claude Code
-    ("GEMINI.md", "# Project instructions\n\n"),                     # Gemini CLI
-    ("AGENT.md", "# Project instructions\n\n"),                      # Amp
-    (".github/copilot-instructions.md", "# Copilot instructions\n\n"),
-    (".cursor/rules/agents.mdc",
-     "---\ndescription: Operating contract for this repository\nalwaysApply: true\n---\n\n"),
-    (".cursorrules", ""),                                            # Cursor (classic)
-    (".windsurfrules", ""),
-    (".clinerules", ""),
-    (".roo/rules/agents.md", "# Project instructions\n\n"),          # Roo Code (.roomodes is YAML)
-    ("CONVENTIONS.md", "# Conventions\n\n"),                         # Aider
-)
-
-# Tools whose own instruction file *is* AGENTS.md need no pointer at all: OpenAI Codex,
-# Jules, Zed, Factory, Cursor 1.x, Google Antigravity and others read it directly.
-HARNESS_NATIVE = ("codex", "jules", "zed", "factory", "opencode", "antigravity")
-
-HARNESS_ALIASES = {
-    "claude": ("CLAUDE.md",),
-    "gemini": ("GEMINI.md",),
-    "amp": ("AGENT.md",),
-    "copilot": (".github/copilot-instructions.md",),
-    "cursor": (".cursor/rules/agents.mdc", ".cursorrules"),
-    "windsurf": (".windsurfrules",),
-    "cline": (".clinerules",),
-    "roo": (".roo/rules/agents.md",),
-    "aider": ("CONVENTIONS.md",),
-}
-
-HARNESS_TITLES = {
-    "claude": "Claude Code", "cursor": "Cursor", "copilot": "GitHub Copilot",
-    "gemini": "Gemini CLI", "windsurf": "Windsurf", "cline": "Cline", "roo": "Roo Code",
-    "amp": "Amp", "aider": "Aider",
-}
-# The order the guided setup offers them in, most used first.
-HARNESS_ORDER = ("claude", "cursor", "copilot", "gemini", "windsurf", "cline", "roo",
-                 "amp", "aider")
-# Files or directories that show a tool is already used here. Detection only pre-ticks
-# the question; the answer decides.
-HARNESS_MARKERS = {
-    "claude": ("CLAUDE.md", ".claude"),
-    "cursor": (".cursor", ".cursorrules"),
-    "copilot": (".github/copilot-instructions.md", ".github/instructions"),
-    "gemini": ("GEMINI.md", ".gemini"),
-    "windsurf": (".windsurfrules", ".windsurf"),
-    "cline": (".clinerules",),
-    "roo": (".roo", ".roomodes"),
-    "amp": ("AGENT.md",),
-    "aider": ("CONVENTIONS.md", ".aider.conf.yml"),
-}
+# now also read AGENTS.md. So AGENTS.md stays the single source of truth and each tool's
+# file is a pointer to it, never a copy. The tools, their pointer files, titles, markers
+# and hook dialects are records in the built-in extensions
+# (optional/extensions/*/nuhut-extension.json); HARNESS_* below are built from them.
 
 # Deployment platforms: (id, label). Each id has a checklist in optional/platforms/<id>.md
 # that installs into <docs>/platforms/ only when the project uses that platform -- the
@@ -2111,22 +2076,65 @@ DECISION_KEYS = {"a": "Ask", "g": "Guide", "p": "Autopilot"}
 SLOP_KEYS = {"o": "Off", "n": "On", "s": "Strict"}
 
 
+def apply_extension_overlays(target, docs, planned, pins):
+    """Render the template overlays of the project's extensions into <planned> in place.
+    Returns ({template rel: ["id@version", ...]}, notes). Only extensions installed with
+    `sdlc.py ext add` (recorded in <pins>) contribute, and only kit templates are
+    targets."""
+    if not pins:
+        return {}, []
+    try:
+        import registry
+    except ImportError:
+        return {}, ["registry.py is missing, so extension overlays were not applied"]
+    reg = registry.load(str(target), kit=None, version=VERSION, warn=False,
+                        use_cache=False, pins=pins)
+    found, notes = registry.template_overlays(reg)
+    applied = {}
+    for target_rel, overlays in sorted(found.items()):
+        overlays = [o for o in overlays if o["ext"] in pins]
+        rel = (Path(docs) / target_rel).as_posix()
+        if not overlays:
+            continue
+        if rel not in planned:
+            notes.append("extension overlay target %s is not a kit template here; skipped"
+                         % target_rel)
+            continue
+        planned[rel] = registry.apply_overlays(planned[rel], overlays)
+        applied[rel] = ["%s@%s" % (o["ext"], o["version"]) for o in sorted(
+            overlays, key=lambda o: (registry.OVERLAY_MODES.index(o["mode"]), o["ext"]))]
+    return applied, notes
+
+
 # Presets set four charter rows together. An explicit flag always wins over the preset,
 # whatever the order on the command line. Presets apply to new installs only: --upgrade
 # keeps whatever the project's charter already says.
-PRESETS = {
-    "solo": {"effort_mode": "lean", "decision_style": "guide", "dev_method": "item",
-             "tier_rules": "standard"},
-    "team": {"effort_mode": "normal", "decision_style": "guide", "dev_method": "item",
-             "tier_rules": "standard"},
-    "regulated": {"effort_mode": "normal", "decision_style": "ask", "dev_method": "item",
-                  "tier_rules": "strict"},
-}
-PRESET_HELP = {
-    "solo": "one person moving fast: lean effort, the agent recommends and you decide",
-    "team": "several people, normal depth -- the kit's own defaults",
-    "regulated": "audited or high-stakes work: every material choice asked, strict tiers",
-}
+#
+# Since 6.0 the kit's built-in extensions (optional/extensions/*/nuhut-extension.json,
+# read by optional/runtime/registry.py) are the only source of the harness and preset
+# tables. The kit always ships them, so a kit without them is broken, not old.
+def _load_registry():
+    try:
+        import registry
+    except Exception as exc:   # a broken registry.py: say so rather than a traceback
+        sys.exit("install.py: optional/runtime/registry.py cannot be imported (%s: %s); "
+                 "re-download the kit" % (exc.__class__.__name__, exc))
+    reg = registry.load(None, kit=SRC)
+    if reg.missing:
+        sys.exit("install.py: optional/extensions/ is missing from the kit; re-download it")
+    return registry, reg
+
+
+REGISTRY_MOD, REGISTRY = _load_registry()
+_TABLES = REGISTRY_MOD.install_tables(REGISTRY)
+HARNESS_POINTERS = _TABLES["HARNESS_POINTERS"]
+HARNESS_NATIVE = _TABLES["HARNESS_NATIVE"]
+HARNESS_ALIASES = _TABLES["HARNESS_ALIASES"]
+HARNESS_TITLES = _TABLES["HARNESS_TITLES"]
+HARNESS_ORDER = _TABLES["HARNESS_ORDER"]
+HARNESS_MARKERS = _TABLES["HARNESS_MARKERS"]
+PRESETS = _TABLES["PRESETS"]
+PRESET_HELP = _TABLES["PRESET_HELP"]
 
 # Menus for the guided setup: (stored value, name, what it means, recommended). The stored
 # values are the ones the charter writers already read, so a menu changes only the asking.
@@ -2191,7 +2199,15 @@ CI_OPTIONS = (
     ("none", "None", "no CI file is written", True),
     ("github", "GitHub Actions", "a manual-only workflow running the confirmed check commands", False),
     ("gitlab", "GitLab CI", "the same, as .gitlab-ci.yml", False),
+    ("bitbucket", "Bitbucket Pipelines", "the record checks on pull requests, as bitbucket-pipelines.yml", False),
+    ("gitea", "Gitea / Forgejo Actions", "the GitHub workflow, as .gitea/workflows/nuhut.yml", False),
+    ("generic", "Any CI (shell script)", "ci/nuhut-check.sh: doctor and ci-check, given NUHUT_BASE", False),
 )
+CI_PROVIDERS = tuple(value for value, _, _, _ in CI_OPTIONS if value != "none")
+# Where each --scaffold-ci provider writes its file.
+CI_FILES = {"github": ".github/workflows/quality.yml", "gitlab": ".gitlab-ci.yml",
+            "bitbucket": "bitbucket-pipelines.yml", "gitea": ".gitea/workflows/nuhut.yml",
+            "generic": "ci/nuhut-check.sh"}
 ACCESS_OPTIONS = (
     ("Role-Based (RBAC)", "Role-Based (RBAC)", "users hold roles; roles grant permissions", False),
     ("Simple Owner/User", "Simple Owner/User", "an owner and ordinary users", False),
@@ -2306,6 +2322,11 @@ def preview_files(w):
             inst.scaffold()
             inst.install_hooks()
             inst.install_git_hooks()
+            # The same steps the real install runs after these, so the preview's count is
+            # what gets written (the .gitattributes lines included).
+            inst.install_mcp()
+            inst.apply_git_ignores()
+            inst.apply_git_attributes()
     except (IOError, OSError, RuntimeError, ValueError):
         pass
     finally:
@@ -2379,6 +2400,8 @@ def equivalent_command(w):
         parts.append("--hooks")
     if o.git_hooks:
         parts += ["--git-hooks"] + (["secrets"] if o.git_hooks == "secrets" else [])
+    if o.mcp:
+        parts.append("--mcp")
     if o.gitignore_tools:
         parts.append("--gitignore-tools")
     if o.git_exclude:
@@ -3049,58 +3072,37 @@ def managed_source_texts(target, docs, ctx, profile="full", shared_skills=False)
     for name in RUNTIME_FILES:
         planned[".ai-sdlc/bin/" + name] = substitute(
             (SRC / "optional" / "runtime" / name).read_text(encoding="utf-8"), ctx)
+    for src, rel in extension_sources():
+        planned[rel] = substitute(src.read_text(encoding="utf-8"), ctx)
     return planned
 
 
+EXTENSIONS_REL = ".ai-sdlc/extensions"
+
+
+def extension_sources():
+    """The kit's built-in extensions as (source file, installed path) pairs. They install
+    into .ai-sdlc/extensions/ as kit-managed files; .ai-sdlc/local/extensions/ holds the
+    project's own and is never written by the installer."""
+    base = SRC / "optional" / "extensions"
+    if not base.is_dir():
+        return []
+    return [(path, "%s/%s" % (EXTENSIONS_REL, path.relative_to(base).as_posix()))
+            for path in sorted(base.rglob("*")) if path.is_file()
+            and "__pycache__" not in path.parts]
+
+
 # The loop's entry points, as skills for tools that list skills where Claude Code lists
-# commands (Antigravity's / menu, Codex, Cursor, Gemini CLI, Copilot). Generated from the
-# command files so there is one source. sdlc-doctor is not here: optional/skills/ already
-# ships a skill by that name.
-LOOP_SKILLS = ("sdlc-plan", "sdlc-build", "sdlc-verify", "sdlc-review", "sdlc-finish", "sdlc-log")
-LOOP_SKILL_WHEN = {
-    "sdlc-plan": "Use when the user invokes /sdlc-plan or asks to plan, frame or scope a "
-                 "change, or when a new request needs a tracked work item and a reviewed "
-                 "plan before any code is written.",
-    "sdlc-build": "Use only when the user invokes /sdlc-build or explicitly asks to build "
-                  "or implement a plan that is already approved. Never on your own "
-                  "initiative: building without an approved plan is what this loop exists "
-                  "to prevent.",
-    "sdlc-verify": "Use when the user invokes /sdlc-verify or asks to run the checks, and "
-                   "before claiming that anything passes, works or is done.",
-    "sdlc-review": "Use when the user invokes /sdlc-review or asks for a review of a plan "
-                   "or a change, and when a plan or a diff reaches a review gate.",
-    "sdlc-finish": "Use when the user invokes /sdlc-finish or asks to finish, close or wrap "
-                   "up a work item that is built, and when the finish guard names an item "
-                   "this session left open.",
-    "sdlc-log": "Use when the user invokes /sdlc-log or asks to close, log or wrap up a "
-                "work item that is built, verified and reviewed.",
-}
+# commands. One converter (optional/runtime/skillgen.py) serves the installer and
+# `sdlc.py repair --shared-skills`.
+from skillgen import LOOP_SKILLS, LOOP_SKILL_WHEN, command_to_skill_text  # noqa: E402,F401
 
 
 def command_skill_text(name):
-    """A loop command rewritten as an Agent Skills SKILL.md: name and description in the
-    frontmatter, the argument placeholder turned into prose, and references to other
-    commands turned into references to their skills. Placeholders are left for
+    """A loop command rewritten as an Agent Skills SKILL.md. Placeholders are left for
     substitute()."""
     text = (SRC / "optional" / "claude-commands" / (name + ".md")).read_text(encoding="utf-8")
-    m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
-    meta, body = {}, text
-    if m:
-        body = text[m.end():]
-        for line in m.group(1).splitlines():
-            key, _, value = line.partition(":")
-            meta[key.strip()] = value.strip().strip('"')
-    hint = meta.get("argument-hint", "")
-    body = body.replace(
-        "$ARGUMENTS",
-        "the request given with this skill: the text after its name, or the request in the "
-        "conversation that called for it" + (" (expected: `%s`)" % hint if hint else "") + ".")
-    body = re.sub(r"`/(sdlc-[a-z-]+)`", r"the `\1` skill", body)
-    description = "%s. %s" % (meta.get("description", name).rstrip("."), LOOP_SKILL_WHEN[name])
-    return ("---\nname: %s\ndescription: %s\n---\n\n"
-            "<!-- Generated from the kit's optional/claude-commands/%s.md by install.py. "
-            "Kit-managed: change the kit, not this file. -->\n%s"
-            % (name, json.dumps(description, ensure_ascii=False), name, body))
+    return command_to_skill_text(name, text)
 
 
 def hook_command(name):
@@ -3189,7 +3191,9 @@ def load_manifest(target):
     return None
 
 
-def write_manifest(target, docs, files, regions=None):
+def write_manifest(target, docs, files, regions=None, extensions=None, overlays=None):
+    """<extensions> is the `sdlc.py ext` record of project extensions, copied through
+    unchanged; <overlays> names, per template, the extension overlays rendered into it."""
     payload = {
         "schema": 1,
         "kit_version": VERSION,
@@ -3198,6 +3202,10 @@ def write_manifest(target, docs, files, regions=None):
     }
     if regions:
         payload["regions"] = dict(sorted(regions.items()))
+    if extensions:
+        payload["extensions"] = extensions
+    if overlays:
+        payload["overlays"] = dict(sorted(overlays.items()))
     atomic_write_text(ensure_inside(target, Path(target) / MANIFEST_REL),
                       json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
@@ -3209,7 +3217,7 @@ def is_managed_rel(rel, docs):
     prefixes = ((str(docs), "process"), (str(docs), "roles"), (str(docs), "templates"),
                 (str(docs), "platforms"), (".claude", "skills"), (".claude", "commands"),
                 (".claude", "hooks"), (".ai-sdlc", "bin"), (".ai-sdlc", "git-hooks"),
-                (".agents", "skills"))
+                (".ai-sdlc", "extensions"), (".agents", "skills"))
     return path.parts in ((str(docs), "README.md"), (str(docs), "CARD.md"),
                           ) + tuple((str(docs), name) for name in RETIRED_DOCS) or any(
         path.parts[:2] == prefix for prefix in prefixes)
@@ -3510,6 +3518,7 @@ class Installer(object):
         candidates = [self.target / "AGENTS.md", self.target / "CLAUDE.md",
                       self.target / MANIFEST_REL]
         candidates.extend(self.target / ".ai-sdlc" / "bin" / name for name in RUNTIME_FILES)
+        candidates.extend(self.target / rel for _, rel in extension_sources())
         candidates.extend(self.target / self.docs / path.relative_to(SRC / "template" / "docs")
                           for path in self.doc_sources())
         if w.a.get("commands", True):
@@ -3528,13 +3537,10 @@ class Installer(object):
         if self.o.scaffold_tests:
             candidates.extend((self.target / self.docs / "project" / "test-plan.md",
                                self.target / ".ai-sdlc" / "testing-profile.json"))
+        if self.o.scaffold_ci:
+            candidates.append(self.target / CI_FILES[self.o.scaffold_ci])
         if self.o.scaffold_ci == "github":
-            candidates.append(self.target / ".github" / "workflows" / "quality.yml")
-        elif self.o.scaffold_ci == "gitlab":
-            candidates.append(self.target / ".gitlab-ci.yml")
-        if self.o.scaffold_ci and not [key for key in self.selected_commands()
-                                       if key not in ("run",)]:
-            raise RuntimeError("cannot scaffold CI: no quality commands were detected or confirmed")
+            candidates.append(self.target / ".github" / "pull_request_template.md")
         for candidate in candidates:
             ensure_inside(self.target, candidate)
         if not self.o.dry_run:
@@ -3543,6 +3549,8 @@ class Installer(object):
         for name in RUNTIME_FILES:
             self.install_file(SRC / "optional" / "runtime" / name,
                               self.target / ".ai-sdlc" / "bin" / name)
+        for path, rel in extension_sources():
+            self.install_file(path, self.target / rel)
         for path in self.doc_sources():
             self.install_file(path, self.target / self.docs
                               / path.relative_to(SRC / "template" / "docs"))
@@ -3626,7 +3634,9 @@ class Installer(object):
     def install_hooks(self):
         """Merged into whatever settings.json is already there, never written over it:
         the file usually carries permissions somebody tuned by hand."""
-        if "CLAUDE.md" in self.harnesses and self.o.finish_guard is not False:
+        claude_wired = any((rec.get("hooks") or {}).get("dialect") == "claude"
+                           for _, rec in self.chosen_harness_records())
+        if claude_wired and self.o.finish_guard is not False:
             if self.o.dry_run:
                 print("  would merge    .claude/settings.json (finish guard)")
             else:
@@ -3728,53 +3738,112 @@ class Installer(object):
         print("  %s %s (%d hook%s)" % ("merge         " if added else "unchanged     ",
                                       rel, added, "" if added == 1 else "s"))
 
+    def chosen_harness_records(self):
+        """[(id, registry record)] for the tools this install wired: a pointer tool whose
+        first pointer file was chosen, or a native tool named with --harness."""
+        native = set(getattr(self.o, "native_harnesses", None) or ())
+        out = []
+        for hid, rec in REGISTRY.harnesses().items():
+            ptrs = rec.get("pointer") or []
+            if (ptrs and ptrs[0].get("path") in self.harnesses) or (
+                    rec.get("native") and hid in native):
+                out.append((hid, rec))
+        return out
+
     def install_harness_hooks(self):
-        """The same six rules under Gemini CLI and the three shell rules under Cursor,
-        through .claude/hooks/adapter.sh. Only for harnesses this install wired."""
-        if "GEMINI.md" in self.harnesses:
-            def gemini(data):
-                hooks = data.setdefault("hooks", {})
-                if not isinstance(hooks, dict):
-                    print("  skip           .gemini/settings.json has a non-object 'hooks' -- not merged.")
-                    return None
-                entries = hooks.setdefault("BeforeTool", [])
-                if not isinstance(entries, list):
-                    return None
-                added = 0
-                for name, _, matcher, _, status in self.HOOK_SPECS:
-                    command = 'sh "$GEMINI_PROJECT_DIR"/.claude/hooks/adapter.sh gemini %s' % name
-                    if any(isinstance(e, dict) and any(isinstance(h, dict) and h.get("command") == command
-                                                       for h in (e.get("hooks") or []))
-                           for e in entries):
-                        continue
-                    entries.append({"matcher": self.GEMINI_MATCHERS[matcher],
-                                    "hooks": [{"type": "command", "command": command,
-                                               "name": "ai-sdlc " + name[:-3],
-                                               "description": status}]})
-                    added += 1
-                return added
-            self.merge_json_hooks(".gemini/settings.json", gemini)
-        if ".cursor/rules/agents.mdc" in self.harnesses:
-            def cursor(data):
-                data.setdefault("version", 1)
-                hooks = data.setdefault("hooks", {})
-                if not isinstance(hooks, dict):
-                    print("  skip           .cursor/hooks.json has a non-object 'hooks' -- not merged.")
-                    return None
-                entries = hooks.setdefault("beforeShellExecution", [])
-                if not isinstance(entries, list):
-                    return None
-                added = 0
-                for name, _, matcher, _, _ in self.HOOK_SPECS:
-                    if "Bash" not in matcher:
-                        continue
-                    command = 'sh "$CURSOR_PROJECT_DIR"/.claude/hooks/adapter.sh cursor %s' % name
-                    if any(isinstance(e, dict) and e.get("command") == command for e in entries):
-                        continue
-                    entries.append({"command": command, "timeout": 15})
-                    added += 1
-                return added
-            self.merge_json_hooks(".cursor/hooks.json", cursor)
+        """The same rules under every other wired tool whose harness record names a hook
+        dialect, through .claude/hooks/adapter.sh. The record gives the settings file and
+        the event names; the dialect (how that file is shaped) is chosen by name here.
+        A tool with no dialect gets no guards, and the install says so."""
+        writers = {"gemini": self.gemini_hooks, "cursor": self.cursor_hooks}
+        for hid, rec in self.chosen_harness_records():
+            spec = rec.get("hooks") or {}
+            dialect = spec.get("dialect")
+            if dialect == "claude":
+                continue                 # install_hooks wrote .claude/settings.json
+            if dialect in writers and spec.get("settings"):
+                writers[dialect](hid, spec["settings"], spec.get("events") or {})
+            else:
+                print("  note           %s: guards do not run for this tool; the git hooks "
+                      "(--git-hooks) still check its commits" % rec.get("title", hid))
+
+    def gemini_hooks(self, hid, rel, events):
+        """Gemini CLI's dialect: every rule as a BeforeTool hook in <rel>, matched on its
+        tool names."""
+        event = events.get("pre_tool", "BeforeTool")
+
+        def mutate(data):
+            hooks = data.setdefault("hooks", {})
+            if not isinstance(hooks, dict):
+                print("  skip           %s has a non-object 'hooks' -- not merged." % rel)
+                return None
+            entries = hooks.setdefault(event, [])
+            if not isinstance(entries, list):
+                return None
+            added = 0
+            for name, _, matcher, _, status in self.HOOK_SPECS:
+                command = 'sh "$GEMINI_PROJECT_DIR"/.claude/hooks/adapter.sh %s %s' % (hid, name)
+                if any(isinstance(e, dict) and any(isinstance(h, dict) and h.get("command") == command
+                                                   for h in (e.get("hooks") or []))
+                       for e in entries):
+                    continue
+                entries.append({"matcher": self.GEMINI_MATCHERS[matcher],
+                                "hooks": [{"type": "command", "command": command,
+                                           "name": "ai-sdlc " + name[:-3],
+                                           "description": status}]})
+                added += 1
+            return added
+        self.merge_json_hooks(rel, mutate)
+
+    def cursor_hooks(self, hid, rel, events):
+        """Cursor's dialect: the shell rules as beforeShellExecution hooks in <rel>. The
+        event carries the command only, so the file-write rules are not registered."""
+        event = events.get("pre_shell", "beforeShellExecution")
+
+        def mutate(data):
+            data.setdefault("version", 1)
+            hooks = data.setdefault("hooks", {})
+            if not isinstance(hooks, dict):
+                print("  skip           %s has a non-object 'hooks' -- not merged." % rel)
+                return None
+            entries = hooks.setdefault(event, [])
+            if not isinstance(entries, list):
+                return None
+            added = 0
+            for name, _, matcher, _, _ in self.HOOK_SPECS:
+                if "Bash" not in matcher:
+                    continue
+                command = 'sh "$CURSOR_PROJECT_DIR"/.claude/hooks/adapter.sh %s %s' % (hid, name)
+                if any(isinstance(e, dict) and e.get("command") == command for e in entries):
+                    continue
+                entries.append({"command": command, "timeout": 15})
+                added += 1
+            return added
+        self.merge_json_hooks(rel, mutate)
+
+    def apply_deploy_attributes(self):
+        """The deploy ledger is append-only, so parallel branches merge it by union."""
+        line = "%s/project/deploys.jsonl merge=union" % self.docs
+        path = ensure_inside(self.target, self.target / ".gitattributes")
+        content = ""
+        if path.exists():
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (IOError, OSError, UnicodeDecodeError):
+                print("  skip           .gitattributes is unreadable -- add '%s' by hand" % line)
+                return
+        if any(existing.split() == line.split() for existing in content.splitlines()):
+            self.skipped += 1
+            print("  skip (exists)  %s in .gitattributes" % line)
+        elif self.o.dry_run:
+            self.added += 1
+            print("  would add      %s to .gitattributes" % line)
+        else:
+            entry = ("\n" if content and not content.endswith("\n") else "") + \
+                "# Nuhut: the deploy ledger is append-only\n" + line + "\n"
+            atomic_write_text(path, content + entry)
+            self.added += 1
+            print("  gitattributes  %s" % line)
 
     def apply_git_ignores(self):
         want_gitignore = bool(self.o.gitignore_tools)
@@ -3847,6 +3916,42 @@ class Installer(object):
             elif not self.o.dry_run:
                 sys.stderr.write("warning: --git-exclude requested but %s is not a git repository\n" % self.target)
 
+    MERGE_DRIVER = "nuhut-shard"
+
+    def apply_git_attributes(self):
+        """Route item shards through the nuhut-shard merge driver. Only missing lines are
+        appended: every line already in .gitattributes (the deploys.jsonl merge=union line
+        among them) is kept as it is. Git config is per clone and is never written here."""
+        self.apply_deploy_attributes()
+        pattern = "%s/project/items/*.json merge=%s" % (self.docs, self.MERGE_DRIVER)
+        ga_path = ensure_inside(self.target, self.target / ".gitattributes")
+        content = ""
+        if ga_path.exists():
+            try:
+                content = ga_path.read_text(encoding="utf-8")
+            except (IOError, OSError, UnicodeDecodeError):
+                print("  skip           .gitattributes is unreadable -- add '%s' by hand" % pattern)
+                return
+        present = any(line.split() == pattern.split() for line in content.splitlines())
+        if present:
+            self.skipped += 1
+            print("  skip (exists)  %s in .gitattributes" % pattern)
+        elif self.o.dry_run:
+            self.added += 1
+            print("  would add      %s to .gitattributes" % pattern)
+        else:
+            entry = ("\n" if content and not content.endswith("\n") else "") + \
+                "# Nuhut: field-level merge of work item shards (sdlc.py merge-shard)\n" + pattern + "\n"
+            atomic_write_text(ga_path, content + entry)
+            self.added += 1
+            print("  gitattributes  %s (added to .gitattributes)" % pattern)
+        if not self.o.dry_run:
+            print("  next           enable the shard merge driver in each clone: "
+                  "python3 .ai-sdlc/bin/sdlc.py fix merge-driver")
+            print("                 (or by hand: git config merge.%s.driver "
+                  "\"python3 .ai-sdlc/bin/sdlc.py merge-shard %%O %%A %%B --marker-size %%L\")"
+                  % self.MERGE_DRIVER)
+
     def note_profile(self):
         """A reader must be able to tell a deliberate absence from a broken install."""
         if self.o.profile != "compact" or self.o.dry_run:
@@ -3868,6 +3973,42 @@ class Installer(object):
         ("pre-commit", "sh .ai-sdlc/git-hooks/pre-commit"),
         ("commit-msg", 'sh .ai-sdlc/git-hooks/commit-msg "$1"'),
     )
+
+    def install_mcp(self):
+        """--mcp: register `sdlc.py mcp` as the "nuhut" server in .mcp.json. The file is the
+        project's, shared with other servers: the entry is merged in, an existing "nuhut"
+        entry is never replaced, and a file that is not a JSON object is left alone."""
+        if not self.o.mcp:
+            return
+        dest = ensure_inside(self.target, self.target / ".mcp.json")
+        entry = {"command": "python3", "args": [RUNTIME_REL, "mcp"]}
+        how = ('                 verify is off: to let the agent run the checks, add '
+               '"--allow-verify" to the nuhut entry\'s args')
+        data = {}
+        if dest.exists():
+            try:
+                data = json.loads(dest.read_text(encoding="utf-8") or "{}")
+            except (ValueError, UnicodeDecodeError):
+                data = None
+            if not isinstance(data, dict) or not isinstance(data.get("mcpServers", {}), dict):
+                print("  note           .mcp.json is not a JSON object with mcpServers; left "
+                      "alone. Add the nuhut server by hand:")
+                print('                 "nuhut": %s' % json.dumps(entry))
+                print(how)
+                return
+            if "nuhut" in data.get("mcpServers", {}):
+                self.skipped += 1
+                print("  skip (exists)  .mcp.json (nuhut server)")
+                return
+        verb = "merge" if dest.exists() else "add"
+        if self.o.dry_run:
+            print("  would %-7s .mcp.json (nuhut server)" % verb)
+            return
+        data.setdefault("mcpServers", {})["nuhut"] = entry
+        atomic_write_text(dest, json.dumps(data, indent=2) + "\n")
+        self.added += 1
+        print("  %-14s .mcp.json (nuhut server: read-only tools)" % verb)
+        print(how)
 
     def install_git_hooks(self):
         """Harness-independent guards git itself runs. The scripts are kit-managed under
@@ -4157,39 +4298,182 @@ class Installer(object):
             if charter_rel in self.fresh:
                 self.edit(charter_rel, lambda value: tick_artifact(value, "eval-plan"))
 
+    # With no detected or confirmed check commands, the record checks still bind.
+    NO_CHECKS_TODO = (
+        "      # TODO: no check commands were detected. Add a step per charter command",
+        "      # (`python3 .ai-sdlc/bin/sdlc.py config --set-check unit=\"<command>\"`), e.g.",
+        "      #   - name: Unit",
+        "      #     run: \"npm test\"")
+
     def ci_text(self, provider):
         commands = self.selected_commands()
         ordered = [(key, commands[key]) for _, _, key in CMD_FIELDS
                    if key not in ("run",) and key in commands]
-        if provider == "github":
-            lines = ["name: Project quality", "", "on:", "  workflow_dispatch:",
+        if provider in ("github", "gitea"):
+            # Never pull_request_target: a fork's PR gets no secrets and a read-only token.
+            # The PR's range is judged by the base branch's ci-check, read from the
+            # environment and the event file, so this text needs no GitHub expression.
+            # Gitea and Forgejo Actions run the same syntax and set the same variables.
+            head = "event" if provider == "github" else "env"
+            lines = ["name: Project quality", "", "on:", "  pull_request:", "  workflow_dispatch:",
                      "", "permissions:", "  contents: read", "",
                      "jobs:", "  quality:", "    runs-on: ubuntu-latest", "    steps:",
                      "      - uses: actions/checkout@v4",
+                     "        with:",
+                     "          fetch-depth: 0",
                      "      - name: SDLC records",
-                     "        run: python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
+                     "        run: python3 .ai-sdlc/bin/sdlc.py doctor --strict",
+                     "      - name: PR records",
+                     "        if: github.event_name == 'pull_request'",
+                     "        run: |",
+                     '          mkdir -p "$RUNNER_TEMP/base"']
+            lines.extend(self.checker_select_shell('origin/$GITHUB_BASE_REF', '$RUNNER_TEMP/base',
+                                                   "          ", "::warning::", "::error::"))
+            lines += [
+                     '          python3 "$checker" --root "$GITHUB_WORKSPACE" ci-check --base "origin/$GITHUB_BASE_REF" \\',
+                     '            --head %s --charter-ref "origin/$GITHUB_BASE_REF"' % head]
             for key, command in ordered:
                 lines.extend(("      - name: %s" % key.replace("_", " ").title(),
                               "        run: %s" % json.dumps(command)))
-            lines.extend(("", "# Manual-only by default. Confirm commands, runtime, and service versions",
-                          "# from the charter before adding push or pull_request triggers.", ""))
+            if not ordered:
+                lines.extend(self.NO_CHECKS_TODO)
+            lines.extend(("",
+                          "# Runs on every pull request. Confirm the commands above, and the runtime and",
+                          "# service versions, against the charter: a wrong command fails every PR or",
+                          "# passes one it should not. ci-check binds only when branch protection on the",
+                          "# default branch requires the `quality` status and CODEOWNERS assigns",
+                          "# .%s/workflows/** and .ai-sdlc/** to the people who approve Tier 1 work;" % provider,
+                          "# without both, a PR can edit or skip this job.", ""))
             return "\n".join(lines)
-        lines = ["stages:", "  - quality", "", "quality:", "  stage: quality",
-                 "  when: manual", "  script:",
-                 "    - python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
+        if provider == "generic":
+            return "\n".join(["#!/bin/sh",
+                              "# Nuhut merge-time checks for any CI host: doctor, then ci-check on the",
+                              "# change's commits. Run it from the repository root in the job that must pass",
+                              "# before a merge, with NUHUT_BASE set to the branch the change merges into and,",
+                              "# when the checkout is not the change's last commit, NUHUT_HEAD to that commit.",
+                              "# It binds only when the host requires this job and the people who approve",
+                              "# Tier 1 work own this file and .ai-sdlc/**.",
+                              "set -eu",
+                              'case "${NUHUT_BASE:-}" in',
+                              '  "") echo "nuhut-check: set NUHUT_BASE to the target branch, e.g. main" >&2; exit 2 ;;',
+                              '  -*) echo "nuhut-check: NUHUT_BASE must not start with -" >&2; exit 2 ;;',
+                              "esac",
+                              "export NUHUT_BASE",
+                              "# ci-check needs full history and the target branch.",
+                              'if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then',
+                              "  git fetch --quiet --unshallow origin",
+                              "fi",
+                              "python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
+                             + self.base_checker_shell("$NUHUT_BASE", '"$PWD"', "") + [""])
+        script = ["python3 .ai-sdlc/bin/sdlc.py doctor --strict"]
+        if provider == "bitbucket":
+            lines = ["image: python:3.12", "", "clone:", "  depth: full", "",
+                     "pipelines:", "  pull-requests:", '    "**":', "      - step:",
+                     "          name: Project quality", "          script:"]
+            pad = "            "
+            body = self.base_checker_shell("$BITBUCKET_PR_DESTINATION_BRANCH",
+                                           '"$BITBUCKET_CLONE_DIR"', pad + "  ")
+            lines.extend(pad + "- " + json.dumps(line) for line in script)
+            lines.append(pad + "- |")
+            lines.extend(body)
+            lines.extend(pad + "- " + json.dumps(command) for _, command in ordered)
+            if not ordered:
+                lines.extend(self.NO_CHECKS_TODO)
+            lines.extend(("", "# Runs on every pull request. Confirm the commands above, and the runtime",
+                          "# version, against the charter. ci-check binds only when the destination",
+                          "# branch requires a passing build before merge and the people who approve",
+                          "# Tier 1 work review changes to this file and .ai-sdlc/**.", ""))
+            return "\n".join(lines)
+        lines = ["stages:", "  - quality", "",
+                 "records:", "  stage: quality", "  image: python:3.12",
+                 "  rules:", '    - if: $CI_PIPELINE_SOURCE == "merge_request_event"',
+                 "  variables:", "    GIT_DEPTH: 0", "  script:",
+                 "    - python3 .ai-sdlc/bin/sdlc.py doctor --strict", "    - |"]
+        lines.extend(self.base_checker_shell("$CI_MERGE_REQUEST_TARGET_BRANCH_NAME",
+                                             '"$CI_PROJECT_DIR"', "      "))
+        lines.extend(("", "quality:", "  stage: quality",
+                      "  when: manual", "  script:",
+                      "    - python3 .ai-sdlc/bin/sdlc.py doctor --strict"))
         for _, command in ordered:
             lines.append("    - %s" % json.dumps(command))
-        lines.extend(("", "# Manual-only by default. Confirm commands, runtime, and service versions",
-                      "# from the charter before making this job automatic or required.", ""))
+        if not ordered:
+            lines.extend(self.NO_CHECKS_TODO)
+        lines.extend(("", "# records runs on every merge request; ci-check binds only when the project",
+                      "# requires the pipeline to succeed before merge and CODEOWNERS covers this",
+                      "# file and .ai-sdlc/**. quality is manual-only by default: confirm commands,",
+                      "# runtime, and service versions from the charter before making it automatic.", ""))
         return "\n".join(lines)
+
+    @staticmethod
+    def checker_select_shell(ref, tmp, pad, warn, err):
+        """Shell lines that set $checker to <ref>'s .ai-sdlc/bin/sdlc.py, so a change cannot
+        edit the checker it is judged by. They fall back to the change's own copy, with a
+        warning, only when <ref> resolves and has no kit, or a kit from before 6.0 (its --help
+        runs and names no ci-check); a ref that cannot be read, an extraction failure or a
+        checker that fails to start exits 1 (ship review NUHT-044 findings 2 and 4)."""
+        bin_ = tmp + "/.ai-sdlc/bin/sdlc.py"
+        return [pad + line for line in (
+            'if ! git rev-parse --verify --quiet "%s^{commit}" >/dev/null; then' % ref,
+            '  echo "%scannot read %s; not falling back to this change\'s copy"; exit 1' % (err, ref),
+            'elif [ -z "$(git ls-tree --name-only "%s" -- .ai-sdlc/bin/sdlc.py)" ]; then' % ref,
+            '  echo "%s%s has no .ai-sdlc/bin/sdlc.py; running this change\'s own ci-check"' % (warn, ref),
+            '  checker=.ai-sdlc/bin/sdlc.py',
+            'elif ! git archive "%s" .ai-sdlc/bin | tar -x -C "%s"; then' % (ref, tmp),
+            '  echo "%scould not extract .ai-sdlc/bin from %s"; exit 1' % (err, ref),
+            'elif python3 "%s" ci-check --help >/dev/null 2>&1; then' % bin_,
+            '  checker="%s"' % bin_,
+            'elif python3 "%s" --help >/dev/null 2>&1 && ! python3 "%s" --help 2>&1 | grep -q ci-check; then'
+            % (bin_, bin_),
+            '  echo "%s%s has a kit from before 6.0 (no ci-check); running this change\'s own ci-check"'
+            % (warn, ref),
+            '  checker=.ai-sdlc/bin/sdlc.py',
+            'else',
+            '  echo "%sthe ci-check on %s fails to start; not falling back to this change\'s copy"' % (err, ref),
+            '  exit 1',
+            'fi')]
+
+    @staticmethod
+    def base_checker_shell(base, root, pad):
+        """Shell lines that fetch the target branch <base> (a variable), take ci-check from
+        that branch's .ai-sdlc/bin so the change cannot edit its own checker, and run it
+        with the CI context ci-check reads itself (--head env, base from the variables)."""
+        return [pad + line for line in (
+            'git fetch --quiet origin "+refs/heads/%s:refs/remotes/origin/%s"' % (base, base),
+            'tmp="$(mktemp -d)"',) + tuple(Installer.checker_select_shell(
+                "origin/" + base, "$tmp", "", "warning: ", "error: ")) + (
+            'python3 "$checker" --root %s ci-check --head env --charter-ref "origin/%s"' % (root, base),)]
+
+    def pr_template_text(self):
+        """.github/pull_request_template.md: what ci-check judges, asked up front."""
+        docs = self.docs
+        return "\n".join((
+            "## Work item", "",
+            "Work-Item: <ID>",
+            "Tier: <1, 2 or 3>",
+            "Plan: <%s/project/plans/<ID>.md, or none at Tier 3>" % docs, "",
+            "## Evidence", "",
+            "- Verify run: <run name from `python3 .ai-sdlc/bin/sdlc.py verify --item <ID>`, "
+            "ledger committed>",
+            "- Review file: <%s/project/reviews/<ID>-<role>.md; required at Tier 1>" % docs, "",
+            "## Checklist", "",
+            "- [ ] Every commit ends with Work-Item, Agent and Model trailers "
+            "(`python3 .ai-sdlc/bin/sdlc.py trailers <ID>`), or `Agent: human`",
+            "- [ ] The verify run is on the last code commit and its ledger rows are committed",
+            "- [ ] The tier is not lower than the paths this PR changes imply (the charter's "
+            "Always Tier 1 here row)",
+            "- [ ] `python3 .ai-sdlc/bin/sdlc.py ci-check --base <default branch>` passes", ""))
 
     def scaffold(self):
         if self.o.scaffold_tests:
             self.scaffold_test_plan()
         if self.o.scaffold_ci:
-            dest = (self.target / ".github" / "workflows" / "quality.yml"
-                    if self.o.scaffold_ci == "github" else self.target / ".gitlab-ci.yml")
-            self.install_text(dest, self.ci_text(self.o.scaffold_ci))
+            dest = self.target / CI_FILES[self.o.scaffold_ci]
+            if self.install_text(dest, self.ci_text(self.o.scaffold_ci)) and \
+                    self.o.scaffold_ci == "generic" and not self.o.dry_run:
+                os.chmod(dest, os.stat(dest).st_mode | 0o111)
+            if self.o.scaffold_ci == "github":
+                self.install_text(self.target / ".github" / "pull_request_template.md",
+                                  self.pr_template_text())
 
     # -- the answers -----------------------------------------------------------
     def tailor(self):
@@ -4197,6 +4481,14 @@ class Installer(object):
         an answer nobody gave must not be written down as a decision."""
         w = self.w
         charter_rel = "%s/project/charter.md" % self.docs
+        # Records this run created empty carry today's date, as the generated test and eval
+        # plans do: there is nothing in them to review yet. The charter is not dated here,
+        # because its rows wait for a person's answers.
+        for name in ("backlog.md", "worklog.md", "assumptions-and-risks.md"):
+            rel = "%s/project/%s" % (self.docs, name)
+            if rel in self.fresh:
+                self.edit(rel, lambda text: fill_line(text, "last-reviewed:",
+                                                      "last-reviewed: %s" % today()))
         if not w.interactive:
             # --deploy is an answer given on the command line; nothing else is.
             if charter_rel in self.fresh and self.edit(charter_rel, self.flag_rows):
@@ -4595,6 +4887,11 @@ def upgrade(target, o):
     planned = managed_source_texts(target, docs, inst.ctx, o.profile,
                                    shared_skills=inst.shared_skills)
     planned.update(slop_filter_upgrade(target, charter, o, inst.ctx))
+    # Project extensions (`sdlc.py ext`) are recorded under their own key: copied through
+    # unchanged, never part of the obsolete set, their overlays rendered into templates.
+    ext_pins = (previous or {}).get("extensions")
+    ext_pins = ext_pins if isinstance(ext_pins, dict) else {}
+    overlays_applied, overlay_notes = apply_extension_overlays(target, docs, planned, ext_pins)
     if o.profile == "compact":
         print("Compact profile: the numbered process/ documents stay uninstalled.")
     try:
@@ -4691,7 +4988,17 @@ def upgrade(target, o):
             notes.append("The kit's charter has rows this one lacks and no neighbour to "
                          "place them by: %s. Copy them from %s." % (", ".join(unplaced),
                          SRC / "template" / "docs" / "project" / "charter.md"))
-    stale_commands = [r for r in unadopted if r.startswith(".claude/commands/")]
+        approvers = re.search(r"^\|\s*\*\*Approvers\*\*\s*\|([^|\n]*)\|",
+                              extra.get(charter_rel) or (target / charter_rel).read_text(
+                                  encoding="utf-8", errors="replace"), re.M)
+        if not approvers or not re.sub(r"_\([^)]*\)_", "", approvers.group(1)).strip():
+            notes.append("The charter's Approvers row is blank. Since 6.0 `sdlc.py finish "
+                         "--waive verify --by <name>` accepts only a name from that row as it "
+                         "stands on the default branch, so every waiver is refused until it "
+                         "is filled: list the people who may waive in the charter's "
+                         "**Approvers** row and merge it. See docs/install.md, \"Upgrading "
+                         "to 6.0\".")
+    stale_commands =[r for r in unadopted if r.startswith(".claude/commands/")]
     stale_hooks = [r for r in unadopted if r.startswith(".claude/hooks/")]
     stale_shared = [r for r in unadopted if r.startswith(".agents/skills/")]
     if stale_shared:
@@ -4727,7 +5034,9 @@ def upgrade(target, o):
                          "up first): --upgrade --repair\n")
         return 1
 
-    obsolete = sorted(set(previous_files) - set(planned))
+    obsolete = sorted(rel for rel in set(previous_files) - set(planned)
+                      if not rel.startswith(".ai-sdlc/local/"))
+    notes.extend(overlay_notes)
     changed = sorted(rel for rel, content in planned.items()
                      if sha256_file(target / rel) != sha256_text(content))
 
@@ -4760,7 +5069,10 @@ def upgrade(target, o):
 
     existing = [rel for rel in affected if originals[rel] is not None]
     if existing:
-        stem = "v%s-to-v%s" % ((previous or {}).get("kit_version", "legacy"), VERSION)
+        was = (previous or {}).get("kit_version", "legacy")
+        # A refresh at the same version is named by its time, not as `vX-to-vX`.
+        stem = "v%s-to-v%s" % (was, VERSION) if was != VERSION else "v%s-refresh-%s" % (
+            VERSION, time.strftime("%Y%m%d-%H%M%S", time.gmtime()))
         backup_dir = target / ".ai-sdlc" / "backups" / stem
         suffix = 2
         while backup_dir.exists():
@@ -4788,7 +5100,8 @@ def upgrade(target, o):
                 path.unlink()
                 print("  remove         %s (obsolete managed file)" % rel)
         hashes = dict((rel, sha256_text(content)) for rel, content in planned.items())
-        write_manifest(target, docs, hashes, regions)
+        write_manifest(target, docs, hashes, regions, extensions=ext_pins,
+                       overlays=overlays_applied)
         if o.harnesses is not None or getattr(o, "native_harnesses", []):
             inst.wire_harnesses()
             if inst.wired:
@@ -4811,6 +5124,7 @@ def upgrade(target, o):
             print("  update         .claude/settings.json (%d hook command%s anchored on "
                   "$CLAUDE_PROJECT_DIR)" % (repaired, "" if repaired == 1 else "s"))
         inst.apply_git_ignores()
+        inst.apply_git_attributes()
     except Exception as exc:
         for rel, data in originals.items():
             path = target / rel
@@ -4893,7 +5207,11 @@ def strip_kit_hooks(data):
     return removed
 
 
-HOOK_SETTINGS = (".claude/settings.json", ".gemini/settings.json", ".cursor/hooks.json")
+# Every settings file a hook dialect writes, from the harness records.
+HOOK_SETTINGS = tuple(sorted(set(
+    (rec.get("hooks") or {}).get("settings") for rec in REGISTRY.harnesses().values()
+    if (rec.get("hooks") or {}).get("dialect") and (rec.get("hooks") or {}).get("settings")),
+    key=lambda rel: (rel != ".claude/settings.json", rel)))
 
 
 def git_hook_dirs(target):
@@ -5373,7 +5691,9 @@ def main(argv):
             inst.scaffold()
             inst.install_hooks()
             inst.install_git_hooks()
+            inst.install_mcp()
             inst.apply_git_ignores()
+            inst.apply_git_attributes()
             inst.record_manifest()
             inst.write_profile()
     except (IOError, OSError, RuntimeError) as exc:

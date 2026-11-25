@@ -1,5 +1,6 @@
 #!/bin/sh
-# Nuhut git hook: refuse a commit whose staged changes add a credential.
+# Nuhut git hook: refuse a commit whose staged changes add a credential, or change
+# a path that the test-lock or protected-path lists name at HEAD.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/lib.sh"

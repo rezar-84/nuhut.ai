@@ -160,9 +160,32 @@ charter's **Agent budget per tier**.
 | Cursor | `CURSOR_TRACE_ID` or `CURSOR_AGENT` → `cursor` | not exposed; the agent writes it |
 | Any other, or a human | `AI_SDLC_AGENT` | `AI_SDLC_MODEL`, or `human` |
 
-Where the script prints `unknown`, replace it with what you know. Never guess a model:
-`unknown` is an honest value, and the doctor treats an unknown author as unjudgeable,
-not as independent.
+When no agent is detected, the script prints `Agent: human` and no `Model` line: a
+person committing by hand writes exactly that, and needs no Model. Where it prints
+`Model: unknown` (it then warns on stderr), pass `--model <id>` or set `AI_SDLC_MODEL`
+with what you know. Never guess a model. `unknown` is an
+honest value locally, and the doctor treats an unknown author as unjudgeable, not as
+independent, but `sdlc.py ci-check` fails a pull request whose commits say `unknown`:
+set `AI_SDLC_AGENT` (and `AI_SDLC_MODEL`), or use `Agent: human`.
+
+`sdlc.py ci-check` judges a pull request's commits, merge commits included: each needs
+`Work-Item` and either `Agent` and `Model` or `Agent: human`. Commits by the bots
+`dependabot[bot]` and `github-actions[bot]` are exempt from this trailer rule only; the
+paths they change still meet the tier floor below.
+
+### The tier floor in CI
+
+`ci-check` also fails a commit whose changed paths are Tier 1 while its item is Tier 2
+or 3. The Tier 1 paths are the backticked globs in the charter's **Always Tier 1 here**
+row, read from the base branch so a pull request cannot weaken the row it is judged by.
+With no glob there, `auth/`, `migrations/` and `infra/` at any depth count. The kit's own
+enforcement surfaces always count: `.ai-sdlc/**` (not its generated state or
+`test-lock.txt`), `.github/workflows/**` and `{{DOCS_DIR}}/project/people.json`. The
+charter counts only when a security-bearing row changes (Approvers, Always Tier 1 here,
+Extensions allowed, Notify webhook, Tier rules, Independent review required for). A pull
+request that lowers an item's tier below the base branch's backlog fails too. It also
+fails an item with no committed full verify record on its newest code commit (the rule
+`finish` applies) and a Tier 1 item with no review file.
 
 ## Approvals
 
@@ -170,12 +193,23 @@ not as independent.
 | --- | --- |
 | Tier 3 | Commit on the current branch once the checks pass. No approval, no parking. |
 | Tier 2 | As the charter's **Tier rules** say: `Standard`, commit and continue; `Strict`, **one human approver**. |
-| Tier 1 | **Two human approvers**, at least one with domain ownership of the affected surface. |
+| Tier 1 | **Two human approvers**, at least one with domain ownership of the affected surface. A one-person project sets **Tier 1 approvals** to `1`. An approval is an `APPROVED` GitHub review on the PR head by someone in **Approvers**, or, with **Local approvals** `on`, `sdlc.py approve` run by that approver in a terminal. |
 | Anything named under "Human approval required for" in `AGENTS.md` | As named there, regardless of tier. |
 | Tier 2 or 3 items inside an epic | Merged into the epic branch by the agent once checks pass and no review holds a Block. The approval above is given once per checkpoint, when the epic branch is proposed for the default branch (`11-epics.md`). A Tier 1 item inside an epic is approved on its own. |
 
 An agent may prepare, propose, and justify a change. An agent does not approve its own
 Tier 1 work, and does not count as either of the two approvers.
+
+`sdlc.py finish` and `sdlc.py approvals <ID>` read these approvals from the item branch's
+GitHub pull request reviews through `gh`. An approval counts only when it was given on
+the PR's current head commit, the PR belongs to this repository and its head is the local
+item branch, and the reviewer is a person other than the PR's author whose GitHub login
+`project/people.json` maps to a handle on the default branch. Bots never count, and
+neither does the `AI_SDLC_APPROVAL` environment variable. Without `gh`, or without such a
+PR, the charter's **Approvers** names are recorded as the fallback and the item stays
+Parked. The required count does not change with team size: when **Approvers** lists
+fewer people than the tier needs, `finish` says so ("1 of 2: this project lists 1
+approver") and the item stays Parked until a human closes it.
 
 Never bypass a failing security, migration, accessibility, or data-integrity check. If
 the check is wrong, that is a separate tracked change with its own justification.
@@ -283,6 +317,15 @@ The test comes first, and the fixer does not get to rewrite it.
    to be wrong, stop and say so; changing it is a human decision, like releasing the lock.
 5. After verification, a human removes the lock line.
 
+The hooks are best-effort. The shell check reads each command for its write targets (a
+redirect, `tee`, `sed -i`, `cp`/`mv`, `git checkout --` and the like) and cannot see
+through a variable or a script; with `--git-hooks`, `pre-commit` refuses a commit that
+changes a path locked at `HEAD`, so a lock is released by committing the line's removal
+first. It refuses a path protected at `HEAD` only when the commit comes from an agent's
+session (its tool's environment variables are set): a person regenerating a lockfile is
+that path's owner. `AI_SDLC_APPROVAL` is a local guardrail, not a verified approval:
+any process, an agent included, can set it, so it records intent and proves nothing.
+
 A test that existed before the fix and that the fixer could not change is the evidence
 that the defect is gone. Editing it to pass is the S1 in `roles/qa.md`.
 
@@ -294,5 +337,14 @@ that the defect is gone. Editing it to pass is the S1 in `roles/qa.md`.
   first minutes. Diagnose from a stable state.
 - A hotfix still gets an ID, a test that reproduces the failure, and a worklog entry —
   written immediately after the fire is out, not "later".
+- Mark it with `sdlc.py hotfix <ID>` (the same as `sdlc.py item set <ID> --hotfix`). The
+  tier stays; the item records `hotfix: true` and the time. `finish` then skips the
+  pre-merge review, keeps every other gate (verify, escalations, Tier 1's human approval)
+  and records the retroactive review as owed.
+- The retroactive review is a file, `project/reviews/<ID>-retro-<role>.md`
+  (`sdlc.py review <ID> --role <role> --by <harness> --stage retro`), written within the
+  charter's **Retroactive review within** (default 2 days). After that, `sdlc.py doctor`
+  fails the hotfix until the file exists.
 - Any S0/S1 incident produces a postmortem (`templates/postmortem.md`) focused on the
-  system that allowed it, not on who typed it.
+  system that allowed it, not on who typed it. It names its follow-up item IDs and the
+  regression test; `doctor` fails a follow-up ID that is not in the backlog.

@@ -1,0 +1,28 @@
+{
+  "id": "NUHT-011",
+  "title": "Self-install kit_version drifts from VERSION after a release",
+  "type": "defect",
+  "tier": "2",
+  "effort": "",
+  "owner": "devops-sre",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "validate.py",
+    ".github/workflows/version.yml",
+    ".ai-sdlc/manifest.json",
+    ".ai-sdlc/profile.json",
+    "AGENTS.md",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

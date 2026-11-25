@@ -28,7 +28,7 @@ last-reviewed: 2026-11-13
 | Hosting & Cloud provider | Distributed via git / GitHub Releases (runs locally on developer & CI machines) |
 | CDN / Edge / WAF | none |
 | TLS certificates | none (local loopback only) |
-| CI | GitHub Actions (`.github/workflows/ci.yml`, `version.yml`, `release.yml`) |
+| CI | GitHub Actions (`.github/workflows/ci.yml`, `version.yml`; `version.yml` also releases) |
 | Test tooling | `validate.py`, `optional/runtime/sdlc.py --selftest`, `tests/smoke.py` |
 
 ## Constraints
@@ -51,7 +51,7 @@ last-reviewed: 2026-11-13
 | `checks.format` | absent — enforced via `validate.py` and stdlib compilation |
 | `checks.lint` | `python3 validate.py` |
 | `checks.typecheck` | absent — pure Python 3.8+ stdlib without third-party typechecker |
-| `checks.unit` | `python3 optional/runtime/sdlc.py --selftest` |
+| `checks.unit` | `python3 optional/runtime/sdlc.py --selftest && python3 tests/run.py --fast --jobs 8` |
 | `checks.integration` | `python3 tests/smoke.py` |
 | `checks.contract` | absent — CLI/JSON contracts are verified inside `validate.py` and `tests/smoke.py` |
 | `checks.build` | `python3 tools/build_view.py --check` |
@@ -109,6 +109,7 @@ last-reviewed: 2026-11-13
 | **Claiming a work item** | `python3 .ai-sdlc/bin/sdlc.py claim <ID>` (isolated worktree + sharded item state) |
 | **Single-writer files** | `VERSION`, `.claude-plugin/plugin.json`, `optional/runtime/view.html` |
 | **May merge to the default branch** | no — pull requests / human merge only |
+| **Worktree scripts** | none |
 
 ## Budgets
 
@@ -168,7 +169,7 @@ last-reviewed: 2026-11-13
 | **Decision style** | `Guide` |
 | **Tier rules** | `Standard` |
 | **Acquisition profile** | `Standard` |
-| **Always Tier 1 here** | Hook security enforcement (`hooks.py`), `view --serve` HTTP control plane, release workflow |
+| **Always Tier 1 here** | Hook security enforcement (`optional/runtime/hooks.py`), `view --serve` HTTP control plane, release workflow (`.github/workflows/**`) |
 | **Never Tier 1 here** | No PII or payment processing exists in this repository |
 | **Human approval required for** | Cutting a release tag, merging to `main`, weakening security hooks, or removing CLI commands |
 | **Independent review required for** | `none` |
@@ -176,6 +177,10 @@ last-reviewed: 2026-11-13
 | **Finish guard** | `on` |
 | **Agent budget per tier** | Tier 3: 50k tokens, 10 min; Tier 2: 300k tokens, 45 min; Tier 1: 1.5M tokens, 3 h |
 | **Approvers** | rezar-84 |
+| **Tier 1 approvals** | `1` _(one-person project; raise to `2` when a second approver joins)_ |
+| **Local approvals** | `on` _(one-person project: the owner approves with `sdlc.py approve` in a terminal; turn off when GitHub reviews by a second approver are available)_ |
+| **Verify at finish** | `fast: lint, unit, build` _(the fast smoke tier, about 90 s; `checks.integration`, the full suite, runs in CI and for Tier 1)_ |
+| **Extensions allowed** | none |
 | **Staleness threshold** | 365 days |
 
 ## Standards & targets

@@ -1,0 +1,26 @@
+{
+  "id": "NUHT-029",
+  "title": "DORA delivery metrics in metrics and the viewer",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "devops-sre",
+  "status": "Done",
+  "depends": [
+    "NUHT-027"
+  ],
+  "touch": [
+    "optional/runtime/view.py",
+    "optional/runtime/view/"
+  ],
+  "created": "2026-11-22",
+  "updated": "2026-11-22",
+  "completed": "2026-11-22",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "v6 Phase 3 (delivery): after Phase 2",
+  "dropped_reason": ""
+}
