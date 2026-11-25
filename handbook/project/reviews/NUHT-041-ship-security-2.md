@@ -43,12 +43,12 @@ Findings:
 
 | # | Response | Evidence | Decided by |
 | --- | --- | --- | --- |
-| 1 | Escalate | Repeat of round 1 finding 2. NUHT-045. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). |  |
-| 2 | Escalate | Repeat of round 1 finding 3. NUHT-045. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). |  |
-| 3 | Escalate | Repeat of round 1 finding 3 for review rows. NUHT-045; `ci-check` checking severity transitions is listed as not done in the plan. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). |  |
+| 1 | Escalate | Repeat of round 1 finding 2. NUHT-045. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). | rezar-84 |
+| 2 | Escalate | Repeat of round 1 finding 3. NUHT-045. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). | rezar-84 |
+| 3 | Escalate | Repeat of round 1 finding 3 for review rows. NUHT-045; `ci-check` checking severity transitions is listed as not done in the plan. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). | rezar-84 |
 | 4 | Fix | A fix now counts only inside this deploy's range (`fix_shipped(..., from_sha)`), so a fix from an earlier deploy does not exempt a defect that is still open; it must be closed. Test: "the next deploy blocks again while the fixed S1 is still open: close it". Whether a commit actually fixes the defect is the defect's own status, not something a deploy can judge. | |
 | 5 | Fix | Same as NUHT-043 round 2 finding 3: `finish.BOOKKEEPING`. | |
 | 6 | Fix | Ladder from the default branch, in the hash. Requiring a person for every downgrade that clears a release block is the owner's call; the owner chose "a human, or an agent after a second agent confirms". | |
-| 7 | Escalate | Repeat of round 1 finding 5 (NUHT-037). Decision 2026-11-25: Accepted as is. `view --serve` keeps warning off Tailscale and does not refuse. |  |
+| 7 | Escalate | Repeat of round 1 finding 5 (NUHT-037). Decision 2026-11-25: Accepted as is. `view --serve` keeps warning off Tailscale and does not refuse. | rezar-84 |
 | 8 | Fix | The base ref is resolved first (`git rev-parse --verify`) and an unreadable ref exits 1; absence is checked with `git ls-tree`. Test: "a base ref that cannot be read: exit 1, no fallback (round 2, finding 4)". The bootstrap fallback for no kit or a 5.x kit stays, warned, as the owner asked for the 5.x upgrade path. | |
 | 9 | Decline | NUHT-046. | |
