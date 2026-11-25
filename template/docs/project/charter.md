@@ -266,6 +266,7 @@ here, in the shape of a role playbook: mission, engage when, reads, what it chec
 | **Approvers** | _(people.json handles for Tier 1's two approvals; GitHub PR reviews count first, these names are the fallback; see project/people.json)_ |
 | **Tier 1 approvals** | `2` _(or `1` for a one-person project)_ |
 | **Local approvals** | `off` _(`on` allows `sdlc.py approve` in a terminal: an unsigned record, for a project without GitHub reviews)_ |
+| **Verify at finish** | `full` _(or `fast: lint, unit, build`: Tier 2 and 3 items run only those stages, and CI runs every stage. Tier 1 always runs every stage)_ |
 | **Extensions allowed** | _(ids of project extensions whose code may run: agent and check commands, hook rules, doctor checks, lifecycle hooks. Read from the default branch, so adding an id on a branch has no effect until it merges. Set with `sdlc.py config --allow-extension <id>`; blank means none)_ |
 | **Staleness threshold** | _(e.g. 90 days — after this, a `project/` doc is treated as a hypothesis)_ |
 

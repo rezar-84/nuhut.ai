@@ -18,7 +18,7 @@
     "perf": "",
     "scan": "",
     "typecheck": "",
-    "unit": "python3 optional/runtime/sdlc.py --selftest"
+    "unit": "python3 optional/runtime/sdlc.py --selftest && python3 tests/run.py --fast --jobs 8"
   },
   "decision_style": "guide",
   "declared": false,

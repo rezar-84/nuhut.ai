@@ -134,17 +134,22 @@ def required_stages(rt, project):
             if rt.charter_commands(project.charter).get(stage, "") not in ("", "absent")]
 
 
-def verify_state(rt, project, item, commits):
+def verify_state(rt, project, item, commits, tier=None):
     """(state, run name, its rows, detail) for the latest verify run behind the item.
     state is 'pass', 'fail', 'none', 'partial' (the latest run left charter stages out)
     or 'stale' (the latest run predates the item's newest code commit). Only a full run,
     clean on the newest code commit or a descendant of it, or dirty on its parent,
-    passes; detail says what a partial or stale run lacks."""
+    passes; detail says what a partial or stale run lacks. At Tier 2 or 3, when the
+    charter's Verify at finish row is fast on the default branch, a run covering the fast
+    stages is full; Tier 1 always needs every stage."""
     all_rows = rt.evidence_matches(project, item, None, commits)
     rows = [r for r in all_rows if r.get("stage") != "bite"]
     if not rows:
         return "none", "", [], ""
     need = required_stages(rt, project)
+    fast = rt.verify_fast_stages(project)[0] if tier in ("2", "3") else []
+    if fast:
+        need = [s for s in need if s in fast]
     newest, parent = rt.newest_code_commit(project, item, commits)
     latest = None
     for name, run in reversed(_runs(rows)):
@@ -961,7 +966,7 @@ def finish(rt, project, item, waive_by=None, reason=None, dry_run=False, today=N
                    "verify again before this merges (`%s sync --fetch`)"
                    % (sync["behind_default"], sync["default_ref"], SDLC))
 
-    run = verify_state(rt, project, item, commits)
+    run = verify_state(rt, project, item, commits, tier)
     approvers, source, registry = waiver_approvers(rt, project)
     waived, dropped = waivers(rt, project, item, set(h for _, h in approvers if h), registry)
     if owed["Verify"] and run[0] != "pass":

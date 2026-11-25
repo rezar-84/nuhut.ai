@@ -3984,6 +3984,76 @@ def test_adopt_detected_commands():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_fast_verify():
+    print("fast verify: Tier 2 and 3 close on the charter's fast stages; Tier 1 runs every stage")
+    d = tempfile.mkdtemp(prefix="sdlc-fastv-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", "-b", "main", repo])
+    code, out = run([repo, "FST", "-y"])
+    check("fast-verify repo installs", code == 0, out[-300:])
+    marker = os.path.join(d, "integration-ran")
+    charter = read(repo, "docs/project/charter.md")
+
+    def set_row(text, label, value):
+        return re.sub(r"(?m)^\| %s \|.*\|$" % re.escape(label), "| %s | %s |" % (label, value), text)
+    charter = set_row(charter, "`checks.lint`", "`true`")
+    charter = set_row(charter, "`checks.unit`", "`true`")
+    charter = set_row(charter, "`checks.integration`", "`touch %s`" % marker)
+    charter = set_row(charter, "**Default branch**", "`main`")
+    write(repo, "docs/project/charter.md", charter)
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore: kit"], cwd=repo)
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=300)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+
+    def ran_integration():
+        found = os.path.exists(marker)
+        if found:
+            os.remove(marker)
+        return found
+    for item, tier in (("FST-1", "2"), ("FST-2", "1")):
+        sdlc("item", "add", item, "--title", "work " + item, "--tier", tier, "--status", "In progress")
+        write(repo, "src/%s.py" % item.lower().replace("-", "_"), "x = 1\n")
+        subprocess.call(["git", "add", "-A"], cwd=repo)
+        subprocess.call(git + ["commit", "-qm", "feat(%s): work\n\nWork-Item: %s" % (item, item)], cwd=repo)
+
+    # On a branch, a charter that turns fast verify on has no effect until it merges.
+    subprocess.call(["git", "checkout", "-qb", "feat/fast"], cwd=repo)
+    write(repo, "docs/project/charter.md",
+          set_row(read(repo, "docs/project/charter.md"), "**Verify at finish**", "`fast: lint, unit`"))
+    check("the charter template carries a Verify at finish row, set fast on the branch",
+          "| **Verify at finish** | `fast: lint, unit` |" in read(repo, "docs/project/charter.md"))
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore(FST-1): fast verify\n\nWork-Item: FST-1"], cwd=repo)
+    code, out = sdlc("verify", "--item", "FST-1")
+    check("a branch's own Verify at finish row is not trusted: every stage runs",
+          code == 0 and ran_integration(), out[-800:])
+    subprocess.call(["git", "checkout", "-q", "main"], cwd=repo)
+    subprocess.call(git + ["merge", "-q", "--no-ff", "feat/fast", "-m", "merge"], cwd=repo)
+
+    code, out = sdlc("verify", "--item", "FST-1")
+    check("with fast on the default branch, a Tier 2 item runs only the fast stages",
+          code == 0 and not ran_integration() and "fast" in out.lower(), out[-800:])
+    ledger = "".join(read(repo, os.path.join("docs/project/ledger", n))
+                     for n in os.listdir(os.path.join(repo, "docs/project/ledger")))
+    check("the ledger marks the run as fast", '"mode": "fast"' in ledger, ledger[-600:])
+    code, out = sdlc("finish", "FST-1", "--dry-run")
+    check("finish accepts a fast run for a Tier 2 item", "verify   pass" in out, out)
+    code, out = sdlc("verify", "--item", "FST-1", "--full")
+    check("--full runs every stage", code == 0 and ran_integration(), out[-800:])
+    code, out = sdlc("verify", "--item", "FST-2")
+    check("a Tier 1 item always runs every stage", code == 0 and ran_integration(), out[-800:])
+    code, out = sdlc("finish", "FST-2", "--dry-run")
+    check("finish takes the full run for a Tier 1 item", "verify   pass" in out, out)
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_worktree_scripts():
     print("worktree scripts: setup on claim and dispatch, teardown on release, a port per worktree")
     d = tempfile.mkdtemp(prefix="sdlc-wtscripts-")
@@ -4508,7 +4578,8 @@ def test_upgrade_to_41():
                     "| **Worktree scripts** |", "| **Retroactive review within** |",
                     "| **Extensions allowed** |",
                     # the Tier 1 approval count and local approvals (NUHT-043).
-                    "| **Tier 1 approvals** |", "| **Local approvals** |")
+                    "| **Tier 1 approvals** |", "| **Local approvals** |",
+                    "| **Verify at finish** |")
         check("project records keep every line; the charter only gains the new rows",
               all(l in after for l in charter_before.splitlines()) and len(added) == len(new_rows)
               and all(any(l.startswith(r) for l in added) for r in new_rows)
@@ -8764,6 +8835,9 @@ def test_test_runner():
           and "serial ran" in out and "2 failed" in out, out)
     code, out = go("--jobs", "2", "--only", "test_alpha,test_gamma")
     check("run.py --jobs passes when the selected tests pass", code == 0 and "all passed" in out, out)
+    code, out = go("--fast", "--only", "test_alpha,test_serial_one")
+    check("run.py --fast leaves the serial (pty) tests out",
+          code == 0 and "alpha works" in out and "serial ran" not in out, out)
     p = subprocess.run([sys.executable, runner, "--list"], cwd=ROOT, stdout=subprocess.PIPE,
                        stderr=subprocess.STDOUT, universal_newlines=True)
     check("run.py --list on smoke.py lists the pty tests as serial",
@@ -9324,7 +9398,7 @@ def main():
                  test_trusted_records_review, test_install_review_fixes,
                  test_status_review_fixes, test_defect_awareness, test_release_defect_gate,
                  test_tier1_approval_count_and_local_approval, test_severity_downgrade_rule,
-                 test_checker_fallback, test_adopt_detected_commands,
+                 test_checker_fallback, test_adopt_detected_commands, test_fast_verify,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

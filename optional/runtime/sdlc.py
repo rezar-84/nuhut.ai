@@ -1449,7 +1449,7 @@ def evidence_dir(project, suffix=""):
     return path
 
 
-def verify(project, selected, timeout, parallel=False, item=None):
+def verify(project, selected, timeout, parallel=False, item=None, fast=None):
     charter = charter_commands(project.charter)
     recorded = project.profile.get("commands") or {}
     drift = []
@@ -1493,6 +1493,9 @@ def verify(project, selected, timeout, parallel=False, item=None):
         if selected and stage not in selected:
             entry["result"] = "Not run (not selected)"
             stage_entries[stage] = entry
+        elif fast and stage not in fast:
+            entry["result"] = "Not run (fast verify: CI runs it)"
+            stage_entries[stage] = entry
         elif command == "absent":
             entry["result"] = "Absent (declared)"
             stage_entries[stage] = entry
@@ -1524,6 +1527,8 @@ def verify(project, selected, timeout, parallel=False, item=None):
         "passed": passed,
         "stages": results,
     }
+    if fast and not selected:
+        summary["mode"] = "fast"
     if item:
         summary["item"] = item
     with open(os.path.join(folder, "summary.json"), "w", encoding="utf-8") as handle:
@@ -1533,7 +1538,8 @@ def verify(project, selected, timeout, parallel=False, item=None):
         "command": e["command"], "exit_code": e.get("exit_code"), "result": e["result"],
         "output_sha256": e.get("log_sha256", ""), "run": os.path.basename(folder),
         **({"item": item} if item else {}),
-        **({"selected": sorted(selected)} if selected else {})}
+        **({"selected": sorted(selected)} if selected else {}),
+        **({"mode": "fast"} if fast and not selected else {})}
         for e in results if "exit_code" in e])
     text = summary_markdown(summary, os.path.relpath(folder, project.root))
     with open(os.path.join(folder, "summary.md"), "w", encoding="utf-8") as handle:
@@ -1966,6 +1972,22 @@ def tier1_approvals(project):
     cell = labelled(text or "", "Tier 1 approvals") or ""
     m = re.match(r"^\W*([12])\b", re.sub(r"[`*]", "", UNFILLED.sub("", cell)).strip())
     return (int(m.group(1)) if m else 2), source
+
+
+def verify_fast_stages(project):
+    """(stages, source): the stages a Tier 2 or 3 item's `verify --item` runs, from the
+    charter's **Verify at finish** row as it stands on the default branch (`trusted_text`),
+    so a branch that turns fast verify on gains nothing until it merges. `fast: lint, unit`
+    names them; only stages the charter gives a command count. An empty list means full:
+    the row is missing, says `full`, or names no stage with a command."""
+    text, source = trusted_text(project, project.charter_path)
+    cell = re.sub(r"[`*]", "", UNFILLED.sub("", labelled(text or "", "Verify at finish") or ""))
+    m = re.match(r"(?i)^\s*fast\s*:\s*(.+)$", cell.strip())
+    if not m:
+        return [], source
+    have = charter_commands(project.charter or "")
+    named = [w.replace("checks.", "") for w in re.split(r"[,\s]+", m.group(1)) if w]
+    return [s for s in STAGES if s in named and have.get(s, "") not in ("", "absent")], source
 
 
 def item_author(project, item):
@@ -3737,7 +3759,7 @@ def ci_check(project, base=None, head=None, charter_ref=None):
                  % (was, base))
         if required_steps(tier, rules, True, True)["Verify"]:
             state = runtime_module("finish").verify_state(sys.modules[__name__], project, item,
-                                                          item_commits(project, item))
+                                                          item_commits(project, item), tier)
             if state[0] != "pass":
                 why = state[3] or ("the latest run (%s) failed" % state[1] if state[0] == "fail"
                                    else "no run names it")
@@ -6209,8 +6231,15 @@ def _cmd_verify(project, opts, parser):
         sys.stderr.write("no charter at %s: nothing says which commands to run\n"
                          % project.charter_path)
         return 2
+    fast = []
+    if opts.item and not selected and not getattr(opts, "full", False) and \
+            item_tier(project, opts.item) in ("2", "3"):
+        fast = verify_fast_stages(project)[0]
     summary, text = verify(project, selected, opts.timeout, parallel=getattr(opts, "parallel", False),
-                           item=opts.item)
+                           item=opts.item, fast=fast)
+    if fast and not getattr(opts, "json", False):
+        text += ("\nFast verify (charter: Verify at finish): ran %s. CI runs every stage; "
+                 "`verify --item %s --full` runs them here.\n" % (", ".join(fast), opts.item))
     if getattr(opts, "json", False):
         print(json.dumps(summary, indent=2))
     else:
@@ -6454,6 +6483,8 @@ def build_parser():
     ver.add_argument("--parallel", "-j", action="store_true",
                      help="run independent verification stages concurrently")
     ver.add_argument("--item", help="the work item this run verifies; the ledger rows name it")
+    ver.add_argument("--full", action="store_true", help="with --item: run every stage even "
+                     "when the charter's Verify at finish row is fast")
     ver.add_argument("--json", action="store_true", help="print verification summary as JSON")
     fin = sub.add_parser("finish", help="close a work item: check its evidence and reviews, "
                          "draft the worklog entry, set Done (Tier 1 / Strict Tier 2: Parked)")

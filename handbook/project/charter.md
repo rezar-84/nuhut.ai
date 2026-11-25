@@ -51,7 +51,7 @@ last-reviewed: 2026-11-13
 | `checks.format` | absent — enforced via `validate.py` and stdlib compilation |
 | `checks.lint` | `python3 validate.py` |
 | `checks.typecheck` | absent — pure Python 3.8+ stdlib without third-party typechecker |
-| `checks.unit` | `python3 optional/runtime/sdlc.py --selftest` |
+| `checks.unit` | `python3 optional/runtime/sdlc.py --selftest && python3 tests/run.py --fast --jobs 8` |
 | `checks.integration` | `python3 tests/smoke.py` |
 | `checks.contract` | absent — CLI/JSON contracts are verified inside `validate.py` and `tests/smoke.py` |
 | `checks.build` | `python3 tools/build_view.py --check` |
@@ -179,6 +179,7 @@ last-reviewed: 2026-11-13
 | **Approvers** | rezar-84 |
 | **Tier 1 approvals** | `1` _(one-person project; raise to `2` when a second approver joins)_ |
 | **Local approvals** | `on` _(one-person project: the owner approves with `sdlc.py approve` in a terminal; turn off when GitHub reviews by a second approver are available)_ |
+| **Verify at finish** | `fast: lint, unit, build` _(the fast smoke tier, about 90 s; `checks.integration`, the full suite, runs in CI and for Tier 1)_ |
 | **Extensions allowed** | none |
 | **Staleness threshold** | 365 days |
 

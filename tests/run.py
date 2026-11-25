@@ -5,6 +5,7 @@
     python3 tests/run.py --only test_semver,test_lens
     python3 tests/run.py -k upgrade             names containing "upgrade"
     python3 tests/run.py --jobs 4               parallel subprocesses; serial tests run after, one at a time
+    python3 tests/run.py --fast --jobs 8        every test except the serial (pty) ones: the quick tier
     python3 tests/run.py -v ...                 passed through to the suite's VERBOSE
 
 tests/smoke.py still runs on its own (`python3 tests/smoke.py`). This runner adds selection,
@@ -133,6 +134,8 @@ def main(argv=None):
     ap.add_argument("-k", dest="pattern", default="", help="run tests whose name contains this text")
     ap.add_argument("--jobs", "-j", type=int, default=1, help="parallel subprocesses (default 1: in-process)")
     ap.add_argument("--timeout", type=int, default=1200, help="seconds per test under --jobs (default 1200)")
+    ap.add_argument("--fast", action="store_true", help="leave out the serial (pty) tests, which "
+                    "drive the interactive installer: the quick tier; the full suite runs them")
     ap.add_argument("-v", dest="verbose", action="store_true", help="verbose suite output")
     ap.add_argument("--child", default="", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
@@ -164,6 +167,8 @@ def main(argv=None):
         selected = [n for n in names if n in wanted]
     if args.pattern:
         selected = [n for n in selected if args.pattern.lower() in n.lower()]
+    if args.fast:
+        selected = [n for n in selected if n not in serial]
     if not selected:
         print("no tests selected (see --list)")
         return 2
