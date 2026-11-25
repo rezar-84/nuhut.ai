@@ -404,6 +404,8 @@ FIX_HINTS = (
     ("contract", r"", "tool", SDLC + " fix wire-pointer"),
     ("charter", r"charter is missing", "tool", "Re-run install.sh <this project> --upgrade; it "
      "recreates the charter without touching other records"),
+    ("charter", r"installer detected", "owner", "Check each detected command runs here, then "
+     + SDLC + " fix adopt-commands --apply; write 'absent' where a stage does not exist"),
     ("charter", r"^blank, so Unknown", "agent", "Write each blank command in the charter's "
      "Commands table, or 'absent' where the stage does not exist: " + SDLC +
      " config --set STAGE=COMMAND"),
@@ -444,8 +446,6 @@ FIX_HINTS = (
      "\"a client\")"),
     ("worklog", r"", "tool", SDLC + " fix rotate-worklog --apply (preview without --apply)"),
     ("profile", r"kit_version", "tool", "Finish the upgrade: install.sh <this project> --upgrade"),
-    ("profile", r"installer detected", "owner", "Check each detected command runs here, then "
-     + SDLC + " fix adopt-commands --apply"),
     ("profile", r"", "tool", SDLC + " fix sync-profile"),
     ("epics", r"an epic with no", "agent", "Create the epic file from templates/epic.md"),
     ("epics", r"", "agent", "Correct the Epic cell of {item}, or add the epic's row"),
@@ -600,9 +600,14 @@ def check_charter(project, out):
         return
     blank = [stage for stage in STAGES if charter_commands(text).get(stage) == ""]
     if blank:
-        out.add("warn", "charter", "%s Commands" % where,
-                "blank, so Unknown rather than absent: %s. Write each command, or 'absent' "
-                "where the stage does not exist here." % ", ".join("checks." + s for s in blank))
+        message = ("blank, so Unknown rather than absent: %s. Write each command, or 'absent' "
+                   "where the stage does not exist here." % ", ".join("checks." + s for s in blank))
+        found = detected_commands(project)
+        if found:
+            message += (" The installer detected %s: check them, then adopt them with "
+                        "`%s fix adopt-commands --apply`."
+                        % (", ".join("%s `%s`" % kv for kv in sorted(found.items())), SDLC))
+        out.add("warn", "charter", "%s Commands" % where, message)
     for label in ("Approvers", "Default branch", "Staleness threshold"):
         cell = labelled(text, label)
         if cell is None or unfilled(cell):
@@ -980,11 +985,7 @@ def check_profile(project, out):
     differ = [stage for stage in STAGES if stage not in detected
               and recorded.get(stage, "") != ("" if charter.get(stage, "") == "absent"
                                              else charter.get(stage, ""))]
-    if detected:
-        out.add("warn", "profile", "%s/project/charter.md Commands" % project.docs,
-                "blank, but the installer detected %s. Check them, then adopt them with "
-                "`%s fix adopt-commands --apply`, or write `absent` in the row"
-                % (", ".join("%s `%s`" % kv for kv in sorted(detected.items())), SDLC))
+    # A detected command waiting for a blank row is reported once, by check_charter.
     if differ:
         # Warn, not fail: verify always runs the charter's commands, so this misleads
         # only tools that read the profile.
@@ -3987,8 +3988,6 @@ def kit_status(project):
     # Check safe mechanical fixables
     prof_findings = Findings()
     check_profile(project, prof_findings)
-    # Detected commands waiting for a person (fix adopt-commands) are not sync-profile's.
-    prof_findings.items = [f for f in prof_findings.items if "installer detected" not in f["message"]]
     ptr_findings = Findings()
     check_pointer(project, ptr_findings)
     hrn_findings = Findings()

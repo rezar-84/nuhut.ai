@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-052",
+  "title": "A fresh install's doctor: blank Commands reported twice, empty records reported as never reviewed",
+  "type": "fix",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "In progress",
+  "depends": [],
+  "touch": [
+    "install.py",
+    "optional/runtime/sdlc.py",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

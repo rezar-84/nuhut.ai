@@ -3931,6 +3931,19 @@ def test_adopt_detected_commands():
     code, out = sdlc("doctor")
     check("doctor points blank rows with a detected command at adopt-commands",
           "fix adopt-commands" in out and "npm run test" in out, out[-1500:])
+    # A fresh install's first doctor run (NUHT-052): one finding for the blank Commands
+    # rows, and no "never reviewed" for records the install created empty.
+    check("doctor reports the blank Commands rows once",
+          len([ln for ln in out.splitlines() if ln.startswith("warn") and " Commands " in ln]) == 1,
+          "\n".join(ln for ln in out.splitlines() if " Commands " in ln))
+    code, out = sdlc("doctor", "--json")
+    stale = [f["where"] for f in (json.loads(out) if out.strip().startswith("[") else [])
+             if f.get("check") == "staleness"]
+    check("records the install created empty are dated, so not reported as never reviewed",
+          not any(w.endswith(("backlog.md", "worklog.md", "assumptions-and-risks.md")) for w in stale),
+          str(stale))
+    check("the charter, whose rows nobody has decided, is still reported as never reviewed",
+          any(w.endswith("charter.md") for w in stale), str(stale))
     # One detection, not two (NUHT-050): the viewer's suggestions come from what the
     # installer detected, where it detected something, so they match doctor and status.
     code, out = sdlc("config", "--json")

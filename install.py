@@ -4481,6 +4481,14 @@ class Installer(object):
         an answer nobody gave must not be written down as a decision."""
         w = self.w
         charter_rel = "%s/project/charter.md" % self.docs
+        # Records this run created empty carry today's date, as the generated test and eval
+        # plans do: there is nothing in them to review yet. The charter is not dated here,
+        # because its rows wait for a person's answers.
+        for name in ("backlog.md", "worklog.md", "assumptions-and-risks.md"):
+            rel = "%s/project/%s" % (self.docs, name)
+            if rel in self.fresh:
+                self.edit(rel, lambda text: fill_line(text, "last-reviewed:",
+                                                      "last-reviewed: %s" % today()))
         if not w.interactive:
             # --deploy is an answer given on the command line; nothing else is.
             if charter_rel in self.fresh and self.edit(charter_rel, self.flag_rows):
