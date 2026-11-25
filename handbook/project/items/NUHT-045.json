@@ -5,11 +5,11 @@
   "tier": "1",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Parked",
+  "status": "Dropped",
   "depends": [],
   "touch": [],
   "created": "2026-11-23",
-  "updated": "2026-11-23",
+  "updated": "2026-11-25",
   "completed": "",
   "summary": "",
   "approvers": [],
@@ -17,5 +17,5 @@
   "park_reason": "Escalated S0 from the NUHT-041/043 security reviews: decide whether approvals must be signed (git SSH/GPG signing) before local approvals ship as more than opt-in",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "ADR 0004: authentication comes from the git host, not from records in the agent's environment"
 }

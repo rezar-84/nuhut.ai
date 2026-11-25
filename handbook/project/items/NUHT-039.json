@@ -5,11 +5,11 @@
   "tier": "1",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Proposed",
+  "status": "Dropped",
   "depends": [],
   "touch": [],
   "created": "2026-11-22",
-  "updated": "2026-11-22",
+  "updated": "2026-11-25",
   "completed": "",
   "summary": "Changes what can refuse a merge: needs human approval (AGENTS.md section 9).",
   "approvers": [],
@@ -17,5 +17,5 @@
   "park_reason": "",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "ADR 0004: server-side enforcement is the git host's branch protection"
 }

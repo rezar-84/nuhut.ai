@@ -42,11 +42,11 @@ Findings:
 
 | # | Response | Evidence | Decided by |
 | --- | --- | --- | --- |
-| 1 | Escalate | Repeat of round 1 finding 1: unsigned local approvals. Opt-in since round 1; this repository turns them on because it has one approver. Whether unsigned approvals may count at all before NUHT-045 (signing) is the owner's decision. | |
-| 2 | Escalate | Repeat of round 1 finding 2: no authenticated person outside GitHub. NUHT-045. | |
+| 1 | Escalate | Repeat of round 1 finding 1: unsigned local approvals. Opt-in since round 1; this repository turns them on because it has one approver. Whether unsigned approvals may count at all before NUHT-045 (signing) is the owner's decision. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). |  |
+| 2 | Escalate | Repeat of round 1 finding 2: no authenticated person outside GitHub. NUHT-045. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). |  |
 | 3 | Fix | An approval now survives only bookkeeping (`finish.BOOKKEEPING`: item shards, ledger, worklog/backlog renders, release records). The charter, `people.json`, reviews, plans and process docs void it. Test: "a change to people.json or the charter after the approval voids it (round 2, finding 3)". | |
-| 4 | Escalate | Review rows are shard records like approvals; authenticating them is NUHT-045. `ci-check` checking severity transitions is listed as not done in the plan. | |
-| 5 | Escalate | Independence is judged from the agent record and model family, as `review --by` does for every Tier 1 review; a requester who controls PATH controls every reviewer. No change in this item can fix that; owner decides whether to accept. | |
+| 4 | Escalate | Review rows are shard records like approvals; authenticating them is NUHT-045. `ci-check` checking severity transitions is listed as not done in the plan. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). |  |
+| 5 | Escalate | Independence is judged from the agent record and model family, as `review --by` does for every Tier 1 review; a requester who controls PATH controls every reviewer. No change in this item can fix that; owner decides whether to accept. Decision 2026-11-25: Declined, ADR 0004 (the kit records intent; GitHub branch protection authenticates). |  |
 | 6 | Fix | The ladder now comes from the default branch's `CARD.md` (`severity_ladder`, `trusted_text`) and is part of the re-rating hash, so a changed ladder voids earlier re-ratings. The report is marked untrusted (round 1). | |
 | 7 | Contest | `tests/smoke.py` parses (`python3 -c "import ast; ast.parse(open('tests/smoke.py').read())"`) and `test_checker_fallback` is in `main()`'s tuple. The reviewer saw only the NUHT-043 commits; hunks from the NUHT-041 and NUHT-044 commits in the same file were absent from its diff. The success assertions run after `Local approvals` is turned on (the test checks the refusal first). The success case runs without agent variables, which is the person path; a pseudo-terminal case is round 1 finding 2. | |
 | 8 | Decline | NUHT-046. | |

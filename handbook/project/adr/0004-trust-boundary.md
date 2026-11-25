@@ -1,13 +1,13 @@
 ---
-status: proposed
+status: approved
 owner: rezar-84
 last-reviewed: 2026-11-25
 ---
 
 # ADR 0004: The kit records approvals; a system outside the agent's reach authenticates them
 
-- **Status:** Proposed. It waits for rezar-84's decision, because it changes how Tier 1
-  governance findings are handled (AGENTS.md §9).
+- **Status:** Approved on 2026-11-25. rezar-84 gave the decision in an agent session;
+  the agent wrote this line.
 - **Date:** 2026-11-25
 - **Deciders:** rezar-84
 - **Work item:** NUHT-049

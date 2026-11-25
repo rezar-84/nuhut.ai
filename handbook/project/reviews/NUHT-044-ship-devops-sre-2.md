@@ -40,5 +40,5 @@ Findings:
 | --- | --- | --- | --- |
 | 1 | Contest | The file parses and `test_checker_fallback` is in `main()`'s tuple (line with `test_checker_fallback,` inside the `for test in (...)` list). The reviewer's diff held only this item's commits; the hunks between them belong to NUHT-041 and NUHT-043 commits in the same file. The full suite runs under `tests/run.py`. | |
 | 2 | Decline | Rollback is a `git revert` of runtime and installer code plus regenerating CI with the reverted kit; `test_scaffolding` and `test_checker_fallback` run the generator and its shell. Executing a revert in a scratch project adds no information beyond those. | |
-| 3 | Escalate | Whether `main` has branch protection requiring the `records` job is a host setting the owner controls; the kit cannot see it. | |
+| 3 | Escalate | Whether `main` has branch protection requiring the `records` job is a host setting the owner controls; the kit cannot see it. Decision 2026-11-25: ADR 0004. Branch protection requiring the `records` job is the owner's GitHub setting. |  |
 | 4 | Fix | Ref resolved first; an unreadable ref exits 1. Test: "a base ref that cannot be read: exit 1, no fallback (round 2, finding 4)". | |
