@@ -4017,7 +4017,7 @@ def test_fast_verify():
         if found:
             os.remove(marker)
         return found
-    for item, tier in (("FST-1", "2"), ("FST-2", "1")):
+    for item, tier in (("FST-1", "2"), ("FST-2", "1"), ("FST-3", "3")):
         sdlc("item", "add", item, "--title", "work " + item, "--tier", tier, "--status", "In progress")
         write(repo, "src/%s.py" % item.lower().replace("-", "_"), "x = 1\n")
         subprocess.call(["git", "add", "-A"], cwd=repo)
@@ -4026,9 +4026,10 @@ def test_fast_verify():
     # On a branch, a charter that turns fast verify on has no effect until it merges.
     subprocess.call(["git", "checkout", "-qb", "feat/fast"], cwd=repo)
     write(repo, "docs/project/charter.md",
-          set_row(read(repo, "docs/project/charter.md"), "**Verify at finish**", "`fast: lint, unit`"))
+          set_row(read(repo, "docs/project/charter.md"), "**Verify at finish**",
+                  "`fast: lint, unit` _(the full suite, `checks.integration`, runs in CI)_"))
     check("the charter template carries a Verify at finish row, set fast on the branch",
-          "| **Verify at finish** | `fast: lint, unit` |" in read(repo, "docs/project/charter.md"))
+          "| **Verify at finish** | `fast: lint, unit` _(" in read(repo, "docs/project/charter.md"))
     subprocess.call(["git", "add", "-A"], cwd=repo)
     subprocess.call(git + ["commit", "-qm", "chore(FST-1): fast verify\n\nWork-Item: FST-1"], cwd=repo)
     code, out = sdlc("verify", "--item", "FST-1")
@@ -4045,12 +4046,41 @@ def test_fast_verify():
     check("the ledger marks the run as fast", '"mode": "fast"' in ledger, ledger[-600:])
     code, out = sdlc("finish", "FST-1", "--dry-run")
     check("finish accepts a fast run for a Tier 2 item", "verify   pass" in out, out)
+
+    def commit_charter(label, value, msg):
+        write(repo, "docs/project/charter.md", set_row(read(repo, "docs/project/charter.md"), label, value))
+        subprocess.call(["git", "add", "-A"], cwd=repo)
+        subprocess.call(git + ["commit", "-qm", msg], cwd=repo)
+    # FST-4 has only a fast run (FST-1 also has the full run from the branch).
+    sdlc("item", "add", "FST-4", "--title", "work FST-4", "--tier", "2", "--status", "In progress")
+    write(repo, "src/fst_4.py", "x = 4\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "feat(FST-4): work\n\nWork-Item: FST-4"], cwd=repo)
+    code, out = sdlc("verify", "--item", "FST-4")
+    check("FST-4 gets a fast run", code == 0 and not ran_integration(), out[-400:])
+    sdlc("item", "set", "FST-4", "--tier", "1")
+    code, out = sdlc("finish", "FST-4", "--dry-run")
+    check("a fast run stops counting once the item is Tier 1", "verify   pass" not in out
+          and "integration" in out, out)
+    sdlc("item", "set", "FST-4", "--tier", "2")
+    commit_charter("**Verify at finish**", "`full`", "chore: verify at finish full")
+    code, out = sdlc("finish", "FST-4", "--dry-run")
+    check("turning fast off on the default branch makes the fast run insufficient",
+          "verify   pass" not in out and "integration" in out, out)
+    commit_charter("**Verify at finish**", "`fast: lint, unit`", "chore: verify at finish fast")
+    code, out = sdlc("verify", "--item", "FST-3")
+    check("a Tier 3 item runs only the fast stages too", code == 0 and not ran_integration(), out[-600:])
     code, out = sdlc("verify", "--item", "FST-1", "--full")
     check("--full runs every stage", code == 0 and ran_integration(), out[-800:])
     code, out = sdlc("verify", "--item", "FST-2")
     check("a Tier 1 item always runs every stage", code == 0 and ran_integration(), out[-800:])
     code, out = sdlc("finish", "FST-2", "--dry-run")
     check("finish takes the full run for a Tier 1 item", "verify   pass" in out, out)
+    commit_charter("`checks.lint`", "`false`", "chore: break lint")
+    code, out = sdlc("verify", "--item", "FST-1")
+    check("a failing fast stage fails the fast run", code != 0 and not ran_integration(), out[-600:])
+    code, out = sdlc("finish", "FST-1", "--dry-run")
+    check("finish refuses a failed fast run", "verify   pass" not in out, out)
     shutil.rmtree(d, ignore_errors=True)
 
 

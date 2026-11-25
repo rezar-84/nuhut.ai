@@ -1981,7 +1981,11 @@ def verify_fast_stages(project):
     names them; only stages the charter gives a command count. An empty list means full:
     the row is missing, says `full`, or names no stage with a command."""
     text, source = trusted_text(project, project.charter_path)
-    cell = re.sub(r"[`*]", "", UNFILLED.sub("", labelled(text or "", "Verify at finish") or ""))
+    raw = UNFILLED.sub("", labelled(text or "", "Verify at finish") or "")
+    # The value is the first `code` span when there is one, so a note that names another
+    # stage (`checks.integration` runs in CI) is never read as part of the list.
+    span = re.search(r"`([^`]*)`", raw)
+    cell = span.group(1) if span else re.sub(r"[*]", "", raw).split("(")[0]
     m = re.match(r"(?i)^\s*fast\s*:\s*(.+)$", cell.strip())
     if not m:
         return [], source
@@ -6238,7 +6242,8 @@ def _cmd_verify(project, opts, parser):
     summary, text = verify(project, selected, opts.timeout, parallel=getattr(opts, "parallel", False),
                            item=opts.item, fast=fast)
     if fast and not getattr(opts, "json", False):
-        text += ("\nFast verify (charter: Verify at finish): ran %s. CI runs every stage; "
+        text += ("\nFast verify (charter: Verify at finish): ran %s only. The other stages run "
+                 "where CI runs them, and stop a merge only if the host requires that job; "
                  "`verify --item %s --full` runs them here.\n" % (", ".join(fast), opts.item))
     if getattr(opts, "json", False):
         print(json.dumps(summary, indent=2))
