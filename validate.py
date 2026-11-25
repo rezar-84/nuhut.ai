@@ -3,6 +3,7 @@
 
 import io
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -512,6 +513,105 @@ def release_matches_changelog(errors, version):
                               "example does not install" % (rel, spec, nxt))
 
 
+# ---------------------------------------------------------------- skill routing (NUHT-059)
+# Does each skill's description carry the words people use for its job, and do two
+# descriptions collide? A lexical approximation of how an agent picks a skill (TF-IDF
+# cosine over the name and description), checked against tests/skill-routing.json: at
+# least 3 prompts that should pick the skill and 2 that should not, each with the skill
+# that owns it. The idea follows addyosmani/agent-skills (MIT); this code is our own.
+ROUTING_STOP = set("""a an and are as at be been but by can do does for from has have how i if
+in into is it its me my of on or our so than that the their them then there these this those
+to us was we what when where which who why will with you your before after about any all also
+use used using whenever every each other more most such only very just should would could
+""".split())
+ROUTING_ALIASES = {"docs": "document", "doc": "document", "auth": "authenticate",
+                   "repo": "repository", "deps": "dependency", "db": "database",
+                   "perf": "performance", "a11y": "accessibility", "i18n": "internationalisation",
+                   "l10n": "localisation", "ui": "interface", "seo": "search", "adr": "decision",
+                   "tests": "test", "spec": "specification"}
+ROUTING_MIN_RANK1 = 0.95
+ROUTING_COLLIDE = 0.75
+
+
+def routing_stem(w):
+    for suf in ("ations", "ation", "ings", "ing", "ies", "ied", "edly", "ed", "es", "ly", "s"):
+        if w.endswith(suf) and len(w) - len(suf) >= 3:
+            w = w[: -len(suf)] + ("y" if suf in ("ies", "ied") else "")
+            break
+    if len(w) > 4 and w[-1] == w[-2] and w[-1] not in "aeiouls":
+        w = w[:-1]
+    return w
+
+
+def routing_tokens(text):
+    text = re.sub(r"\{\{[A-Z_]+\}\}", " ", text.lower())
+    return [routing_stem(ROUTING_ALIASES.get(w, w)) for w in re.split(r"[^a-z0-9]+", text)
+            if len(w) > 2 and w not in ROUTING_STOP]
+
+
+def check_skill_routing(skills_dir, cases):
+    """Errors for missing cases, colliding descriptions and misrouted prompts."""
+    docs, descs = {}, {}
+    for f in sorted(Path(skills_dir).glob("*/SKILL.md")):
+        m = re.search(r"^description:\s*(.+)$", f.read_text(encoding="utf-8"), re.M)
+        descs[f.parent.name] = routing_tokens(m.group(1) if m else "")
+        docs[f.parent.name] = routing_tokens(f.parent.name.replace("sdlc-", "")) * 2 + descs[f.parent.name]
+    n = len(docs)
+    df = {}
+    for toks in docs.values():
+        for t in set(toks):
+            df[t] = df.get(t, 0) + 1
+    idf = dict((t, math.log(1 + n / (1.0 + c))) for t, c in df.items())
+
+    def vec(toks):
+        tf = {}
+        for t in toks:
+            tf[t] = tf.get(t, 0) + 1
+        out = dict((t, c * idf.get(t, math.log(1 + n))) for t, c in tf.items())
+        norm = math.sqrt(sum(x * x for x in out.values())) or 1.0
+        return dict((t, x / norm) for t, x in out.items())
+
+    def cos(a, b):
+        return sum(x * b.get(t, 0.0) for t, x in a.items())
+    vecs = dict((k, vec(t)) for k, t in docs.items())
+    only = dict((k, vec(t)) for k, t in descs.items())
+    names = sorted(docs)
+    errors = []
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            if cos(only[a], only[b]) >= ROUTING_COLLIDE:
+                errors.append("skills %s and %s have near-identical descriptions (%.2f)"
+                              % (a, b, cos(only[a], only[b])))
+    ranked1 = total = 0
+    for skill in names:
+        case = cases.get(skill) or {}
+        if len(case.get("positive", [])) < 3 or len(case.get("negative", [])) < 2:
+            errors.append("tests/skill-routing.json: %s needs at least 3 positive and 2 negative "
+                          "prompts" % skill)
+        for prompt in case.get("positive", []):
+            q = vec(routing_tokens(prompt))
+            order = sorted(names, key=lambda s: -cos(q, vecs[s]))
+            total += 1
+            if order[0] == skill:
+                ranked1 += 1
+            else:
+                errors.append("%s: %r picks %s first; add the prompt's words to the "
+                              "description" % (skill, prompt, order[0]))
+        for neg in case.get("negative", []):
+            q = vec(routing_tokens(neg["prompt"]))
+            owner = neg.get("owner")
+            top = max(names, key=lambda s: cos(q, vecs[s]))
+            if top == skill or (owner in vecs and cos(q, vecs[owner]) <= cos(q, vecs[skill])):
+                errors.append("%s: %r should go to %s but picks %s" % (skill, neg["prompt"],
+                                                                        owner or "another skill", top))
+    for extra in sorted(set(cases) - set(names)):
+        errors.append("tests/skill-routing.json names %s, which is not a skill" % extra)
+    if total and ranked1 / float(total) < ROUTING_MIN_RANK1:
+        errors.append("only %d of %d skill prompts pick their skill first (need %d%%)"
+                      % (ranked1, total, ROUTING_MIN_RANK1 * 100))
+    return errors
+
+
 def unpinned_actions(text):
     """(line number, action) for each `uses:` in a workflow that is not pinned to a 40-hex
     commit with a `# vX` comment. Local actions (`./...`) and docker refs are skipped."""
@@ -533,6 +633,16 @@ def main():
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     if not VERSION_RE.match(version):
         errors.append("VERSION is not semantic major.minor.patch: %r" % version)
+
+    routing_file = ROOT / "tests" / "skill-routing.json"
+    if routing_file.is_file():
+        try:
+            errors.extend(check_skill_routing(ROOT / "optional" / "skills",
+                                              json.loads(routing_file.read_text(encoding="utf-8"))))
+        except ValueError:
+            errors.append("tests/skill-routing.json is not valid JSON")
+    else:
+        errors.append("tests/skill-routing.json is missing: every skill needs routing prompts")
 
     # Every action a workflow runs is pinned to a commit, with its version as a comment
     # (NUHT-046): a tag can be moved to other code.

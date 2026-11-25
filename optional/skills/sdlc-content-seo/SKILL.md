@@ -1,6 +1,6 @@
 ---
 name: sdlc-content-seo
-description: Review publicly discoverable content and its technical SEO — titles, headings, metadata, canonical and indexing directives, internal links, structured data, URL changes and redirects — and check that every claim in the copy is true and sourced. Use when public pages, marketing copy, routes, or metadata change.
+description: Review publicly discoverable content and its technical SEO — page titles, meta descriptions, headings, metadata, canonical and indexing directives, internal links, structured data, URL changes and redirects — and check that every claim in the copy is true and sourced. Use when public pages, marketing copy, routes, or metadata change.
 ---
 
 # Content and SEO review

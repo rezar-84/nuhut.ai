@@ -4273,6 +4273,33 @@ def test_finish_commit():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_skill_routing():
+    print("skill routing: missing cases, colliding descriptions and misrouted prompts fail validate")
+    sys.path.insert(0, ROOT)
+    import validate as _validate
+    sys.path.pop(0)
+    d = tempfile.mkdtemp(prefix="sdlc-routing-")
+
+    def skill(name, desc):
+        write(os.path.join(d, name), "SKILL.md", "---\nname: %s\ndescription: %s\n---\n# x\n" % (name, desc))
+    skill("sdlc-alpha", "Write the failing test before the code for a defect or new behaviour.")
+    skill("sdlc-beta", "Plan a database schema migration, a backfill or a column rename.")
+    cases = {"sdlc-alpha": {"positive": ["write a failing test first", "test before code for the defect",
+                                         "new behaviour needs a test before code"],
+                            "negative": [{"prompt": "rename a column in the database", "owner": "sdlc-beta"},
+                                         {"prompt": "backfill old rows", "owner": "sdlc-beta"}]}}
+    errs = _validate.check_skill_routing(d, cases)
+    check("a skill with no routing prompts fails", any("sdlc-beta needs at least 3" in e for e in errs), "\n".join(errs))
+    check("well-routed prompts pass", not any(e.startswith("sdlc-alpha") for e in errs), "\n".join(errs))
+    cases["sdlc-alpha"]["positive"].append("plan the schema migration")
+    errs = _validate.check_skill_routing(d, cases)
+    check("a prompt that picks another skill fails", any("picks sdlc-beta first" in e for e in errs), "\n".join(errs))
+    skill("sdlc-gamma", "Write the failing test before the code for a defect or new behaviour.")
+    errs = _validate.check_skill_routing(d, cases)
+    check("two near-identical descriptions fail", any("near-identical" in e for e in errs), "\n".join(errs))
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_worktree_scripts():
     print("worktree scripts: setup on claim and dispatch, teardown on release, a port per worktree")
     d = tempfile.mkdtemp(prefix="sdlc-wtscripts-")
@@ -9625,7 +9652,7 @@ def main():
                  test_status_review_fixes, test_defect_awareness, test_release_defect_gate,
                  test_tier1_approval_count_and_local_approval, test_severity_downgrade_rule,
                  test_checker_fallback, test_adopt_detected_commands, test_fast_verify,
-                 test_hooks_command, test_finish_commit,
+                 test_hooks_command, test_finish_commit, test_skill_routing,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

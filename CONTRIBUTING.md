@@ -24,7 +24,10 @@ dependency after installation.
 
    `validate.py` cross-checks the pairings the kit maintains by hand: every role has a
    playbook, a charter row and a README entry; every template is in the docs map; every
-   skill has an install rule; every check stage has a charter row. It also measures each
+   skill has an install rule; every check stage has a charter row. Every skill also has
+   routing prompts in `tests/skill-routing.json`, at least 3 that should pick it and 2 that
+   should go elsewhere; validate fails when a prompt picks the wrong skill or two
+   descriptions nearly match, so a new skill ships with its prompts. It also measures each
    tier's reading list against its word budget (`python3 validate.py --reading-lists`).
    The smoke suite needs full git history for its upgrade and benchmark tests
    (`git fetch --unshallow --tags`); without it they skip and say so.

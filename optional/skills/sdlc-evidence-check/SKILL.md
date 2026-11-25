@@ -1,6 +1,6 @@
 ---
 name: sdlc-evidence-check
-description: Check a status claim before it is written — "done", "tests pass", "verified", "it works", "fixed", "should be fine". Use before reporting completion or progress, and whenever about to describe the state of checks, so every claim comes out as Verified, Not run, Absent, or Unknown with the real command output behind it.
+description: Check a status claim before it is written — "done", "tests pass", "verified", "it works", "fixed", "should be fine". Use before reporting completion or progress, before saying a claim is accurate, and whenever about to describe the state of checks, so every claim comes out as Verified, Not run, Absent, or Unknown with the real command output behind it.
 ---
 
 # Evidence check — before you claim anything

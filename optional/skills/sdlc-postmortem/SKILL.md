@@ -1,6 +1,6 @@
 ---
 name: sdlc-postmortem
-description: Run a blameless postmortem after an incident, outage, regression, data problem, or rollback — timeline, contributing factors, detection and recovery gaps, and tracked corrective actions. Use when something broke in a real environment, a release had to be reverted, or a bug reached users.
+description: Run a blameless postmortem after an incident, outage, regression, data problem, or rollback — timeline, contributing factors, detection and recovery gaps, and tracked corrective actions. Use when something broke in a real environment, a release was reverted or rolled back, a bug reached users, or someone asks what went wrong.
 ---
 
 # Postmortem

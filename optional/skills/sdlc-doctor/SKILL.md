@@ -1,6 +1,6 @@
 ---
 name: sdlc-doctor
-description: Check the project's own SDLC documents for gaps, staleness, and drift before relying on them — blank charter commands, unticked roles with no reason, artifacts past their staleness window, backlog and worklog IDs that do not match, backlog rows sitting past the staleness window (a zombie In progress claim, a Blocked or Parked row nobody chased, a Ready row nobody picked up), an oversized worklog, or a profile that disagrees with the charter. Use at the start of a session in an unfamiliar project, before a release, or when a document looks like it may not describe reality.
+description: Check the project's own SDLC documents for gaps, staleness, and drift before relying on them — blank charter commands, unticked roles with no reason, artifacts past their staleness window, backlog and worklog IDs that do not match, backlog rows sitting past the staleness window (a zombie In progress claim, a Blocked or Parked row nobody chased, a Ready row nobody picked up), an oversized worklog, or a profile that disagrees with the charter. Use at the start of a session in an unfamiliar project, before a release, for a health check of the project records, or when a document looks like it may not describe reality.
 ---
 
 # Doctor — is this project's paperwork still true?
