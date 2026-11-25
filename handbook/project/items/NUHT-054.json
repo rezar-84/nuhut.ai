@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-054",
+  "title": "Rotate the worklog past its 1,000-line limit",
+  "type": "chore",
+  "tier": "3",
+  "effort": "",
+  "owner": "technical-writer",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "handbook/project/worklog.md",
+    "handbook/project/worklog-archive/"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "2026-11-25",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}
