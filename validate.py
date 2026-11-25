@@ -512,6 +512,19 @@ def release_matches_changelog(errors, version):
                               "example does not install" % (rel, spec, nxt))
 
 
+def unpinned_actions(text):
+    """(line number, action) for each `uses:` in a workflow that is not pinned to a 40-hex
+    commit with a `# vX` comment. Local actions (`./...`) and docker refs are skipped."""
+    found = []
+    for n, line in enumerate(text.splitlines(), 1):
+        m = re.search(r"\buses:\s*([^\s#]+)", line)
+        if not m or m.group(1).startswith(("./", "docker://")):
+            continue
+        if not re.match(r"^[^@]+@[0-9a-f]{40}\s+#\s*v\S+", line.split("uses:", 1)[1].strip()):
+            found.append((n, m.group(1)))
+    return found
+
+
 def main():
     if sys.argv[1:] == ["--reading-lists"]:
         print_reading_lists()
@@ -523,13 +536,23 @@ def main():
 
     # Every action a workflow runs is pinned to a commit, with its version as a comment
     # (NUHT-046): a tag can be moved to other code.
-    for wf in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        for n, line in enumerate(wf.read_text(encoding="utf-8").splitlines(), 1):
-            m = re.search(r"\buses:\s*([^\s#]+)", line)
-            if m and not m.group(1).startswith("./") and \
-                    not re.match(r"^[^@]+@[0-9a-f]{40}\s+#\s*v\S+", line.split("uses:", 1)[1].strip()):
-                errors.append("%s:%d: %s is not pinned to a commit hash with a `# vX` comment"
-                              % (wf.relative_to(ROOT), n, m.group(1)))
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml")) + \
+        sorted((ROOT / ".github" / "workflows").glob("*.yaml"))
+    checkout_pins = set()
+    for wf in workflows:
+        text = wf.read_text(encoding="utf-8")
+        for n, action in unpinned_actions(text):
+            errors.append("%s:%d: %s is not pinned to a commit hash with a `# vX` comment"
+                          % (wf.relative_to(ROOT), n, action))
+        checkout_pins.update(re.findall(r"actions/checkout@[0-9a-f]{40}\s+#\s*v\S+", text))
+    # The scaffold's pin lives in install.py, which Dependabot does not edit: it must match
+    # what this repository's workflows run, so an update moves both.
+    scaffold = re.search(r'^PINNED_CHECKOUT = "([^"]+)"', (ROOT / "install.py").read_text(
+        encoding="utf-8"), re.M)
+    if scaffold and checkout_pins and scaffold.group(1) not in checkout_pins:
+        errors.append("install.py PINNED_CHECKOUT (%s) differs from the workflows' %s: when "
+                      "Dependabot moves the pin, update install.py to match"
+                      % (scaffold.group(1), ", ".join(sorted(checkout_pins))))
 
     # The plugin manifest carries its own version string and drifts silently otherwise.
     manifest = ROOT / ".claude-plugin" / "plugin.json"

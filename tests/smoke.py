@@ -2701,6 +2701,14 @@ def test_scaffolding():
     check("machine-readable profile records confirmation boundary",
           profile.get("confirmation_required") is True and "node" in profile.get("adapters", []))
     check("charter ticks generated test plan", "☑ test-plan" in read(d, "docs/project/charter.md"))
+    sys.path.insert(0, ROOT)
+    import validate as _validate
+    sys.path.pop(0)
+    check("validate refuses a tag or branch action and accepts a pinned one (NUHT-046 review)",
+          [a for _, a in _validate.unpinned_actions(
+              "steps:\n  - uses: actions/checkout@v4\n  - uses: x/y@main\n"
+              "  - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0\n"
+              "  - uses: ./local-action\n")] == ["actions/checkout@v4", "x/y@main"])
     check("GitHub CI pins actions/checkout to a commit, with its version as a comment (NUHT-046)",
           re.search(r"actions/checkout@[0-9a-f]{40} # v4", workflow) is not None, workflow[:600])
     check("GitHub CI uses detected commands",

@@ -42,4 +42,8 @@ the pinned workflows.
 
 ## Rollback
 
-Revert the commit. The tags still exist upstream.
+Revert the commit; the tags still exist upstream. Rehearsed on 2026-11-25 in a throwaway
+worktree at `e7f5396`: `git revert --no-edit e7f5396` gave `46774a4`, the workflows ran
+`actions/checkout@v4` and `actions/setup-python@v5` again, `.github/dependabot.yml` was
+gone, and `python3 validate.py` ("all kit validations passed") and
+`tests/run.py --only test_scaffolding` ("all passed") both passed. The worktree was removed.
