@@ -4011,6 +4011,7 @@ def test_fast_verify():
     charter = set_row(charter, "`checks.unit`", "`true`")
     charter = set_row(charter, "`checks.integration`", "`touch %s`" % marker)
     charter = set_row(charter, "**Default branch**", "`main`")
+    charter = set_row(charter, "`checks.e2e`", "absent")
     write(repo, "docs/project/charter.md", charter)
     subprocess.call(["git", "add", "-A"], cwd=repo)
     subprocess.call(git + ["commit", "-qm", "chore: kit"], cwd=repo)
@@ -4053,6 +4054,8 @@ def test_fast_verify():
     ledger = "".join(read(repo, os.path.join("docs/project/ledger", n))
                      for n in os.listdir(os.path.join(repo, "docs/project/ledger")))
     check("the ledger marks the run as fast", '"mode": "fast"' in ledger, ledger[-600:])
+    check("a stage the charter declares absent is still reported Absent in a fast run",
+          re.search(r"`checks.e2e` \| Absent \(declared\)", out) is not None, out[-1500:])
     code, out = sdlc("finish", "FST-1", "--dry-run")
     check("finish accepts a fast run for a Tier 2 item", "verify   pass" in out, out)
 

@@ -1493,14 +1493,14 @@ def verify(project, selected, timeout, parallel=False, item=None, fast=None):
         if selected and stage not in selected:
             entry["result"] = "Not run (not selected)"
             stage_entries[stage] = entry
-        elif fast and stage not in fast:
-            entry["result"] = "Not run (fast verify: CI runs it)"
-            stage_entries[stage] = entry
         elif command == "absent":
             entry["result"] = "Absent (declared)"
             stage_entries[stage] = entry
         elif not command:
             entry["result"] = "Absent (no command in the charter)"
+            stage_entries[stage] = entry
+        elif fast and stage not in fast:
+            entry["result"] = "Not run (fast verify: CI runs it)"
             stage_entries[stage] = entry
         else:
             stage_entries[stage] = entry
