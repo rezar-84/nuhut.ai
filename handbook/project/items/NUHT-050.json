@@ -5,7 +5,7 @@
   "tier": "2",
   "effort": "",
   "owner": "software-engineer",
-  "status": "In progress",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/sdlc.py",
@@ -13,11 +13,11 @@
   ],
   "created": "2026-11-25",
   "updated": "2026-11-25",
-  "completed": "",
+  "completed": "2026-11-25",
   "summary": "",
   "approvers": [],
-  "waiting_on": "backlog owner",
-  "park_reason": "Discovered item triage: accept into Ready, defer, or drop (charter Discovered defects policy is Parked (human triage required))",
+  "waiting_on": "",
+  "park_reason": "",
   "unblock_by": "",
   "later_when": "",
   "dropped_reason": ""
