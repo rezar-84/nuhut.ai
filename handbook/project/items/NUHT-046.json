@@ -5,16 +5,24 @@
   "tier": "1",
   "effort": "",
   "owner": "software-engineer",
-  "status": "In progress",
+  "status": "Parked",
   "depends": [],
   "touch": [],
   "created": "2026-11-23",
   "updated": "2026-11-25",
   "completed": "",
   "summary": "",
-  "approvers": [],
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "charter",
+      "commit": "",
+      "at": ""
+    }
+  ],
   "waiting_on": "rezar-84",
-  "park_reason": "Review finding NUHT-041 #7 (S2): changes workflows and the scaffold output; needs an update process",
+  "park_reason": "merge approval (Tier 1): 0 of 1 (charter fallback)",
   "unblock_by": "",
   "later_when": "",
   "dropped_reason": ""
