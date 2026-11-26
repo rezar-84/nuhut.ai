@@ -5,14 +5,14 @@
   "tier": "3",
   "effort": "",
   "owner": "software-engineer",
-  "status": "In progress",
+  "status": "Done",
   "depends": [],
   "touch": [
     "tests/smoke.py"
   ],
   "created": "2026-11-26",
   "updated": "2026-11-26",
-  "completed": "",
+  "completed": "2026-11-26",
   "summary": "CI fails on Ubuntu only and the log needs a login; report each failure and crash as an ::error annotation, which the public checks API shows.",
   "approvers": [],
   "waiting_on": "",
