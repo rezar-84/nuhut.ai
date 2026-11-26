@@ -163,7 +163,7 @@ The runtime, `python3 .ai-sdlc/bin/sdlc.py <command>` (each has `-h` with exampl
 | **Releases and deploys** | `deploy record` which version went to which environment, with its commits and items · `deploy list` what runs where |
 | **Specs** | `spec list \| show \| validate \| apply` |
 | **Writing** | `slop` find the phrasings that read as machine-written (`--strict` fails the file) |
-| **Setup** | `config` see or change the charter's constraints · `fix` safe repairs · `ext` add, update, remove, search and package [extensions](docs/extensions.md) as Claude Code, Gemini, Codex or Kiro plugins · `notify` the webhook for items that wait on a person (`--test` sends one) |
+| **Setup** | `config` see or change the charter's constraints · `fix` safe repairs · `hooks` the guard hooks, what each blocks, and turning one off (a person) · `ext` add, update, remove, search and package [extensions](docs/extensions.md) as Claude Code, Gemini, Codex or Kiro plugins · `notify` the webhook for items that wait on a person (`--test` sends one) |
 | **Extension commands** | `issues pull` park GitHub issues that no item maps to · `issues push` open issues for the items you name (the `github-issues` built-in, through `gh`) |
 
 In Claude Code: `/sdlc-plan`, `/sdlc-build`, `/sdlc-verify`, `/sdlc-review`, `/sdlc-finish`, `/sdlc-log`,
@@ -208,6 +208,19 @@ record and setting, adds new charter rows, and backs up what it changes. A 3.x p
 **Tier rules: Strict**, which keeps the 3.x behaviour until you choose otherwise.
 [CHANGELOG.md](CHANGELOG.md) has the migration notes. The kit itself is versioned
 automatically from its commits, with semantic versioning.
+
+### What's new in 6.0
+
+- `finish` trusts only evidence bound to the item, and approvers read from the default
+  branch. Solo projects can set **Tier 1 approvals** to `1`.
+- Fast verify for Tier 2 and 3 (`Verify at finish: fast: lint, unit`), and
+  `finish --commit` to commit the item's records in one step.
+- Commit checks run as git hooks; `sdlc.py hooks list|on|off` explains and switches each.
+- `sdlc.py status`, `bug`, `deploy`, `ext` and `ci-check` on any git host.
+
+Before upgrading a 5.x project, read
+[Upgrading to 6.0](CHANGELOG.md#upgrading-to-60): commits now count only with a
+`Work-Item:` trailer, and the **Approvers** row must be filled.
 
 ## How it compares
 

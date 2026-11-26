@@ -5,19 +5,35 @@
   "tier": "1",
   "effort": "",
   "owner": "devops-sre",
-  "status": "Ready",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/"
   ],
   "created": "2026-11-22",
-  "updated": "2026-11-22",
-  "completed": "",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
   "summary": "",
-  "approvers": [],
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "local",
+      "commit": "9e26517b8ae45f4b4dd35d2f40ad6b4e8179cd22",
+      "at": "2026-11-26T06:56:55Z"
+    }
+  ],
   "waiting_on": "",
   "park_reason": "",
   "unblock_by": "",
   "later_when": "v6 Phase 3 (delivery): after Phase 2",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "9e26517b8ae45f4b4dd35d2f40ad6b4e8179cd22",
+      "at": "2026-11-26T06:56:55Z",
+      "as": "reza"
+    }
+  ]
 }

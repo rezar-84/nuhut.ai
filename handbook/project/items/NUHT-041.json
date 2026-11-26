@@ -5,27 +5,35 @@
   "tier": "1",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Parked",
+  "status": "Done",
   "depends": [
     "NUHT-040"
   ],
   "touch": [],
   "created": "2026-11-22",
-  "updated": "2026-11-25",
-  "completed": "",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
   "summary": "Owner approved the build 2026-11-22; severity downgrade rule added 2026-11-23 (human, or agent after an independent blind re-rating)",
   "approvers": [
     {
       "handle": "rezar-84",
       "login": "",
-      "source": "charter",
-      "commit": "",
-      "at": ""
+      "source": "local",
+      "commit": "e4119b5ae3a051c90009404e1445a87a6295d6ab",
+      "at": "2026-11-26T06:09:55Z"
     }
   ],
-  "waiting_on": "rezar-84",
-  "park_reason": "merge approval (Tier 1): 0 of 2 (charter fallback)",
+  "waiting_on": "",
+  "park_reason": "",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "e4119b5ae3a051c90009404e1445a87a6295d6ab",
+      "at": "2026-11-26T06:09:55Z",
+      "as": "reza"
+    }
+  ]
 }

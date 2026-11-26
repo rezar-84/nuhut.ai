@@ -1493,14 +1493,14 @@ def verify(project, selected, timeout, parallel=False, item=None, fast=None):
         if selected and stage not in selected:
             entry["result"] = "Not run (not selected)"
             stage_entries[stage] = entry
-        elif fast and stage not in fast:
-            entry["result"] = "Not run (fast verify: CI runs it)"
-            stage_entries[stage] = entry
         elif command == "absent":
             entry["result"] = "Absent (declared)"
             stage_entries[stage] = entry
         elif not command:
             entry["result"] = "Absent (no command in the charter)"
+            stage_entries[stage] = entry
+        elif fast and stage not in fast:
+            entry["result"] = "Not run (fast verify: CI runs it)"
             stage_entries[stage] = entry
         else:
             stage_entries[stage] = entry
@@ -2073,7 +2073,10 @@ def evidence_matches(project, item, rows=None, commits=None):
     # of the item's commits in its history. A dirty run on the item's own commit verified
     # whatever came next, not the item. A waiver (finish --waive) is a recorded Not run,
     # never evidence.
-    return [row for row in rows if not row.get("waived_by") and (
+    # A run tagged for another item verified that item, even when it ran on one of this
+    # item's commits (a records commit, say), so it is not this item's evidence (NUHT-063).
+    return [row for row in rows if not row.get("waived_by")
+            and row.get("item") in (None, "", item) and (
         (row.get("commit") in heads and not row.get("dirty"))
         or (row.get("dirty") and row.get("commit") in parents)
         or (row.get("item") == item and not row.get("dirty")
@@ -2299,9 +2302,13 @@ def item_diff(project, item, base=None):
                       "the working tree" % item)
     if base:
         return project.git("diff", base), None
-    oldest, newest = commits[-1], commits[0]
-    start = oldest[1] or project.git("hash-object", "-t", "tree", "/dev/null").strip()
-    return project.git("diff", start, newest[0]), None
+    # Only the item's own commits, oldest first: a range from its first commit to its
+    # last would also carry other items' work committed in between.
+    empty = project.git("hash-object", "-t", "tree", "/dev/null").strip()
+    parts = []
+    for sha, parent, _ in reversed(commits):
+        parts.append("# commit %s\n%s" % (sha[:12], project.git("diff", parent or empty, sha)))
+    return "\n".join(parts), None
 
 
 def item_tier(project, item):
@@ -4917,6 +4924,7 @@ Setup
   config              see or change the charter's constraints                          config --specs on
   notify              the Notify webhook: its setup; --test sends a test event         notify --test
   fix                 repair setup drift; preview record repairs (--apply writes)      fix rotate-worklog
+  hooks               the guard hooks: what each blocks; a person turns one off      hooks off test-lock
   ext                 extensions: list, add, update, remove, search, validate, package ext search lint
 """
 MAIN_HELP_FOOTER = """
@@ -4939,6 +4947,8 @@ EXAMPLES = {
                   "approvals ACME-12 --json"],
     "approve": ["approve ACME-12 --by sam  # run by the approver in a terminal"],
     "rerate": ["rerate ACME-31 --by codex  # blind re-rating; needed before an agent lowers S0-S2"],
+    "hooks": ["hooks                    # each guard hook: on or off, what it blocks, what it cannot see",
+              "hooks off test-lock      # a person, in a terminal", "hooks on test-lock"],
     "guard": ["guard start              # SessionStart hook (reads the hook JSON on stdin)",
               "guard stop               # Stop hook"],
     "plan-check": ["plan-check ACME-12", "plan-check ACME-12 --base main --strict",
@@ -5076,6 +5086,45 @@ def _cmd_approve(project, opts, parser):
     return code
 
 
+def finish_record_paths(project, item):
+    """The records `finish` and `verify --item` leave for <item> that git does not have yet:
+    its shard, its worklog entry, and ledger shards named for it."""
+    base = project.docs.rstrip("/") + "/project/"
+    wanted = (base + "items/%s.json" % item, base + "worklog/%s.md" % item)
+    out = project.git("status", "--porcelain", "--untracked-files=all", "--", base)
+    paths = []
+    for line in out.splitlines():
+        path = line[3:].strip().strip('"')
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        if path in wanted or (path.startswith(base + "ledger/") and ("-%s-" % item) in path):
+            paths.append(path)
+    return paths
+
+
+def commit_finish_records(project, item, status):
+    """Commit only <item>'s records, with its trailers; whatever else is staged stays
+    staged and out of this commit. Returns (sha or '', message)."""
+    paths = finish_record_paths(project, item)
+    if not paths:
+        return "", "commit   nothing to commit: the records are already in git"
+    agent, model = identity(None, None, project)
+    tags = [("Work-Item", item)] + ([("Agent", "human")] if agent == "unknown" else
+                                    [("Agent", agent), ("Model", model)])
+    message = "chore(%s): finish records (%s)\n\n%s" % (
+        item, status, "\n".join("%s: %s" % pair for pair in tags))
+    proc = subprocess.run(["git", "add", "--"] + paths, cwd=project.root,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if proc.returncode == 0:
+        proc = subprocess.run(["git", "commit", "-q", "-m", message, "--"] + paths,
+                              cwd=project.root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if proc.returncode != 0:
+        return "", ("commit   failed (%s): commit %s yourself"
+                    % (proc.stdout.decode("utf-8", "replace").strip()[:200], ", ".join(paths)))
+    sha = project.git("rev-parse", "--short", "HEAD").strip()
+    return sha, "commit   %s: %s" % (sha, ", ".join(paths))
+
+
 def _cmd_finish(project, opts, parser):
     """finish and guard: close a work item, or run the finish guard from a hook."""
     finish_mod = runtime_module("finish")
@@ -5113,6 +5162,13 @@ def _cmd_finish(project, opts, parser):
     lines, code = finish_mod.finish(sys.modules[__name__], project, opts.item,
                                     opts.by if opts.waive else None, opts.reason,
                                     opts.dry_run, notes=notes or None)
+    if getattr(opts, "commit", False) and code == 0:
+        if opts.dry_run:
+            lines.append("commit   would commit: %s"
+                         % (", ".join(finish_record_paths(project, opts.item)) or "nothing"))
+        else:
+            status = (_shards_mod.merged_items(project).get(opts.item) or {}).get("status", "")
+            lines.append(commit_finish_records(project, opts.item, status or "closed")[1])
     if getattr(opts, "json", False):
         owed_list = [ln[5:].strip() for ln in lines if ln.startswith("OWED ")]
         cur_item = _shards_mod.merged_items(project).get(opts.item) or {}
@@ -6253,6 +6309,58 @@ def _cmd_verify(project, opts, parser):
     return 1 if failed else 0
 
 
+def _cmd_hooks(project, opts, parser):
+    """hooks: list the kit's guard hooks, or turn one off or on (.ai-sdlc/hooks-off.txt)."""
+    hooks_mod = runtime_module("hooks")
+    info = dict((h[0], h[1:]) for h in hooks_mod.HOOK_INFO)
+    path = project.path(hooks_mod.HOOKS_OFF_LIST)
+    off = set(hooks_mod._active_patterns(path))
+
+    def state_of(name):
+        """'on' when the hook is wired to run, 'not wired' when only its script is there."""
+        if name in ("work-item-id", "secret-guard"):
+            hook = "commit-msg" if name == "work-item-id" else "pre-commit"
+            script = os.path.isfile(project.path(".ai-sdlc/git-hooks/" + hook))
+            wired = hooks_mod.git_hook_wired(project.root, hook)
+        else:
+            script = os.path.isfile(project.path(".claude/hooks/%s.sh" % name))
+            wired = hooks_mod.agent_hook_wired(project.root, name)
+        return "on" if wired else ("not wired" if script else "not installed")
+    if opts.action == "list":
+        print("%-16s %-14s %-34s %s" % ("hook", "state", "runs on", "blocks"))
+        for name, (where, blocks, blind) in sorted(info.items()):
+            state = "off" if name in off else state_of(name)
+            print("%-16s %-14s %-34s %s" % (name, state, where, blocks))
+            print("%-16s %-14s %-34s cannot see: %s" % ("", "", "", blind))
+        print("\nTurn one off: %s hooks off <name> (a person, in a terminal). On again: "
+              "hooks on <name>. Install them: install.sh <project> --hooks. The finish "
+              "reminder is the charter's Finish guard row." % SDLC)
+        return 0
+    name = opts.name or ""
+    if name not in info:
+        sys.stderr.write("hooks: unknown hook %r; one of: %s\n" % (name, ", ".join(sorted(info))))
+        return 2
+    if opts.action == "off" and any(os.environ.get(k) for k in AGENT_SESSION_ENVS) \
+            and not sys.stdin.isatty():
+        sys.stderr.write("hooks: an agent's session without a terminal cannot turn a guard off; "
+                         "a person runs `%s hooks off %s` in their own terminal\n" % (SDLC, name))
+        print("refused: turning %s off needs a person at a terminal" % name)
+        return 1
+    lines = read(path).splitlines() if os.path.isfile(path) else [
+        "# Guard hooks a person turned off (`sdlc.py hooks off <name>`), one name per line."]
+    lines = [ln for ln in lines if ln.strip() != name]
+    if opts.action == "off":
+        lines.append(name)
+    folder = os.path.dirname(path)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    print("%s is %s%s" % (name, opts.action, "; it no longer blocks: %s" % info[name][1]
+                          if opts.action == "off" else ""))
+    return 0
+
+
 def _cmd_fix(project, opts, parser):
     """fix: safe mechanical repairs."""
     if opts.action in ("rotate-worklog", "normalise-status",
@@ -6360,7 +6468,7 @@ def register_command(name, handler, help="", configure=None, verb=None, core=Fal
 
 for _name, _handler in (
         ("status", _cmd_status), ("doctor", _cmd_doctor), ("approvals", _cmd_approvals),
-        ("approve", _cmd_approve), ("rerate", _cmd_rerate),
+        ("approve", _cmd_approve), ("rerate", _cmd_rerate), ("hooks", _cmd_hooks),
         ("finish", _cmd_finish), ("guard", _cmd_finish),
         ("notify", _cmd_notify), ("sync", _cmd_sync), ("slop", _cmd_slop), ("spec", _cmd_spec),
         ("next-id", _cmd_next_id), ("render", _cmd_render), ("item", _cmd_item),
@@ -6507,6 +6615,8 @@ def build_parser():
     fin.add_argument("--reviews", help="reviews summary when not in reviews/<ID>*.md")
     fin.add_argument("--from-json", dest="from_json", help="JSON file (or '-' for stdin) supplying worklog fields")
     fin.add_argument("--dry-run", action="store_true", help="say what it would do; write nothing")
+    fin.add_argument("--commit", action="store_true", help="commit the item's records (shard, "
+                     "worklog entry, ledger) with its trailers; other staged work stays out")
     fin.add_argument("--json", action="store_true", help="print result as JSON")
     apr = sub.add_parser("approvals", help="who approved an item's merge: the item branch's "
                          "GitHub PR reviews on its head (gh), else the charter's Approvers")
@@ -6808,6 +6918,9 @@ def build_parser():
     bug_p.add_argument("--tier", choices=("1", "2", "3"), default="2", help="risk tier of the fix (default 2)")
     bug_p.add_argument("--status", help="status; default follows the charter's Discovered defects row")
     bug_p.add_argument("--json", action="store_true", help="print the item as JSON")
+    hk_p = sub.add_parser("hooks", help="list the guard hooks; a person turns one off or on")
+    hk_p.add_argument("action", choices=("list", "on", "off"), nargs="?", default="list")
+    hk_p.add_argument("name", nargs="?", help="hook name, as `hooks list` shows it")
     rr_p = sub.add_parser("rerate", help="a blind severity re-rating of a defect by another "
                           "agent; an agent needs one to lower an S0, S1 or S2")
     rr_p.add_argument("item", help="defect item ID")

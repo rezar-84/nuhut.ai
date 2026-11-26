@@ -5,20 +5,42 @@
   "tier": "1",
   "effort": "",
   "owner": "devops-sre",
-  "status": "Ready",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/sdlc.py",
     "install.py"
   ],
   "created": "2026-11-22",
-  "updated": "2026-11-22",
-  "completed": "",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
   "summary": "",
-  "approvers": [],
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "local",
+      "commit": "53d52f2d9e6a529f44bd0d649c05249556a8f3ec",
+      "at": "2026-11-26T06:56:51Z"
+    }
+  ],
   "waiting_on": "",
   "park_reason": "",
   "unblock_by": "",
   "later_when": "v6 Phase 2 (team): after v6.0 ships",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "6c87281bb005f7756b1867314676816b34f58df2",
+      "at": "2026-11-26T06:09:49Z",
+      "as": "reza"
+    },
+    {
+      "handle": "rezar-84",
+      "commit": "53d52f2d9e6a529f44bd0d649c05249556a8f3ec",
+      "at": "2026-11-26T06:56:51Z",
+      "as": "reza"
+    }
+  ]
 }

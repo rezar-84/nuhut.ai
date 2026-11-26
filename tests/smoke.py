@@ -673,10 +673,11 @@ def test_hooks():
     check("existing settings survive the merge",
           settings.get("permissions", {}).get("allow") == ["Bash(npm *)"], str(settings))
     entries = settings.get("hooks", {}).get("PreToolUse", [])
-    check("all six hooks are registered", len(entries) == 6, str(entries))
-    check("the commit hook is filtered to git commit",
-          any(h.get("if") == "Bash(git commit*)"
-              for e in entries for h in e.get("hooks", [])), str(entries))
+    # The commit checks run as git hooks since NUHT-055, so four agent hooks are registered.
+    check("all four agent hooks are registered", len(entries) == 4, str(entries))
+    check("no hook reads shell text for git commit",
+          not any(h.get("if") == "Bash(git commit*)"
+                  for e in entries for h in e.get("hooks", [])), str(entries))
     check("every hook is anchored on the project root",
           all(h.get("command", "").startswith('sh "$CLAUDE_PROJECT_DIR"/.claude/hooks/')
               for e in entries for h in e.get("hooks", [])), str(entries))
@@ -873,7 +874,7 @@ def test_hooks():
           kept.get("facts", {}).get("marker_from_setup") is True, out[-300:])
     settings = json.loads(read(d, ".claude/settings.json"))
     check("re-running does not duplicate the hooks",
-          len(settings.get("hooks", {}).get("PreToolUse", [])) == 6, str(settings))
+          len(settings.get("hooks", {}).get("PreToolUse", [])) == 4, str(settings))
 
     # An older install registered relative commands; both routes repair them in place.
     legacy = read(d, ".claude/settings.json").replace('sh \\"$CLAUDE_PROJECT_DIR\\"/', "sh ")
@@ -883,7 +884,7 @@ def test_hooks():
     settings = json.loads(read(d, ".claude/settings.json"))
     commands = [h["command"] for e in settings["hooks"]["PreToolUse"] for h in e["hooks"]]
     check("--hooks rewrites legacy commands without duplicating them",
-          len(commands) == 6 and all("$CLAUDE_PROJECT_DIR" in c for c in commands), str(commands))
+          len(commands) == 4 and all("$CLAUDE_PROJECT_DIR" in c for c in commands), str(commands))
     write(d, ".claude/settings.json", legacy)
     code, out = run([d, "HKT", "--upgrade"])
     settings = json.loads(read(d, ".claude/settings.json"))
@@ -899,21 +900,21 @@ def test_hooks():
     check("exit 0 with other harnesses", code == 0, out[-300:])
     gem = json.loads(read(d, ".gemini/settings.json") or "{}")
     before = gem.get("hooks", {}).get("BeforeTool", [])
-    check("gemini gets all six rules as BeforeTool hooks through the adapter",
-          len(before) == 6 and all('adapter.sh gemini' in h["command"] and "$GEMINI_PROJECT_DIR" in h["command"]
+    check("gemini gets the four agent rules as BeforeTool hooks through the adapter",
+          len(before) == 4 and all('adapter.sh gemini' in h["command"] and "$GEMINI_PROJECT_DIR" in h["command"]
                                    for e in before for h in e["hooks"]), str(before)[:300])
     check("gemini matchers name its tools",
-          any(e["matcher"] == "run_shell_command" for e in before)
+          any("run_shell_command" in e["matcher"] for e in before)
           and any(e["matcher"] == "write_file|replace" for e in before), str(before)[:300])
     cur = json.loads(read(d, ".cursor/hooks.json") or "{}")
     shell = cur.get("hooks", {}).get("beforeShellExecution", [])
-    check("cursor gets the three shell rules and keeps its own hooks",
-          len(shell) == 3 and cur["hooks"].get("afterFileEdit") == [{"command": "./fmt.sh"}]
+    check("cursor gets the shell rule (approval-gate) and keeps its own hooks",
+          len(shell) == 1 and cur["hooks"].get("afterFileEdit") == [{"command": "./fmt.sh"}]
           and cur.get("version") == 1, str(cur)[:300])
     run([d, "HKT", "-y", "--hooks", "--harness", "claude,gemini,cursor"])
     check("re-running does not duplicate harness hooks",
-          len(json.loads(read(d, ".gemini/settings.json"))["hooks"]["BeforeTool"]) == 6
-          and len(json.loads(read(d, ".cursor/hooks.json"))["hooks"]["beforeShellExecution"]) == 3)
+          len(json.loads(read(d, ".gemini/settings.json"))["hooks"]["BeforeTool"]) == 4
+          and len(json.loads(read(d, ".cursor/hooks.json"))["hooks"]["beforeShellExecution"]) == 1)
     check("the adapter is installed and kit-managed",
           ".claude/hooks/adapter.sh" in json.loads(read(d, ".ai-sdlc/manifest.json")).get("files", {}))
 
@@ -1002,10 +1003,11 @@ def test_shell_write_guards():
         "git checkout HEAD~1 -- tests/locked_test.py",
         "git restore --source HEAD tests/locked_test.py",
         "dd if=/dev/null of=tests/locked_test.py",
+        # Inline code that names a file the hooks enforce from is still refused (NUHT-055 review).
+        "node -e \"require('fs').writeFileSync('.ai-sdlc/protected.txt','')\"",
+        "perl -e 'open F,\">.ai-sdlc/gates.txt\"'",
+        "ruby -e 'File.write(\".ai-sdlc/gates.txt\",\"\")'",
         "python3 -c \"open('tests/locked_test.py','w').write('')\"",
-        "bash -c 'echo > tests/locked_test.py'",
-        "sh -c 'cat tests/locked_test.py'",
-        "eval 'echo > tests/locked_test.py'",
         "cd tests && echo x > locked_test.py",
         "echo x > %s/tests/locked_test.py" % d,
         "echo x > tests/../tests/locked_test.py",
@@ -1018,18 +1020,9 @@ def test_shell_write_guards():
         "echo '[]' > docs/project/people.json",
         ": > .ai-sdlc/test-lock.txt",
         "sed -i '1d' .ai-sdlc/protected.txt",
-        # Interpreters that run inline code, and stdin scripts (NUHT-016 ship review).
-        "node -e \"require('fs').writeFileSync('.ai-sdlc/protected.txt','')\"",
-        "perl -e 'open F,\">.ai-sdlc/gates.txt\"'",
-        "ruby -e 'File.write(\".ai-sdlc/gates.txt\",\"\")'",
-        "php -r \"file_put_contents('tests/locked_test.py','');\"",
-        "python3 - <<'EOF'\nopen('.ai-sdlc/manifest.json','w').write('{}')\nEOF",
-        "cat <<'EOF' | sh\necho > tests/locked_test.py\nEOF",
-        "awk 'BEGIN{print \"\" > \"tests/locked_test.py\"}'",
         "rsync /tmp/x tests/locked_test.py",
         "tar -xf /tmp/x.tar -C .ai-sdlc/extensions",
         "unzip -o /tmp/x.zip -d .ai-sdlc/local/extensions",
-        "git apply <<'EOF'\n--- a/.ai-sdlc/manifest.json\n+++ b/.ai-sdlc/manifest.json\nEOF",
         "patch .ai-sdlc/manifest.json /tmp/p.diff",
         # Trust anchors beyond the extension files.
         "echo x > .ai-sdlc/bin/hooks.py",
@@ -1056,6 +1049,22 @@ def test_shell_write_guards():
     for cmd in allowed:
         out = shell(cmd)
         check("shell read allowed: %s" % cmd, "deny" not in out, out)
+    # Inline code is not guessed at (NUHT-055): a mention of a guarded path is not a write,
+    # and refusing on one blocked reads. The git pre-commit backstop catches what it writes.
+    inline = (
+        "bash -c 'echo > tests/locked_test.py'",
+        "sh -c 'cat tests/locked_test.py'",
+        "eval 'echo > tests/locked_test.py'",
+        "php -r \"file_put_contents('tests/locked_test.py','');\"",
+        "python3 - <<'EOF'\nopen('.ai-sdlc/manifest.json','w').write('{}')\nEOF",
+        "cat <<'EOF' | sh\necho > tests/locked_test.py\nEOF",
+        "awk 'BEGIN{print \"\" > \"tests/locked_test.py\"}'",
+        "git apply <<'EOF'\n--- a/.ai-sdlc/manifest.json\n+++ b/.ai-sdlc/manifest.json\nEOF",
+    )
+    for cmd in inline:
+        out = shell(cmd)
+        check("inline code is left to the commit backstop: %s" % cmd.replace("\n", "\\n"),
+              "deny" not in out, out)
     out = shell("sed -i 's/1/0/' tests/locked_test.py", script="test-lock.sh")
     check("test-lock inspects a Bash payload", '"permissionDecision":"deny"' in out, out)
     out = shell("echo {} > gen/out.json", script="protected-paths.sh")
@@ -2692,8 +2701,18 @@ def test_scaffolding():
     check("machine-readable profile records confirmation boundary",
           profile.get("confirmation_required") is True and "node" in profile.get("adapters", []))
     check("charter ticks generated test plan", "☑ test-plan" in read(d, "docs/project/charter.md"))
+    sys.path.insert(0, ROOT)
+    import validate as _validate
+    sys.path.pop(0)
+    check("validate refuses a tag or branch action and accepts a pinned one (NUHT-046 review)",
+          [a for _, a in _validate.unpinned_actions(
+              "steps:\n  - uses: actions/checkout@v4\n  - uses: x/y@main\n"
+              "  - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0\n"
+              "  - uses: ./local-action\n")] == ["actions/checkout@v4", "x/y@main"])
+    check("GitHub CI pins actions/checkout to a commit, with its version as a comment (NUHT-046)",
+          re.search(r"actions/checkout@[0-9a-f]{40} # v4", workflow) is not None, workflow[:600])
     check("GitHub CI uses detected commands",
-          "actions/checkout@v4" in workflow and "npm run build" in workflow and
+          "npm run build" in workflow and
           "workflow_dispatch" in workflow and "  pull_request:" in workflow)
     check("GitHub CI runs the doctor strictly before the quality commands",
           workflow.index("sdlc.py doctor --strict") < workflow.index("npm run build"), workflow)
@@ -4002,6 +4021,7 @@ def test_fast_verify():
     charter = set_row(charter, "`checks.unit`", "`true`")
     charter = set_row(charter, "`checks.integration`", "`touch %s`" % marker)
     charter = set_row(charter, "**Default branch**", "`main`")
+    charter = set_row(charter, "`checks.e2e`", "absent")
     write(repo, "docs/project/charter.md", charter)
     subprocess.call(["git", "add", "-A"], cwd=repo)
     subprocess.call(git + ["commit", "-qm", "chore: kit"], cwd=repo)
@@ -4044,6 +4064,8 @@ def test_fast_verify():
     ledger = "".join(read(repo, os.path.join("docs/project/ledger", n))
                      for n in os.listdir(os.path.join(repo, "docs/project/ledger")))
     check("the ledger marks the run as fast", '"mode": "fast"' in ledger, ledger[-600:])
+    check("a stage the charter declares absent is still reported Absent in a fast run",
+          re.search(r"`checks.e2e` \| Absent \(declared\)", out) is not None, out[-1500:])
     code, out = sdlc("finish", "FST-1", "--dry-run")
     check("finish accepts a fast run for a Tier 2 item", "verify   pass" in out, out)
 
@@ -4081,6 +4103,258 @@ def test_fast_verify():
     check("a failing fast stage fails the fast run", code != 0 and not ran_integration(), out[-600:])
     code, out = sdlc("finish", "FST-1", "--dry-run")
     check("finish refuses a failed fast run", "verify   pass" not in out, out)
+    # A run tagged for another item is not this item's evidence, even on one of this
+    # item's commits (NUHT-063): a failing run tagged FST-4 on FST-1's code commit.
+    fst1_head = subprocess.check_output(["git", "log", "-1", "--format=%H", "--grep", "Work-Item: FST-1"],
+                                        cwd=repo).decode().strip()
+    ledger_dir = os.path.join(repo, "docs", "project", "ledger")
+    write(ledger_dir, "29990101T000000Z-FST-4-x.jsonl", "".join(json.dumps({
+        "time": "2999-01-01T00:00:00Z", "commit": fst1_head, "dirty": False, "stage": stage,
+        "command": cmd, "exit_code": rc, "result": result, "output_sha256": "",
+        "run": run_name, "item": "FST-4"}) + "\n" for stage, cmd, rc, result, run_name in (
+            ("lint", "false", 1, "Verified: fail", "29990101T000000Z"),
+            ("unit", "true", 0, "Verified: pass", "29990101T000001Z"))))
+    # Import without writing __pycache__ into the repository, which would dirty the tree.
+    sys.path.insert(0, os.path.join(repo, ".ai-sdlc", "bin"))
+    saved_bytecode, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        import importlib
+        import sdlc as _rt
+        importlib.reload(_rt)
+        rows = _rt.evidence_matches(_rt.Project(repo), "FST-1")
+    finally:
+        sys.path.pop(0)
+        sys.dont_write_bytecode = saved_bytecode
+    check("another item's failing or passing run is not this item's evidence (NUHT-063)",
+          not [r for r in rows if r.get("item") == "FST-4"]
+          and any(r.get("item") == "FST-1" for r in rows), str(rows)[-400:])
+    os.remove(os.path.join(ledger_dir, "29990101T000000Z-FST-4-x.jsonl"))
+    # A newer failing run on some stages blocks finish even after an older full pass
+    # (NUHT-012 retro review, finding 2): FST-2 passed every stage above; lint now fails.
+    code, out = sdlc("verify", "--item", "FST-2", "--stage", "lint")
+    check("the --stage lint run fails", code != 0 and "`checks.lint` | Verified: fail" in out, out[-800:])
+    code, out = sdlc("finish", "FST-2", "--dry-run")
+    check("a newer failing --stage run blocks finish after an older full pass",
+          "verify   pass" not in out and re.search(r"verify +.*fail", out) is not None, out)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_hooks_command():
+    print("hooks: commit checks run in git, inline code is not guessed at, hooks list/on/off")
+    d = os.path.realpath(tempfile.mkdtemp(prefix="sdlc-hookscmd-"))
+    git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.call(["git", "init", "-q", d])
+    code, out = run([d, "HKC", "-y", "--hooks"])
+    check("hooks repo installs", code == 0, out[-300:])
+    settings = read(d, ".claude/settings.json")
+    check("the agent no longer reads shell text for commit checks",
+          "work-item-id.sh" not in settings and "secret-guard.sh" not in settings, settings)
+    check("--hooks installs the git commit-msg and pre-commit hooks that replace them",
+          os.path.isfile(os.path.join(d, ".ai-sdlc", "git-hooks", "commit-msg"))
+          and os.path.isfile(os.path.join(d, ".ai-sdlc", "git-hooks", "pre-commit")), out[-600:])
+    write(d, "tests/locked_test.py", "def test_x():\n    assert 1\n")
+    with open(os.path.join(d, ".ai-sdlc", "test-lock.txt"), "a") as fh:
+        fh.write("tests/locked_test.py\n")
+    person = dict((k, v) for k, v in os.environ.items()
+                  if k not in ("CLAUDECODE", "CLAUDE_PROJECT_DIR", "GEMINI_CLI", "GEMINI_PROJECT_DIR",
+                               "CURSOR_PROJECT_DIR", "CURSOR_AGENT", "CODEX_SANDBOX", "AI_SDLC_AGENT",
+                               "AI_SDLC_APPROVAL"))
+    agent = dict(person, CLAUDE_PROJECT_DIR=d, CLAUDECODE="1")
+
+    def fire(script, cmd):
+        p = subprocess.run(["sh", os.path.join(d, ".claude", "hooks", script)], cwd=d, env=agent,
+                           input=json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd}}).encode(),
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return p.stdout.decode("utf-8", "replace")
+    out = fire("approval-gate.sh", "python3 - <<'EOF'\nprint(open('.ai-sdlc/profile.json').read())\nEOF")
+    check("inline code that only names a guarded path is allowed", "deny" not in out, out)
+    out = fire("approval-gate.sh", "echo x > tests/locked_test.py")
+    check("a direct shell write to a locked test is still denied", '"permissionDecision":"deny"' in out, out)
+    out = fire("approval-gate.sh", "python3 -c \"open('.ai-sdlc/hooks-off.txt','a').write('test-lock')\"")
+    check("inline code that names the off list is refused (review finding 2)",
+          '"permissionDecision":"deny"' in out, out)
+
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+
+    def sdlc(env, *args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=d, env=env, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+    code, out = sdlc(person, "hooks", "list")
+    check("hooks list names each hook, where it runs, what it blocks and that it is on",
+          code == 0 and "test-lock" in out and "work-item-id" in out and "git commit" in out
+          and " on " in out, out)
+    code, out = sdlc(agent, "hooks", "off", "test-lock")
+    check("an agent's session cannot turn a hook off", code != 0 and "terminal" in out, out)
+    code, out = sdlc(person, "hooks", "off", "test-lock")
+    check("a person turns a hook off", code == 0, out)
+    out = fire("approval-gate.sh", "echo x > tests/locked_test.py")
+    check("a hook that is off does not block", "deny" not in out, out)
+    code, out = sdlc(agent, "hooks", "on", "test-lock")
+    check("anyone may turn a hook back on", code == 0, out)
+    out = fire("approval-gate.sh", "echo x > tests/locked_test.py")
+    check("the hook blocks again once it is on", '"permissionDecision":"deny"' in out, out)
+    hook_settings = read(d, ".claude/settings.json")
+    write(d, ".claude/settings.json", hook_settings.replace(".claude/hooks/doc-leak-guard.sh", ".claude/hooks/x.sh"))
+    code, out = sdlc(person, "hooks", "list")
+    check("a hook whose script exists but is not registered is listed as not wired (finding 5)",
+          re.search(r"doc-leak-guard\s+not wired", out) is not None, out)
+    write(d, ".claude/settings.json", hook_settings)
+    code, out = sdlc(person, "hooks", "off", "no-such-hook")
+    check("an unknown hook name is refused", code != 0, out)
+
+    # An install from before 6.1 has the Bash commit hooks; --upgrade retires them.
+    data = json.loads(read(d, ".claude/settings.json"))
+    data["hooks"]["PreToolUse"].append({"matcher": "Bash", "hooks": [{
+        "type": "command", "if": "Bash(git commit*)",
+        "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/work-item-id.sh"}]})
+    write(d, ".claude/settings.json", json.dumps(data, indent=2))
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    subprocess.call(git + ["commit", "-qm", "init", "--no-verify"], cwd=d)
+    data["hooks"]["PreToolUse"].append({"matcher": "Bash", "hooks": [{
+        "type": "command", "command": "sh tools/work-item-id.sh"}]})
+    write(d, ".claude/settings.json", json.dumps(data, indent=2))
+    # An install from before 6.1 with agent hooks only: no git hooks, none in the manifest.
+    shutil.rmtree(os.path.join(d, ".ai-sdlc", "git-hooks"))
+    man = json.loads(read(d, ".ai-sdlc/manifest.json"))
+    man["files"] = dict((k, v) for k, v in man.get("files", {}).items()
+                        if not k.startswith(".ai-sdlc/git-hooks/"))
+    write(d, ".ai-sdlc/manifest.json", json.dumps(man, indent=2))
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    subprocess.call(git + ["commit", "-qm", "agent hooks only", "--no-verify"], cwd=d)
+    code, out = run([d, "--upgrade", "-y"])
+    after = read(d, ".claude/settings.json")
+    check("--upgrade installs the git hooks before it retires the old agent commit hooks",
+          code == 0 and os.path.isfile(os.path.join(d, ".ai-sdlc", "git-hooks", "commit-msg"))
+          and ".claude/hooks/work-item-id.sh" not in after, out[-600:])
+    check("--upgrade keeps a project's own hook with the same script name (review finding 4)",
+          "sh tools/work-item-id.sh" in after, after)
+    # Scripts present but git no longer calls them: upgrade wires them before retiring.
+    data = json.loads(after)
+    data["hooks"]["PreToolUse"].append({"matcher": "Bash", "hooks": [{
+        "type": "command", "command": "sh \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/work-item-id.sh"}]})
+    write(d, ".claude/settings.json", json.dumps(data, indent=2))
+    for hook in ("commit-msg", "pre-commit"):
+        hook_file = os.path.join(d, ".git", "hooks", hook)
+        if os.path.exists(hook_file):
+            os.remove(hook_file)
+    subprocess.call(git + ["add", "-A"], cwd=d, stdout=subprocess.DEVNULL)
+    subprocess.call(git + ["commit", "-qm", "hooks disconnected", "--no-verify"], cwd=d)
+    code, out = run([d, "--upgrade", "-y"])
+    wired = read(os.path.join(d, ".git", "hooks"), "commit-msg") or ""
+    check("--upgrade wires disconnected git hooks before it retires the old ones (round 2, 3)",
+          code == 0 and "git-hooks/commit-msg" in wired
+          and ".claude/hooks/work-item-id.sh" not in read(d, ".claude/settings.json"), out[-600:])
+    script = os.path.join(d, ".ai-sdlc", "bin", "sdlc.py")
+    write(os.path.join(d, ".git", "hooks"), "pre-commit", "#!/bin/sh\n# sh .ai-sdlc/git-hooks/pre-commit\n")
+    os.chmod(os.path.join(d, ".git", "hooks", "pre-commit"), 0o755)
+    p = subprocess.run([sys.executable, script, "hooks", "list"], cwd=d, env=person,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    check("a commented-out git hook call is not wired (round 2, 4)",
+          re.search(r"secret-guard\s+not wired", p.stdout) is not None, p.stdout)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_finish_commit():
+    print("finish --commit: the records finish writes go in one commit with the item's trailers")
+    d = tempfile.mkdtemp(prefix="sdlc-fincommit-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", "-b", "main", repo])
+    code, out = run([repo, "FCM", "-y"])
+    check("finish-commit repo installs", code == 0, out[-300:])
+    charter = read(repo, "docs/project/charter.md")
+    charter = re.sub(r"(?m)^\| `checks\.lint` \|.*\|$", "| `checks.lint` | `true` |", charter)
+    write(repo, "docs/project/charter.md", charter)
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore: kit"], cwd=repo)
+    script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
+    env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+               GIT_COMMITTER_EMAIL="t@t", AI_SDLC_AGENT="claude-code", AI_SDLC_MODEL="claude-opus-5-5")
+
+    def sdlc(*args):
+        p = subprocess.run([sys.executable, script] + list(args), cwd=repo, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
+        return p.returncode, p.stdout.decode("utf-8", "replace")
+    sdlc("item", "add", "FCM-1", "--title", "a change", "--tier", "2", "--status", "In progress")
+    write(repo, "src/a.py", "x = 1\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "feat(FCM-1): a\n\nWork-Item: FCM-1"], cwd=repo)
+    code, out = sdlc("verify", "--item", "FCM-1")
+    check("FCM-1 verifies", code == 0, out[-400:])
+    write(repo, "notes.txt", "unrelated work in progress\n")
+    subprocess.call(["git", "add", "notes.txt"], cwd=repo)
+    notes = ["--why", "a reason", "--not-done", "nothing deferred", "--discovered", "nothing",
+             "--decisions", "none", "--assumptions", "none", "--plan", "inline",
+             "--reviews", "software-engineer: Pass"]
+    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo).strip()
+    code, out = sdlc("finish", "FCM-1", "--commit", "--dry-run", *notes)
+    check("a dry run commits nothing",
+          subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo).strip() == head, out)
+    code, out = sdlc("finish", "FCM-1", "--commit", *notes)
+    msg = subprocess.check_output(["git", "log", "-1", "--format=%B"], cwd=repo).decode()
+    names = subprocess.check_output(["git", "show", "--name-only", "--format=", "HEAD"], cwd=repo).decode()
+    check("finish --commit closes the item and commits its records with the trailers",
+          code == 0 and msg.startswith("chore(FCM-1):") and "Work-Item: FCM-1" in msg
+          and "Agent: claude-code" in msg and "docs/project/items/FCM-1.json" in names
+          and "docs/project/worklog/FCM-1.md" in names and "docs/project/ledger/" in names,
+          out + msg + names)
+    staged = subprocess.check_output(["git", "diff", "--cached", "--name-only"], cwd=repo).decode()
+    check("work the person had staged is left out of the commit and stays staged",
+          "notes.txt" not in names and "notes.txt" in staged, names + staged)
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_skill_routing():
+    print("skill routing: missing cases, colliding descriptions and misrouted prompts fail validate")
+    sys.path.insert(0, ROOT)
+    import validate as _validate
+    sys.path.pop(0)
+    d = tempfile.mkdtemp(prefix="sdlc-routing-")
+
+    def skill(name, desc):
+        write(os.path.join(d, name), "SKILL.md", "---\nname: %s\ndescription: %s\n---\n# x\n" % (name, desc))
+    skill("sdlc-alpha", "Write the failing test before the code for a defect or new behaviour.")
+    skill("sdlc-beta", "Plan a database schema migration, a backfill or a column rename.")
+    cases = {"sdlc-alpha": {"positive": ["write a failing test first", "test before code for the defect",
+                                         "new behaviour needs a test before code"],
+                            "negative": [{"prompt": "rename a column in the database", "owner": "sdlc-beta"},
+                                         {"prompt": "backfill old rows", "owner": "sdlc-beta"}]}}
+    errs = _validate.check_skill_routing(d, cases)
+    check("a skill with no routing prompts fails", any("sdlc-beta needs at least 3" in e for e in errs), "\n".join(errs))
+    check("well-routed prompts pass", not any(e.startswith("sdlc-alpha") for e in errs), "\n".join(errs))
+    cases["sdlc-alpha"]["positive"].append("plan the schema migration")
+    errs = _validate.check_skill_routing(d, cases)
+    check("a prompt that picks another skill fails", any("picks sdlc-beta first" in e for e in errs), "\n".join(errs))
+    skill("sdlc-gamma", "Write the failing test before the code for a defect or new behaviour.")
+    errs = _validate.check_skill_routing(d, cases)
+    check("two near-identical descriptions fail", any("near-identical" in e for e in errs), "\n".join(errs))
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_review_diff_scope():
+    print("review: the diff holds the item's own commits, not other items' work between them")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import sdlc as runtime
+    sys.path.pop(0)
+    d = tempfile.mkdtemp(prefix="sdlc-revdiff-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", "-b", "main", repo])
+    code, out = run([repo, "RDS", "-y"])
+    check("review-diff repo installs", code == 0, out[-300:])
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore: kit"], cwd=repo)
+    for name, item in (("mine_one.py", "RDS-1"), ("theirs.py", "RDS-2"), ("mine_two.py", "RDS-1")):
+        write(repo, name, "x = 1\n")
+        subprocess.call(["git", "add", name], cwd=repo)
+        subprocess.call(git + ["commit", "-qm", "feat(%s): %s\n\nWork-Item: %s" % (item, name, item)], cwd=repo)
+    diff, err = runtime.item_diff(runtime.Project(repo), "RDS-1")
+    check("the item's diff holds both of its commits", err is None and "mine_one.py" in (diff or "")
+          and "mine_two.py" in (diff or ""), diff or err)
+    check("another item's commit between them is left out", "theirs.py" not in (diff or ""), diff or "")
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -4796,7 +5070,8 @@ def test_release_workflow():
     check("an existing tag fails the release cleanly", "already exists" in text)
     refs = []
     for base, dirs, files in os.walk(ROOT):
-        dirs[:] = [x for x in dirs if x not in (".git", ".claude", "node_modules", "worklog", "plans")]
+        dirs[:] = [x for x in dirs if x not in (".git", ".claude", "node_modules", "worklog", "plans",
+                                                 "worklog-archive")]
         for f in files:
             if f.endswith((".md", ".yml", ".py", ".txt")) and f not in ("worklog.md", "backlog.md", "CHANGELOG.md", "smoke.py"):
                 if "workflows/release.yml" in read(base, f):
@@ -5935,14 +6210,20 @@ def test_json_and_doctor_cache():
             "owner": "software-engineer", "status": "Ready", "depends": [], "touch": ["src/m%d.py" % n],
             "created": today_s, "updated": today_s,
         }))
+    t0 = time.time()
     sdlc("doctor", "--json")
+    cold_ms = (time.time() - t0) * 1000.0
     cache_path = os.path.join(d, ".ai-sdlc", "cache", "doctor.json")
     check("doctor writes .ai-sdlc/cache/doctor.json", os.path.isfile(cache_path))
     t0 = time.time()
     rc_warm, out_warm = sdlc("doctor", "--json")
     warm_ms = (time.time() - t0) * 1000.0
-    check("warm doctor run with 120 shards completes in <500ms",
-          rc_warm == 0 and warm_ms < 500.0, "took %.1fms" % warm_ms)
+    # Wall-clock limits flake on a loaded machine: under `tests/run.py --jobs N` (the fast
+    # tier) the absolute bound is relaxed, and the cache must still beat the cold run.
+    limit = 500.0 if int(os.environ.get("NUHUT_TEST_JOBS", "1") or 1) <= 1 else 2000.0
+    check("warm doctor run with 120 shards completes in <%dms and beats the cold run" % limit,
+          rc_warm == 0 and warm_ms < limit and warm_ms < cold_ms,
+          "warm %.1fms, cold %.1fms" % (warm_ms, cold_ms))
 
     # Mutating a shard invalidates the cache immediately on the next doctor run.
     write(d, "docs/project/items/JSC-050.json", json.dumps({
@@ -6656,8 +6937,8 @@ def test_tool_support_in_extensions():
     gem = json.loads(read(d, ".gemini/settings.json") or "{}")
     cur = json.loads(read(d, ".cursor/hooks.json") or "{}")
     check("gemini and cursor hooks are still written from their records",
-          len(gem.get("hooks", {}).get("BeforeTool", [])) == 6
-          and len(cur.get("hooks", {}).get("beforeShellExecution", [])) == 3)
+          len(gem.get("hooks", {}).get("BeforeTool", [])) == 4
+          and len(cur.get("hooks", {}).get("beforeShellExecution", [])) == 1)
     bindir = os.path.join(d, ".ai-sdlc", "bin")
     check("the helper ships with the runtime", os.path.isfile(os.path.join(bindir, "skillgen.py")))
     # A project tool that reuses the gemini dialect, and one that tries to change claude's.
@@ -6785,7 +7066,7 @@ def test_new_tool_extensions():
     os.chmod(stub, 0o755)
     git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
     subprocess.call(["git", "add", "-A"], cwd=d)
-    subprocess.call(git + ["commit", "-qm", "chore: install the kit"], cwd=d)
+    subprocess.call(git + ["commit", "-qm", "chore: install the kit", "--no-verify"], cwd=d)
     write(d, "app.py", "V = 1\n")
     subprocess.call(["git", "add", "app.py"], cwd=d)
     subprocess.call(git + ["commit", "-qm", "feat(NTL-001): app\n\nWork-Item: NTL-001\n"
@@ -8159,6 +8440,32 @@ def test_github_approvals():
           and sorted(a.get("handle") for a in res.get("approvers", [])) == ["alice", "bob"], out)
     code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")], state="MERGED"))
     check("a merged PR whose head is the local branch still counts", code == 0 and res.get("met") is True, out)
+    for label, author in (("null", None), ("absent", "-"), ("empty login", {"login": ""})):
+        bad = pr([rv("alice-gh"), rv("bob-gh")])
+        if author == "-":
+            bad.pop("author")
+        else:
+            bad["author"] = author
+        code, out, res = approvals(bad)
+        check("a PR whose author is %s counts no GitHub review (NUHT-024 retro, finding 3)" % label,
+              code == 1 and res.get("met") is False and "pr-author-unknown" in str(res.get("note"))
+              and not [a for a in res.get("approvers", []) if a.get("source") == "github"], out)
+    # Review condition 1: an unreadable tier needs Tier 1 approvals (finding 4). The shard
+    # loader normalises a tier on its own, so approvals() is called with one directly.
+    bindir = os.path.join(repo, ".ai-sdlc", "bin")
+    sys.path.insert(0, bindir)
+    try:
+        import importlib
+        import sdlc as _rt
+        importlib.reload(_rt)
+        _fin = _rt.runtime_module("finish")
+        res = _fin.approvals(_rt, _rt.Project(repo), "APR-1", tier="x",
+                             run=lambda *a, **k: subprocess.CompletedProcess(a, 1, b"", b"no gh"))
+    finally:
+        sys.path.remove(bindir)
+    check("an unreadable tier is judged as Tier 1 and needs approvals (finding 4)",
+          res is not None and res.get("tier") == "1" and res.get("required", 0) >= 1
+          and res.get("met") is False, json.dumps(res, default=str)[:600])
 
     code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh", oid="0" * 40)]))
     check("an approval of an older commit is stale and does not count",
@@ -9259,6 +9566,41 @@ def test_tier1_approval_count_and_local_approval():
     code, out, err = sdlc("approvals", "TA-001", "--json")
     res = json.loads(out or "{}")
     check("a later commit needs a new approval", res.get("met") is False, out + err)
+    # NUHT-063: what an approval survives. A records commit carrying the item's trailer
+    # (finish --commit writes one) is bookkeeping, and an old branch named for the item that
+    # is already merged into HEAD is not the merge candidate.
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
+    shard = os.path.join(repo, "docs", "project", "items", "TA-001.json")
+    with open(shard, "a") as fh:
+        fh.write("\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(["git", "commit", "-qm", "chore(TA-001): finish records\n\nWork-Item: TA-001\n"
+                     "Agent: claude-code\nModel: claude-opus\n"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("a records-only commit with the item's trailer keeps the approval (NUHT-063)",
+          json.loads(out or "{}").get("met") is True, out + err)
+    subprocess.call(["git", "branch", "v6/TA-001", "HEAD~2"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("a branch named for the item that is already merged is not the merge candidate (NUHT-063)",
+          json.loads(out or "{}").get("met") is True, out + err)
+    subprocess.call(["git", "branch", "-D", "v6/TA-001"], cwd=repo, stdout=subprocess.DEVNULL)
+    # The denial side (NUHT-063 review): an unmerged item branch with work the approval
+    # never saw voids it, and so does a records commit that changes the charter.
+    subprocess.call(["git", "checkout", "-q", "-b", "v6/TA-001"], cwd=repo)
+    commit("TA-001", "unapproved-work")
+    subprocess.call(["git", "checkout", "-q", "-"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("an unmerged item branch with work after the approval voids it (NUHT-063 review)",
+          json.loads(out or "{}").get("met") is False, out + err)
+    subprocess.call(["git", "branch", "-D", "v6/TA-001"], cwd=repo, stdout=subprocess.DEVNULL)
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
+    write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md") + "\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(["git", "commit", "-qm", "docs(TA-001): charter\n\nWork-Item: TA-001\n"
+                     "Agent: claude-code\nModel: claude-opus\n"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("a commit with the item's trailer that changes the charter voids the approval (NUHT-063 review)",
+          json.loads(out or "{}").get("met") is False, out + err)
 
     write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md").replace(
         "| **Tier 1 approvals** | 1 |", "| **Tier 1 approvals** | 2 |"))
@@ -9429,6 +9771,8 @@ def main():
                  test_status_review_fixes, test_defect_awareness, test_release_defect_gate,
                  test_tier1_approval_count_and_local_approval, test_severity_downgrade_rule,
                  test_checker_fallback, test_adopt_detected_commands, test_fast_verify,
+                 test_hooks_command, test_finish_commit, test_skill_routing,
+                 test_review_diff_scope,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,

@@ -137,7 +137,8 @@ def prepare(task, arm, workspace, kit_path=KIT, harness="claude"):
         sh(args, kit_path, env)
         fill_charter(workspace)
     sh(["git", "add", "-A"], workspace, env)
-    sh(["git", "commit", "-q", "-m", "baseline"], workspace, env)
+    # The harness's setup commit is not agent work: the kit's git hooks (--hooks) skip it.
+    sh(["git", "commit", "-q", "--no-verify", "-m", "baseline"], workspace, env)
     sh(["git", "tag", measure.BASELINE], workspace, env)
 
 

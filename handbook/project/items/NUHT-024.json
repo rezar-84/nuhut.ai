@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "security",
-  "status": "Ready",
+  "status": "Done",
   "depends": [
     "NUHT-023"
   ],
@@ -13,13 +13,35 @@
     "optional/runtime/finish.py"
   ],
   "created": "2026-11-22",
-  "updated": "2026-11-22",
-  "completed": "",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
   "summary": "",
-  "approvers": [],
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "local",
+      "commit": "8bca7d4446a499466d5ce4b070c43fa50181e053",
+      "at": "2026-11-26T06:56:53Z"
+    }
+  ],
   "waiting_on": "",
   "park_reason": "",
   "unblock_by": "",
   "later_when": "v6 Phase 2 (team): after v6.0 ships",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "eea8e9d2d5eec7f9e51b04a8e9a9017d4ebe1ec2",
+      "at": "2026-11-26T06:09:51Z",
+      "as": "reza"
+    },
+    {
+      "handle": "rezar-84",
+      "commit": "8bca7d4446a499466d5ce4b070c43fa50181e053",
+      "at": "2026-11-26T06:56:53Z",
+      "as": "reza"
+    }
+  ]
 }

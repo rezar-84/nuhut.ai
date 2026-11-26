@@ -1,6 +1,6 @@
 ---
 name: sdlc-service-contract
-description: Check a change that crosses a service boundary — an API request or response shape, an event or message payload, a queue topic, an RPC signature, or a shared datastore access. Use when editing an interface another deployable unit calls or consumes, or when adding a new call between services.
+description: Check a change that crosses a service boundary — an API request or response shape, an event or queue message payload (a field renamed, added or removed), a queue topic, an RPC signature, or a shared datastore access. Use when editing an interface another deployable unit calls or consumes, or when adding a new call between services.
 ---
 
 # Service contract — the deploy you will break is not yours

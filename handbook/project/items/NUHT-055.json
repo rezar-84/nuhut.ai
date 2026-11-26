@@ -1,0 +1,42 @@
+{
+  "id": "NUHT-055",
+  "title": "Hooks: commit checks move to git hooks, no guessing at inline code, sdlc.py hooks list/on/off",
+  "type": "feat",
+  "tier": "1",
+  "effort": "",
+  "owner": "security",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "optional/runtime/hooks.py",
+    "optional/runtime/sdlc.py",
+    "install.py",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
+  "summary": "",
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "local",
+      "commit": "84e7fad88e6a5141b3904e91f7e8b6095b831c08",
+      "at": "2026-11-26T06:10:07Z"
+    }
+  ],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "84e7fad88e6a5141b3904e91f7e8b6095b831c08",
+      "at": "2026-11-26T06:10:07Z",
+      "as": "reza"
+    }
+  ]
+}

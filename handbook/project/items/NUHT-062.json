@@ -1,0 +1,21 @@
+{
+  "id": "NUHT-062",
+  "title": "6.0 retro ship-review follow-ups (release resumability, semver, deploy ledger durability)",
+  "type": "fix",
+  "tier": "2",
+  "effort": "",
+  "owner": "devops-sre",
+  "status": "Ready",
+  "depends": [],
+  "touch": [],
+  "created": "2026-11-26",
+  "updated": "2026-11-26",
+  "completed": "",
+  "summary": "Deferred findings from the retro ship reviews of NUHT-012, 014, 022, 027 and 061: 012#3 dirty-run evidence binds only to the parent; 014#2 a failed gh release after a successful push is not resumable; 014#3 the release job does not run tests/unit; 014#4 a multiline BREAKING CHANGE paragraph followed by trailers; 022#3 a scaffolded workflow with no check commands passes; 027#2 union-merged deploy ledger order; 027#3 unlocked read-modify-write in deploy record; 027#4 record written before the ledger append, unchecked short write; 027#5 ledger read errors not shown in the viewer; 061: the shard loader turns an unreadable tier into 2 instead of failing closed.",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

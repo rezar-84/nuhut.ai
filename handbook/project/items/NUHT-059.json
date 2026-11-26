@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-059",
+  "title": "A routing check in validate.py: each skill's description picks its own prompts and no two collide",
+  "type": "feat",
+  "tier": "2",
+  "effort": "",
+  "owner": "qa",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "validate.py",
+    "tests/skill-routing.json",
+    "optional/skills/"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

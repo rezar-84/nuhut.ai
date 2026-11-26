@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-056",
+  "title": "The doctor cache timing test flakes under the parallel fast tier",
+  "type": "test",
+  "tier": "3",
+  "effort": "",
+  "owner": "qa",
+  "status": "Done",
+  "depends": [],
+  "touch": [
+    "tests/smoke.py",
+    "tests/run.py"
+  ],
+  "created": "2026-11-25",
+  "updated": "2026-11-25",
+  "completed": "2026-11-25",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "architect",
-  "status": "Ready",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/registry.py",
@@ -13,13 +13,35 @@
     "optional/runtime/sdlc.py"
   ],
   "created": "2026-11-22",
-  "updated": "2026-11-22",
-  "completed": "",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
   "summary": "Owner (rezar-84) directed implementation of the v6 roadmap on kit-v6 on 2026-11-22; merge to main stays a human approval",
-  "approvers": [],
-  "waiting_on": "rezar-84",
-  "park_reason": "Approve ADR 0003 (extension system) and the NUHT-016 plan",
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "local",
+      "commit": "6f05f2d4f6d1695409eb2ab5d663b53ccb6b5ba7",
+      "at": "2026-11-26T06:56:49Z"
+    }
+  ],
+  "waiting_on": "",
+  "park_reason": "",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "1e7c5e4a365919231ff008f15d27bb30d0520a2c",
+      "at": "2026-11-26T06:09:47Z",
+      "as": "reza"
+    },
+    {
+      "handle": "rezar-84",
+      "commit": "6f05f2d4f6d1695409eb2ab5d663b53ccb6b5ba7",
+      "at": "2026-11-26T06:56:49Z",
+      "as": "reza"
+    }
+  ]
 }

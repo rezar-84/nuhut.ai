@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "devops-sre",
-  "status": "Ready",
+  "status": "Done",
   "depends": [],
   "touch": [
     ".github/workflows/version.yml",
@@ -13,13 +13,35 @@
     "tools/semver.py"
   ],
   "created": "2026-11-22",
-  "updated": "2026-11-22",
-  "completed": "",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
   "summary": "Owner (rezar-84) directed implementation of the v6 roadmap on kit-v6 on 2026-11-22; merge to main stays a human approval",
-  "approvers": [],
-  "waiting_on": "rezar-84",
-  "park_reason": "Edits .github/workflows/release.yml and the release process (AGENTS.md section 9)",
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "local",
+      "commit": "7260fa877d71cc1f881cc9f5a0bac9902190e19b",
+      "at": "2026-11-26T06:56:47Z"
+    }
+  ],
+  "waiting_on": "",
+  "park_reason": "",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "638c890ea854f7dcd93c7377e70a0fbb6e7b7bf0",
+      "at": "2026-11-26T06:09:46Z",
+      "as": "reza"
+    },
+    {
+      "handle": "rezar-84",
+      "commit": "7260fa877d71cc1f881cc9f5a0bac9902190e19b",
+      "at": "2026-11-26T06:56:47Z",
+      "as": "reza"
+    }
+  ]
 }

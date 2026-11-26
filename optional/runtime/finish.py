@@ -176,10 +176,14 @@ def verify_state(rt, project, item, commits, tier=None):
                       "is %s. Run `sdlc.py verify --item %s`"
                       % (name or "?", commit[:7], " (dirty)" if dirty else "",
                          (newest or "")[:7], item))
+        failed = [r for r in run if "fail" in str(r.get("result", ""))]
+        # A failure on the code being finished blocks, even in a partial run newer than
+        # an older full pass: a known failing check is not covered by earlier evidence.
+        if fresh and failed:
+            return "fail", name, run, ""
         if selected or missing or not fresh:
             continue
-        failed = [r for r in run if "fail" in str(r.get("result", ""))]
-        return ("fail" if failed else "pass"), name, run, ""
+        return "pass", name, run, ""
     return latest
 
 
@@ -383,12 +387,18 @@ def item_branch(rt, project, item):
     if m and m.group(1) == item:
         return current
     try:
-        return rt.runtime_module("claims")._existing_item_branch(project, item) or ""
+        branch = rt.runtime_module("claims")._existing_item_branch(project, item) or ""
     except EXPECTED_HELPER_ERRORS:
         return ""
     except Exception as exc:             # noqa: BLE001 -- reported, not swallowed
         report_unexpected("finding the branch of %s" % item, exc)
         return ""
+    # A branch already merged into what is checked out is history, not the merge candidate
+    # (NUHT-063): its tip predates later work and would void an approval of HEAD.
+    tip = project.git("rev-parse", "--verify", "--quiet", (branch or "HEAD") + "^{commit}").strip()
+    if branch and tip and _is_ancestor(project, tip, project.git("rev-parse", "HEAD").strip()):
+        return ""
+    return branch
 
 
 def _gh_json(run, argv, cwd):
@@ -449,6 +459,10 @@ def approvals(rt, project, item, tier=None, run=None):
     # nothing else needs an approval.
     strict = str(rt.tier_rules(project)).lower() == "strict"
     tier1 = rt.tier1_approvals(project)[0] if hasattr(rt, "tier1_approvals") else 2
+    # An unreadable tier is judged as Tier 1: a classification the gate cannot read must not
+    # read as needing no approval (NUHT-024 retro review, finding 4).
+    if tier not in ("1", "2", "3"):
+        tier = "1"
     required = tier1 if tier == "1" else (1 if tier == "2" and strict else 0)
     names, _ = rt.approver_names(project)
     registry = rt.people(project)
@@ -519,7 +533,11 @@ def approvals(rt, project, item, tier=None, run=None):
     result["head"] = head
 
     author, _ = _gh_login(data.get("author"))
-    author_key = (author or "").lower()
+    if not author:
+        # Without the PR's author, a review cannot be shown to come from someone else, so
+        # none counts (NUHT-024 retro review, finding 3).
+        return fallback("pr-author-unknown (the PR has no readable author)")
+    author_key = author.lower()
     # Mapping a login is security-bearing: people.json counts only as the default branch
     # has it. A registry that exists only on this branch maps nobody.
     _, people_source = rt.trusted_text(project, os.path.join(project.docs, rt.PEOPLE_REL))
@@ -631,7 +649,9 @@ def local_approvals(rt, project, item, charter, against=None):
     except Exception:                    # noqa: BLE001 -- an unreadable shard approves nothing
         shard = {}
     commits = rt.item_commits(project, item)
-    newest = commits[0][0] if commits else ""
+    # The newest commit that changes code: finish --commit writes a records commit with the
+    # item's trailer after an approval, and that is bookkeeping, not new work (NUHT-063).
+    newest = (rt.newest_code_commit(project, item, commits)[0] or "") if commits else ""
     if against is None:
         branch = item_branch(rt, project, item)
         against = project.git("rev-parse", "--verify", "--quiet",

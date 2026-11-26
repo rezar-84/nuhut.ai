@@ -5,17 +5,33 @@
   "tier": "1",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Ready",
+  "status": "Done",
   "depends": [],
   "touch": [],
   "created": "2026-11-23",
-  "updated": "2026-11-25",
-  "completed": "",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
   "summary": "",
-  "approvers": [],
-  "waiting_on": "rezar-84",
-  "park_reason": "Review finding NUHT-041 #7 (S2): changes workflows and the scaffold output; needs an update process",
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "local",
+      "commit": "23812cd2897a5d77e8131416de1a7ff4cce6d605",
+      "at": "2026-11-26T06:10:03Z"
+    }
+  ],
+  "waiting_on": "",
+  "park_reason": "",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "23812cd2897a5d77e8131416de1a7ff4cce6d605",
+      "at": "2026-11-26T06:10:03Z",
+      "as": "reza"
+    }
+  ]
 }
