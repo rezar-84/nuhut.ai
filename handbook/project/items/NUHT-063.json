@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "security",
-  "status": "Parked",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/finish.py",
@@ -14,20 +14,28 @@
   ],
   "created": "2026-11-26",
   "updated": "2026-11-26",
-  "completed": "",
+  "completed": "2026-11-26",
   "summary": "",
   "approvers": [
     {
       "handle": "rezar-84",
       "login": "",
-      "source": "charter",
-      "commit": "",
-      "at": ""
+      "source": "local",
+      "commit": "dc223695ecf9ff8ab0fc5a71e8a2095b04628049",
+      "at": "2026-11-26T06:56:57Z"
     }
   ],
-  "waiting_on": "rezar-84",
-  "park_reason": "merge approval (Tier 1): 0 of 1 (charter fallback)",
+  "waiting_on": "",
+  "park_reason": "",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "dc223695ecf9ff8ab0fc5a71e8a2095b04628049",
+      "at": "2026-11-26T06:56:57Z",
+      "as": "reza"
+    }
+  ]
 }
