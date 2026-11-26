@@ -20,6 +20,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import traceback
 import time
 from pathlib import Path
 
@@ -116,6 +117,17 @@ def check(name, condition, detail=""):
     else:
         print("  FAIL  %s%s" % (name, (" -- " + detail) if detail else ""))
         failures.append(name)
+        annotate(name, detail)
+
+
+def annotate(name, detail=""):
+    """On GitHub Actions, also report a failure as an error annotation: annotations are
+    readable through the public checks API, where a job's log needs a login."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    text = name + ((" -- " + str(detail)[-1500:]) if detail else "")
+    text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print("::error title=smoke test failed::%s" % text, flush=True)
 
 
 def fixture(kind):
@@ -9781,7 +9793,14 @@ def main():
                  test_issue_sync,
                  test_mcp_server,
                  test_test_runner):
-        test()
+        try:
+            test()
+        except Exception:
+            # A crash in one test is reported as its failure, and the rest still run.
+            trace = traceback.format_exc()
+            print(trace)
+            failures.append(test.__name__)
+            annotate(test.__name__ + " crashed", trace)
     print("")
     if failures:
         print("%d failed: %s" % (len(failures), ", ".join(failures)))
