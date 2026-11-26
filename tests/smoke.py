@@ -4108,10 +4108,12 @@ def test_fast_verify():
     fst1_head = subprocess.check_output(["git", "log", "-1", "--format=%H", "--grep", "Work-Item: FST-1"],
                                         cwd=repo).decode().strip()
     ledger_dir = os.path.join(repo, "docs", "project", "ledger")
-    write(ledger_dir, "29990101T000000Z-FST-4-x.jsonl", json.dumps({
-        "time": "2999-01-01T00:00:00Z", "commit": fst1_head, "dirty": False, "stage": "lint",
-        "command": "false", "exit_code": 1, "result": "Verified: fail", "output_sha256": "",
-        "run": "29990101T000000Z", "item": "FST-4"}) + "\n")
+    write(ledger_dir, "29990101T000000Z-FST-4-x.jsonl", "".join(json.dumps({
+        "time": "2999-01-01T00:00:00Z", "commit": fst1_head, "dirty": False, "stage": stage,
+        "command": cmd, "exit_code": rc, "result": result, "output_sha256": "",
+        "run": run_name, "item": "FST-4"}) + "\n" for stage, cmd, rc, result, run_name in (
+            ("lint", "false", 1, "Verified: fail", "29990101T000000Z"),
+            ("unit", "true", 0, "Verified: pass", "29990101T000001Z"))))
     # Import without writing __pycache__ into the repository, which would dirty the tree.
     sys.path.insert(0, os.path.join(repo, ".ai-sdlc", "bin"))
     saved_bytecode, sys.dont_write_bytecode = sys.dont_write_bytecode, True
@@ -4123,8 +4125,9 @@ def test_fast_verify():
     finally:
         sys.path.pop(0)
         sys.dont_write_bytecode = saved_bytecode
-    check("a run tagged for another item does not count as this item's evidence (NUHT-063)",
-          not [r for r in rows if r.get("item") == "FST-4"], str(rows)[-400:])
+    check("another item's failing or passing run is not this item's evidence (NUHT-063)",
+          not [r for r in rows if r.get("item") == "FST-4"]
+          and any(r.get("item") == "FST-1" for r in rows), str(rows)[-400:])
     os.remove(os.path.join(ledger_dir, "29990101T000000Z-FST-4-x.jsonl"))
     # A newer failing run on some stages blocks finish even after an older full pass
     # (NUHT-012 retro review, finding 2): FST-2 passed every stage above; lint now fails.
@@ -9581,6 +9584,23 @@ def test_tier1_approval_count_and_local_approval():
     check("a branch named for the item that is already merged is not the merge candidate (NUHT-063)",
           json.loads(out or "{}").get("met") is True, out + err)
     subprocess.call(["git", "branch", "-D", "v6/TA-001"], cwd=repo, stdout=subprocess.DEVNULL)
+    # The denial side (NUHT-063 review): an unmerged item branch with work the approval
+    # never saw voids it, and so does a records commit that changes the charter.
+    subprocess.call(["git", "checkout", "-q", "-b", "v6/TA-001"], cwd=repo)
+    commit("TA-001", "unapproved-work")
+    subprocess.call(["git", "checkout", "-q", "-"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("an unmerged item branch with work after the approval voids it (NUHT-063 review)",
+          json.loads(out or "{}").get("met") is False, out + err)
+    subprocess.call(["git", "branch", "-D", "v6/TA-001"], cwd=repo, stdout=subprocess.DEVNULL)
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
+    write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md") + "\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(["git", "commit", "-qm", "docs(TA-001): charter\n\nWork-Item: TA-001\n"
+                     "Agent: claude-code\nModel: claude-opus\n"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("a commit with the item's trailer that changes the charter voids the approval (NUHT-063 review)",
+          json.loads(out or "{}").get("met") is False, out + err)
 
     write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md").replace(
         "| **Tier 1 approvals** | 1 |", "| **Tier 1 approvals** | 2 |"))
