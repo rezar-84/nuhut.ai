@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-061",
+  "title": "Retro ship-review fixes: a newer failing run blocks finish; approvals fail closed on unknown authors and tiers",
+  "type": "fix",
+  "tier": "1",
+  "effort": "",
+  "owner": "qa",
+  "status": "In progress",
+  "depends": [],
+  "touch": [
+    "optional/runtime/finish.py",
+    "tests/smoke.py",
+    "docs/cli.md"
+  ],
+  "created": "2026-11-26",
+  "updated": "2026-11-26",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

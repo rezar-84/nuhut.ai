@@ -22,8 +22,8 @@ cd ../acme-shop-ACME-12                                # the item's own checkout
 python3 .ai-sdlc/bin/sdlc.py unclaim ACME-12 --remove-worktree
 ```
 
-`unclaim` was called `release` before 6.0. `release` still works the same way, with one
-deprecation line on stderr, and is removed in 7.0.
+`unclaim` was called `release` before 6.0. `release` still works the same way, says once that it is
+deprecated (on stderr, or as a `deprecated` field with `--json`), and is removed in 7.0.
 
 - **The claim is atomic.** It is a file in the repository's shared git directory
   (`<git-common-dir>/nuhut/claims/ACME-12.json`), created with an exclusive create. A

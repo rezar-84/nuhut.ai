@@ -176,10 +176,14 @@ def verify_state(rt, project, item, commits, tier=None):
                       "is %s. Run `sdlc.py verify --item %s`"
                       % (name or "?", commit[:7], " (dirty)" if dirty else "",
                          (newest or "")[:7], item))
+        failed = [r for r in run if "fail" in str(r.get("result", ""))]
+        # A failure on the code being finished blocks, even in a partial run newer than
+        # an older full pass: a known failing check is not covered by earlier evidence.
+        if fresh and failed:
+            return "fail", name, run, ""
         if selected or missing or not fresh:
             continue
-        failed = [r for r in run if "fail" in str(r.get("result", ""))]
-        return ("fail" if failed else "pass"), name, run, ""
+        return "pass", name, run, ""
     return latest
 
 
@@ -449,6 +453,10 @@ def approvals(rt, project, item, tier=None, run=None):
     # nothing else needs an approval.
     strict = str(rt.tier_rules(project)).lower() == "strict"
     tier1 = rt.tier1_approvals(project)[0] if hasattr(rt, "tier1_approvals") else 2
+    # An unreadable tier is judged as Tier 1: a classification the gate cannot read must not
+    # read as needing no approval (NUHT-024 retro review, finding 4).
+    if tier not in ("1", "2", "3"):
+        tier = "1"
     required = tier1 if tier == "1" else (1 if tier == "2" and strict else 0)
     names, _ = rt.approver_names(project)
     registry = rt.people(project)
@@ -519,7 +527,11 @@ def approvals(rt, project, item, tier=None, run=None):
     result["head"] = head
 
     author, _ = _gh_login(data.get("author"))
-    author_key = (author or "").lower()
+    if not author:
+        # Without the PR's author, a review cannot be shown to come from someone else, so
+        # none counts (NUHT-024 retro review, finding 3).
+        return fallback("pr-author-unknown (the PR has no readable author)")
+    author_key = author.lower()
     # Mapping a login is security-bearing: people.json counts only as the default branch
     # has it. A registry that exists only on this branch maps nobody.
     _, people_source = rt.trusted_text(project, os.path.join(project.docs, rt.PEOPLE_REL))
