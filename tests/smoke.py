@@ -8346,7 +8346,9 @@ def test_github_approvals():
     # PATH without any real gh: a folder holding only git, then the system folders.
     nogh = os.path.join(d, "nogh")
     os.makedirs(nogh)
-    os.symlink(os.path.realpath(shutil.which("git")), os.path.join(nogh, "git"))
+    # Only these tools, so "no gh" holds where gh lives in /usr/bin (GitHub's Ubuntu runners).
+    for tool in ("git", "sh"):
+        os.symlink(os.path.realpath(shutil.which(tool)), os.path.join(nogh, tool))
     stub = os.path.join(d, "stub")
     write(d, "stub/gh", "#!/bin/sh\necho \"$@\" >> \"$GH_LOG\"\n"
           "if [ \"$1\" = repo ]; then echo '{\"nameWithOwner\": \"acme/app\"}'; exit 0; fi\n"
@@ -8360,8 +8362,8 @@ def test_github_approvals():
                     GH_FIXTURE=fixture_path, GH_LOG=gh_log)
 
     def sdlc(*args, **kw):
-        env = dict(base_env, PATH=(stub + os.pathsep if kw.get("gh", True) else "")
-                   + nogh + os.pathsep + "/usr/bin" + os.pathsep + "/bin")
+        env = dict(base_env, PATH=(stub + os.pathsep + nogh + os.pathsep + "/usr/bin" + os.pathsep + "/bin")
+                   if kw.get("gh", True) else nogh)
         env.update(kw.get("env") or {})
         p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, universal_newlines=True, env=env,
@@ -8832,7 +8834,9 @@ def test_issue_sync():
     script = os.path.join(repo, ".ai-sdlc", "bin", "sdlc.py")
     nogh = os.path.join(d, "nogh")
     os.makedirs(nogh)
-    os.symlink(os.path.realpath(shutil.which("git")), os.path.join(nogh, "git"))
+    # Only these tools, so "no gh" holds where gh lives in /usr/bin (GitHub's Ubuntu runners).
+    for tool in ("git", "sh"):
+        os.symlink(os.path.realpath(shutil.which(tool)), os.path.join(nogh, tool))
     stub = os.path.join(d, "stub")
     write(d, "stub/gh", "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\037' \"$a\" >> \"$GH_LOG\"; done\n"
           "echo >> \"$GH_LOG\"\n"
@@ -8860,8 +8864,8 @@ def test_issue_sync():
                     GH_NEXT=gh_next)
 
     def sdlc(*args, **kw):
-        env = dict(base_env, PATH=(stub + os.pathsep if kw.get("gh", True) else "")
-                   + nogh + os.pathsep + "/usr/bin" + os.pathsep + "/bin")
+        env = dict(base_env, PATH=(stub + os.pathsep + nogh + os.pathsep + "/usr/bin" + os.pathsep + "/bin")
+                   if kw.get("gh", True) else nogh)
         p = subprocess.run([sys.executable, script] + list(args), cwd=repo, stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE, universal_newlines=True, env=env,
                            stdin=subprocess.DEVNULL, timeout=180)
