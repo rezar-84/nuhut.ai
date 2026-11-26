@@ -4103,6 +4103,29 @@ def test_fast_verify():
     check("a failing fast stage fails the fast run", code != 0 and not ran_integration(), out[-600:])
     code, out = sdlc("finish", "FST-1", "--dry-run")
     check("finish refuses a failed fast run", "verify   pass" not in out, out)
+    # A run tagged for another item is not this item's evidence, even on one of this
+    # item's commits (NUHT-063): a failing run tagged FST-4 on FST-1's code commit.
+    fst1_head = subprocess.check_output(["git", "log", "-1", "--format=%H", "--grep", "Work-Item: FST-1"],
+                                        cwd=repo).decode().strip()
+    ledger_dir = os.path.join(repo, "docs", "project", "ledger")
+    write(ledger_dir, "29990101T000000Z-FST-4-x.jsonl", json.dumps({
+        "time": "2999-01-01T00:00:00Z", "commit": fst1_head, "dirty": False, "stage": "lint",
+        "command": "false", "exit_code": 1, "result": "Verified: fail", "output_sha256": "",
+        "run": "29990101T000000Z", "item": "FST-4"}) + "\n")
+    # Import without writing __pycache__ into the repository, which would dirty the tree.
+    sys.path.insert(0, os.path.join(repo, ".ai-sdlc", "bin"))
+    saved_bytecode, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        import importlib
+        import sdlc as _rt
+        importlib.reload(_rt)
+        rows = _rt.evidence_matches(_rt.Project(repo), "FST-1")
+    finally:
+        sys.path.pop(0)
+        sys.dont_write_bytecode = saved_bytecode
+    check("a run tagged for another item does not count as this item's evidence (NUHT-063)",
+          not [r for r in rows if r.get("item") == "FST-4"], str(rows)[-400:])
+    os.remove(os.path.join(ledger_dir, "29990101T000000Z-FST-4-x.jsonl"))
     # A newer failing run on some stages blocks finish even after an older full pass
     # (NUHT-012 retro review, finding 2): FST-2 passed every stage above; lint now fails.
     code, out = sdlc("verify", "--item", "FST-2", "--stage", "lint")
@@ -9540,6 +9563,24 @@ def test_tier1_approval_count_and_local_approval():
     code, out, err = sdlc("approvals", "TA-001", "--json")
     res = json.loads(out or "{}")
     check("a later commit needs a new approval", res.get("met") is False, out + err)
+    # NUHT-063: what an approval survives. A records commit carrying the item's trailer
+    # (finish --commit writes one) is bookkeeping, and an old branch named for the item that
+    # is already merged into HEAD is not the merge candidate.
+    code, out, err = sdlc("approve", "TA-001", "--by", "Sam", NUHUT_USER="Sam")
+    shard = os.path.join(repo, "docs", "project", "items", "TA-001.json")
+    with open(shard, "a") as fh:
+        fh.write("\n")
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(["git", "commit", "-qm", "chore(TA-001): finish records\n\nWork-Item: TA-001\n"
+                     "Agent: claude-code\nModel: claude-opus\n"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("a records-only commit with the item's trailer keeps the approval (NUHT-063)",
+          json.loads(out or "{}").get("met") is True, out + err)
+    subprocess.call(["git", "branch", "v6/TA-001", "HEAD~2"], cwd=repo)
+    code, out, err = sdlc("approvals", "TA-001", "--json")
+    check("a branch named for the item that is already merged is not the merge candidate (NUHT-063)",
+          json.loads(out or "{}").get("met") is True, out + err)
+    subprocess.call(["git", "branch", "-D", "v6/TA-001"], cwd=repo, stdout=subprocess.DEVNULL)
 
     write(repo, "docs/project/charter.md", read(repo, "docs/project/charter.md").replace(
         "| **Tier 1 approvals** | 1 |", "| **Tier 1 approvals** | 2 |"))

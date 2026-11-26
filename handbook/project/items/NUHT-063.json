@@ -1,0 +1,25 @@
+{
+  "id": "NUHT-063",
+  "title": "Approvals survive finish's records commit and stale merged item branches; another item's run is not evidence",
+  "type": "fix",
+  "tier": "1",
+  "effort": "",
+  "owner": "security",
+  "status": "In progress",
+  "depends": [],
+  "touch": [
+    "optional/runtime/finish.py",
+    "optional/runtime/sdlc.py",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-26",
+  "updated": "2026-11-26",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

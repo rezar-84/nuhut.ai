@@ -2073,7 +2073,10 @@ def evidence_matches(project, item, rows=None, commits=None):
     # of the item's commits in its history. A dirty run on the item's own commit verified
     # whatever came next, not the item. A waiver (finish --waive) is a recorded Not run,
     # never evidence.
-    return [row for row in rows if not row.get("waived_by") and (
+    # A run tagged for another item verified that item, even when it ran on one of this
+    # item's commits (a records commit, say), so it is not this item's evidence (NUHT-063).
+    return [row for row in rows if not row.get("waived_by")
+            and row.get("item") in (None, "", item) and (
         (row.get("commit") in heads and not row.get("dirty"))
         or (row.get("dirty") and row.get("commit") in parents)
         or (row.get("item") == item and not row.get("dirty")

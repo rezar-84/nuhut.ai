@@ -387,12 +387,18 @@ def item_branch(rt, project, item):
     if m and m.group(1) == item:
         return current
     try:
-        return rt.runtime_module("claims")._existing_item_branch(project, item) or ""
+        branch = rt.runtime_module("claims")._existing_item_branch(project, item) or ""
     except EXPECTED_HELPER_ERRORS:
         return ""
     except Exception as exc:             # noqa: BLE001 -- reported, not swallowed
         report_unexpected("finding the branch of %s" % item, exc)
         return ""
+    # A branch already merged into what is checked out is history, not the merge candidate
+    # (NUHT-063): its tip predates later work and would void an approval of HEAD.
+    tip = project.git("rev-parse", "--verify", "--quiet", (branch or "HEAD") + "^{commit}").strip()
+    if branch and tip and _is_ancestor(project, tip, project.git("rev-parse", "HEAD").strip()):
+        return ""
+    return branch
 
 
 def _gh_json(run, argv, cwd):
@@ -643,7 +649,9 @@ def local_approvals(rt, project, item, charter, against=None):
     except Exception:                    # noqa: BLE001 -- an unreadable shard approves nothing
         shard = {}
     commits = rt.item_commits(project, item)
-    newest = commits[0][0] if commits else ""
+    # The newest commit that changes code: finish --commit writes a records commit with the
+    # item's trailer after an approval, and that is bookkeeping, not new work (NUHT-063).
+    newest = (rt.newest_code_commit(project, item, commits)[0] or "") if commits else ""
     if against is None:
         branch = item_branch(rt, project, item)
         against = project.git("rev-parse", "--verify", "--quiet",
