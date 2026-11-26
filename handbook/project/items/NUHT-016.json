@@ -29,5 +29,13 @@
   "park_reason": "merge approval (Tier 1): 0 of 1 (charter fallback)",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "1e7c5e4a365919231ff008f15d27bb30d0520a2c",
+      "at": "2026-11-26T06:09:47Z",
+      "as": "reza"
+    }
+  ]
 }
