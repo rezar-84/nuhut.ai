@@ -1,0 +1,24 @@
+{
+  "id": "NUHT-060",
+  "title": "review's item diff sweeps in other items' commits made between the item's first and last",
+  "type": "fix",
+  "tier": "2",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "In progress",
+  "depends": [],
+  "touch": [
+    "optional/runtime/sdlc.py",
+    "tests/smoke.py"
+  ],
+  "created": "2026-11-26",
+  "updated": "2026-11-26",
+  "completed": "",
+  "summary": "",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}

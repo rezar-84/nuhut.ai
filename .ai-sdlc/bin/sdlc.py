@@ -2299,9 +2299,13 @@ def item_diff(project, item, base=None):
                       "the working tree" % item)
     if base:
         return project.git("diff", base), None
-    oldest, newest = commits[-1], commits[0]
-    start = oldest[1] or project.git("hash-object", "-t", "tree", "/dev/null").strip()
-    return project.git("diff", start, newest[0]), None
+    # Only the item's own commits, oldest first: a range from its first commit to its
+    # last would also carry other items' work committed in between.
+    empty = project.git("hash-object", "-t", "tree", "/dev/null").strip()
+    parts = []
+    for sha, parent, _ in reversed(commits):
+        parts.append("# commit %s\n%s" % (sha[:12], project.git("diff", parent or empty, sha)))
+    return "\n".join(parts), None
 
 
 def item_tier(project, item):

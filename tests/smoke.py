@@ -4300,6 +4300,31 @@ def test_skill_routing():
     shutil.rmtree(d, ignore_errors=True)
 
 
+def test_review_diff_scope():
+    print("review: the diff holds the item's own commits, not other items' work between them")
+    sys.path.insert(0, os.path.join(ROOT, "optional", "runtime"))
+    import sdlc as runtime
+    sys.path.pop(0)
+    d = tempfile.mkdtemp(prefix="sdlc-revdiff-")
+    repo = os.path.join(d, "repo")
+    os.makedirs(repo)
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+    subprocess.call(["git", "init", "-q", "-b", "main", repo])
+    code, out = run([repo, "RDS", "-y"])
+    check("review-diff repo installs", code == 0, out[-300:])
+    subprocess.call(["git", "add", "-A"], cwd=repo)
+    subprocess.call(git + ["commit", "-qm", "chore: kit"], cwd=repo)
+    for name, item in (("mine_one.py", "RDS-1"), ("theirs.py", "RDS-2"), ("mine_two.py", "RDS-1")):
+        write(repo, name, "x = 1\n")
+        subprocess.call(["git", "add", name], cwd=repo)
+        subprocess.call(git + ["commit", "-qm", "feat(%s): %s\n\nWork-Item: %s" % (item, name, item)], cwd=repo)
+    diff, err = runtime.item_diff(runtime.Project(repo), "RDS-1")
+    check("the item's diff holds both of its commits", err is None and "mine_one.py" in (diff or "")
+          and "mine_two.py" in (diff or ""), diff or err)
+    check("another item's commit between them is left out", "theirs.py" not in (diff or ""), diff or "")
+    shutil.rmtree(d, ignore_errors=True)
+
+
 def test_worktree_scripts():
     print("worktree scripts: setup on claim and dispatch, teardown on release, a port per worktree")
     d = tempfile.mkdtemp(prefix="sdlc-wtscripts-")
@@ -9653,6 +9678,7 @@ def main():
                  test_tier1_approval_count_and_local_approval, test_severity_downgrade_rule,
                  test_checker_fallback, test_adopt_detected_commands, test_fast_verify,
                  test_hooks_command, test_finish_commit, test_skill_routing,
+                 test_review_diff_scope,
                  test_release_records, test_unclaim_alias,
                  test_command_table,
                  test_github_approvals,
