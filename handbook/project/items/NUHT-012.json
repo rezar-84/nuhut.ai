@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "qa",
-  "status": "Ready",
+  "status": "Parked",
   "depends": [],
   "touch": [
     "optional/runtime/finish.py",
@@ -13,12 +13,20 @@
     "tests/smoke.py"
   ],
   "created": "2026-11-22",
-  "updated": "2026-11-22",
+  "updated": "2026-11-26",
   "completed": "",
   "summary": "Owner (rezar-84) directed implementation of the v6 roadmap on kit-v6 on 2026-11-22; merge to main stays a human approval",
-  "approvers": [],
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "charter",
+      "commit": "",
+      "at": ""
+    }
+  ],
   "waiting_on": "rezar-84",
-  "park_reason": "Tightens a Tier 1 governance gate (AGENTS.md section 9)",
+  "park_reason": "merge approval (Tier 1): 0 of 1 (charter fallback)",
   "unblock_by": "",
   "later_when": "",
   "dropped_reason": ""
