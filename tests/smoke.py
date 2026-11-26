@@ -4106,9 +4106,10 @@ def test_fast_verify():
     # A newer failing run on some stages blocks finish even after an older full pass
     # (NUHT-012 retro review, finding 2): FST-2 passed every stage above; lint now fails.
     code, out = sdlc("verify", "--item", "FST-2", "--stage", "lint")
+    check("the --stage lint run fails", code != 0 and "`checks.lint` | Verified: fail" in out, out[-800:])
     code, out = sdlc("finish", "FST-2", "--dry-run")
     check("a newer failing --stage run blocks finish after an older full pass",
-          "verify   pass" not in out and "fail" in out, out)
+          "verify   pass" not in out and re.search(r"verify +.*fail", out) is not None, out)
     shutil.rmtree(d, ignore_errors=True)
 
 
@@ -8413,11 +8414,32 @@ def test_github_approvals():
           and sorted(a.get("handle") for a in res.get("approvers", [])) == ["alice", "bob"], out)
     code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh")], state="MERGED"))
     check("a merged PR whose head is the local branch still counts", code == 0 and res.get("met") is True, out)
-    bad = pr([rv("alice-gh"), rv("bob-gh")])
-    bad["author"] = None
-    code, out, res = approvals(bad)
-    check("a PR with no readable author counts no GitHub review (NUHT-024 retro, finding 3)",
-          code == 1 and res.get("met") is False and "pr-author-unknown" in str(res.get("note")), out)
+    for label, author in (("null", None), ("absent", "-"), ("empty login", {"login": ""})):
+        bad = pr([rv("alice-gh"), rv("bob-gh")])
+        if author == "-":
+            bad.pop("author")
+        else:
+            bad["author"] = author
+        code, out, res = approvals(bad)
+        check("a PR whose author is %s counts no GitHub review (NUHT-024 retro, finding 3)" % label,
+              code == 1 and res.get("met") is False and "pr-author-unknown" in str(res.get("note"))
+              and not [a for a in res.get("approvers", []) if a.get("source") == "github"], out)
+    # Review condition 1: an unreadable tier needs Tier 1 approvals (finding 4). The shard
+    # loader normalises a tier on its own, so approvals() is called with one directly.
+    bindir = os.path.join(repo, ".ai-sdlc", "bin")
+    sys.path.insert(0, bindir)
+    try:
+        import importlib
+        import sdlc as _rt
+        importlib.reload(_rt)
+        _fin = _rt.runtime_module("finish")
+        res = _fin.approvals(_rt, _rt.Project(repo), "APR-1", tier="x",
+                             run=lambda *a, **k: subprocess.CompletedProcess(a, 1, b"", b"no gh"))
+    finally:
+        sys.path.remove(bindir)
+    check("an unreadable tier is judged as Tier 1 and needs approvals (finding 4)",
+          res is not None and res.get("tier") == "1" and res.get("required", 0) >= 1
+          and res.get("met") is False, json.dumps(res, default=str)[:600])
 
     code, out, res = approvals(pr([rv("alice-gh"), rv("bob-gh", oid="0" * 40)]))
     check("an approval of an older commit is stale and does not count",
