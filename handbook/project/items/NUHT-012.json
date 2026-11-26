@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "qa",
-  "status": "Parked",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/finish.py",
@@ -14,19 +14,19 @@
   ],
   "created": "2026-11-22",
   "updated": "2026-11-26",
-  "completed": "",
+  "completed": "2026-11-26",
   "summary": "Owner (rezar-84) directed implementation of the v6 roadmap on kit-v6 on 2026-11-22; merge to main stays a human approval",
   "approvers": [
     {
       "handle": "rezar-84",
       "login": "",
-      "source": "charter",
-      "commit": "",
-      "at": ""
+      "source": "local",
+      "commit": "fae512846658cd273166669fd096259d76d179da",
+      "at": "2026-11-26T06:56:45Z"
     }
   ],
-  "waiting_on": "rezar-84",
-  "park_reason": "merge approval (Tier 1): 0 of 1 (charter fallback)",
+  "waiting_on": "",
+  "park_reason": "",
   "unblock_by": "",
   "later_when": "",
   "dropped_reason": "",
@@ -35,6 +35,12 @@
       "handle": "rezar-84",
       "commit": "f7a725ccbe8bdc29704663d0c91c2e6f047f7ae2",
       "at": "2026-11-26T06:09:43Z",
+      "as": "reza"
+    },
+    {
+      "handle": "rezar-84",
+      "commit": "fae512846658cd273166669fd096259d76d179da",
+      "at": "2026-11-26T06:56:45Z",
       "as": "reza"
     }
   ]
