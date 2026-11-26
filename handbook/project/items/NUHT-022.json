@@ -5,19 +5,27 @@
   "tier": "1",
   "effort": "",
   "owner": "devops-sre",
-  "status": "Ready",
+  "status": "Parked",
   "depends": [],
   "touch": [
     "optional/runtime/sdlc.py",
     "install.py"
   ],
   "created": "2026-11-22",
-  "updated": "2026-11-22",
+  "updated": "2026-11-26",
   "completed": "",
   "summary": "",
-  "approvers": [],
-  "waiting_on": "",
-  "park_reason": "",
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "charter",
+      "commit": "",
+      "at": ""
+    }
+  ],
+  "waiting_on": "rezar-84",
+  "park_reason": "merge approval (Tier 1): 0 of 1 (charter fallback)",
   "unblock_by": "",
   "later_when": "v6 Phase 2 (team): after v6.0 ships",
   "dropped_reason": ""
