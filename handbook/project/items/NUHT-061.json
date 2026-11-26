@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "qa",
-  "status": "In progress",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/finish.py",
@@ -14,12 +14,28 @@
   ],
   "created": "2026-11-26",
   "updated": "2026-11-26",
-  "completed": "",
+  "completed": "2026-11-26",
   "summary": "",
-  "approvers": [],
+  "approvers": [
+    {
+      "handle": "rezar-84",
+      "login": "",
+      "source": "local",
+      "commit": "8f5287adcc522413598a60ae2d680ab397183c80",
+      "at": "2026-11-26T06:10:09Z"
+    }
+  ],
   "waiting_on": "",
   "park_reason": "",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "8f5287adcc522413598a60ae2d680ab397183c80",
+      "at": "2026-11-26T06:10:09Z",
+      "as": "reza"
+    }
+  ]
 }
