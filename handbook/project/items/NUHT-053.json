@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Parked",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/sdlc.py",
@@ -14,21 +14,29 @@
     "tests/smoke.py"
   ],
   "created": "2026-11-25",
-  "updated": "2026-11-25",
-  "completed": "",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
   "summary": "",
   "approvers": [
     {
       "handle": "rezar-84",
       "login": "",
-      "source": "charter",
-      "commit": "",
-      "at": ""
+      "source": "local",
+      "commit": "d15f6caba67ae07bac7e5fcb372bf852442d57f8",
+      "at": "2026-11-26T06:10:05Z"
     }
   ],
-  "waiting_on": "rezar-84",
-  "park_reason": "merge approval (Tier 1): 0 of 2 (charter fallback)",
+  "waiting_on": "",
+  "park_reason": "",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "d15f6caba67ae07bac7e5fcb372bf852442d57f8",
+      "at": "2026-11-26T06:10:05Z",
+      "as": "reza"
+    }
+  ]
 }
