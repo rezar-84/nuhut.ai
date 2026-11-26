@@ -5,7 +5,7 @@
   "tier": "1",
   "effort": "",
   "owner": "software-engineer",
-  "status": "Parked",
+  "status": "Done",
   "depends": [],
   "touch": [
     "optional/runtime/finish.py",
@@ -13,21 +13,29 @@
     "optional/runtime/shards.py"
   ],
   "created": "2026-11-23",
-  "updated": "2026-11-25",
-  "completed": "",
+  "updated": "2026-11-26",
+  "completed": "2026-11-26",
   "summary": "Owner decisions 2026-11-23: approver count per project config (1 or 2); finding 18 resolved to the safer rule",
   "approvers": [
     {
       "handle": "rezar-84",
       "login": "",
-      "source": "charter",
-      "commit": "",
-      "at": ""
+      "source": "local",
+      "commit": "49d279d39ee269d9be328bc872720d3709917bc3",
+      "at": "2026-11-26T06:09:58Z"
     }
   ],
-  "waiting_on": "rezar-84",
-  "park_reason": "merge approval (Tier 1): 0 of 2 (charter fallback)",
+  "waiting_on": "",
+  "park_reason": "",
   "unblock_by": "",
   "later_when": "",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "49d279d39ee269d9be328bc872720d3709917bc3",
+      "at": "2026-11-26T06:09:58Z",
+      "as": "reza"
+    }
+  ]
 }
