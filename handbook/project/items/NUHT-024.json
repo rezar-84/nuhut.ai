@@ -29,5 +29,13 @@
   "park_reason": "merge approval (Tier 1): 0 of 1 (charter fallback)",
   "unblock_by": "",
   "later_when": "v6 Phase 2 (team): after v6.0 ships",
-  "dropped_reason": ""
+  "dropped_reason": "",
+  "local_approvals": [
+    {
+      "handle": "rezar-84",
+      "commit": "eea8e9d2d5eec7f9e51b04a8e9a9017d4ebe1ec2",
+      "at": "2026-11-26T06:09:51Z",
+      "as": "reza"
+    }
+  ]
 }
