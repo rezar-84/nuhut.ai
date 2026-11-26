@@ -4,6 +4,30 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+### Highlights
+
+6.0 is about trust and speed: what the kit checks is bound to the item and the default
+branch, and the everyday loop is faster and quieter.
+
+- **Evidence and approvals bind to the work.** `finish` accepts only a verify run on the
+  item's own code; approvers, `people.json` and other trusted rows are read from the
+  default branch, so a branch cannot approve itself. Tier 1 needs 1 or 2 approvals (charter
+  row), from GitHub PR reviews or, opt-in, `sdlc.py approve` in a person's terminal.
+- **Faster loop.** Fast verify (`Verify at finish: fast: <stages>`) for Tier 2 and 3 items,
+  `finish --commit` to commit the records, `tests/run.py --fast` for the kit's own suite.
+- **Hooks that stop crying wolf.** Commit checks run as git hooks; `sdlc.py hooks
+  list|on|off` explains and switches each guard.
+- **Defects and releases.** `sdlc.py bug` with severities; open S0/S1 defects block
+  `deploy record`; `deploy record|list` keeps a release ledger.
+- **Extensions.** Agent tools are manifests; `sdlc.py ext` adds project extensions with
+  pinned code; built-ins for OpenCode, Kiro, ACP and GitHub issue sync.
+- **More to see.** `sdlc.py status` (what to do next), `ci-check` on any git host, `view
+  --serve --host` for remote viewing, DORA metrics, an MCP server for the records, webhook
+  notifications.
+- **Supply chain.** GitHub Actions pinned to commit hashes, with Dependabot.
+
+Read **Upgrading to 6.0** below before upgrading a 5.x project.
+
 ### Upgrading to 6.0
 
 - **Commits are attributed by trailer only.** Items committed without a `Work-Item:` trailer lose their commits; `doctor` reports how many. Fix: commit further work with the trailer (`sdlc.py trailers <ID>`).

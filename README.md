@@ -209,6 +209,19 @@ record and setting, adds new charter rows, and backs up what it changes. A 3.x p
 [CHANGELOG.md](CHANGELOG.md) has the migration notes. The kit itself is versioned
 automatically from its commits, with semantic versioning.
 
+### What's new in 6.0
+
+- `finish` trusts only evidence bound to the item, and approvers read from the default
+  branch. Solo projects can set **Tier 1 approvals** to `1`.
+- Fast verify for Tier 2 and 3 (`Verify at finish: fast: lint, unit`), and
+  `finish --commit` to commit the item's records in one step.
+- Commit checks run as git hooks; `sdlc.py hooks list|on|off` explains and switches each.
+- `sdlc.py status`, `bug`, `deploy`, `ext` and `ci-check` on any git host.
+
+Before upgrading a 5.x project, read
+[Upgrading to 6.0](CHANGELOG.md#upgrading-to-60): commits now count only with a
+`Work-Item:` trailer, and the **Approvers** row must be filled.
+
 ## How it compares
 
 Spec-driven tools (GitHub Spec Kit, OpenSpec, Kiro) answer *what should this feature do*.

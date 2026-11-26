@@ -1,6 +1,6 @@
 # Roadmap, findings and known gaps
 
-Updated 2026-11-25, on `kit-v6` before the 6.0.0 release. The 4.x findings below are kept
+Updated 2026-11-26, on `kit-v6` as it goes to the 6.0.0 release. The 4.x findings below are kept
 as written on 2026-10-31. This page records why the work was done, what comes next, and
 what is still missing. The full plan behind it was reviewed
 against the kit's own goals in [design.md](design.md) before any code was written.
@@ -59,11 +59,12 @@ already make small work cheap, once the checks respect them.
 | Dashboard | Done (`97871c4`) | Needs you pages and groups; the cards are balanced. |
 | Software Factory (`kit-v5`) | Done (`kit-v5`) | Unified Python stdlib hooks (`hooks.py`, Gemini Stop guard, zero `jq`); hardened `view --serve` (`HttpOnly` cookie + `Origin` check); sharded zero-conflict store (`items/`, `worklog/`, `ledger/`, `fix migrate-shards`); `--sync-refs` git-ref CAS leases + `next-id`; `<500ms` incremental `doctor` cache; `sdlc.py dispatch`; `Discovered defects` triage policy; multi-harness `kit-value` and 5-task `effort-modes` benchmarks. |
 | Release `v5.0.0` | Done (`04970a6`) | `kit-v5` merged to `main`; the Version workflow bumped `VERSION` and tagged `v5.0.0`. |
-| v5.0.x, make the claims true | Built on `kit-v6` | Version drift (NUHT-011), shell-write guards (NUHT-013) and `install.sh` (NUHT-015) are Done. Binding verify evidence (NUHT-012) and the release pipeline (NUHT-014) are built and wait for Tier 1 approval. |
-| v6.0, extension system | Built on `kit-v6`; ADR 0003 Proposed | Built-in tools as extensions, `ext` CLI, plugin wrappers, command table (NUHT-017 to NUHT-021 Done). The manifest and loader (NUHT-016) wait for Tier 1 approval. |
-| v6.0, team and delivery | Built on `kit-v6` | People, shard merge driver, `status`, deploy ledger, hotfix path, DORA metrics are Done (NUHT-023, 025, 026, 028, 029). `ci-check`, GitHub approvals and release records (NUHT-022, 024, 027) are built and wait for Tier 1 approval. |
-| v6.0, integrations | Built on `kit-v6` | Issue sync, MCP server, worktree scripts, standards discovery, webhooks (NUHT-030 to NUHT-034 Done). See [landscape.md](landscape.md). |
-| Release `v6.0.0` | Waiting | ADR 0004 (the trust boundary, NUHT-049) needs the owner's decision. After it, the open escalations on the Tier 1 items are decided in one sitting, the items close, and `kit-v6` merges to `main`. |
+| v5.0.x, make the claims true | Done | Version drift (NUHT-011), shell-write guards (NUHT-013), `install.sh` (NUHT-015), binding verify evidence (NUHT-012) and the release pipeline (NUHT-014). |
+| v6.0, extension system | Done; ADR 0003 | Manifest and loader (NUHT-016), built-in tools as extensions, `ext` CLI, plugin wrappers, command table (NUHT-017 to NUHT-021). |
+| v6.0, team and delivery | Done | People, shard merge driver, `status`, deploy ledger, hotfix path, DORA metrics, `ci-check`, GitHub approvals and release records (NUHT-022 to NUHT-029). |
+| v6.0, integrations | Done | Issue sync, MCP server, worktree scripts, standards discovery, webhooks (NUHT-030 to NUHT-034). See [landscape.md](landscape.md). |
+| v6.0, speed and trust | Done; ADR 0004 | Fast verify (NUHT-053), git-hook commit checks and `hooks on/off` (NUHT-055), `finish --commit` (NUHT-057), skill routing check (NUHT-059), pinned Actions (NUHT-046), approval and evidence fixes (NUHT-060, 061, 063). |
+| Release `v6.0.0` | Releasing | Every Tier 1 item is approved and Done. `kit-v6` merges to `main`; the Version workflow tags `v6.0.0` once CI passes. |
 | After 6.0 | Planned | Run the kit-value benchmark before any 6.x feature (NUHT-036). A fresh `-y` install with zero `doctor` warnings. A routing eval for skills. "Red flags" and "When not to use" sections in every skill. No new gates inside the agent's environment until the benchmark has run. |
 
 ### Trial (next)
