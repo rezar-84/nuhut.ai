@@ -111,11 +111,14 @@ jobs:
             exit 1
           fi
           test "$(python3 tools/semver.py bump)" = "$v"
-          python3 validate.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add VERSION CHANGELOG.md .claude-plugin/plugin.json AGENTS.md .ai-sdlc/manifest.json .ai-sdlc/profile.json
           git commit -m "chore(release): v$v [skip ci]"
+          # Validate the release commit, not the uncommitted bump: until the bump is committed,
+          # semver next reads the new VERSION as current and judges against the release after
+          # it. A failure here stops before the tag and the push, so nothing leaves the runner.
+          python3 validate.py
           git tag -a "v$v" -m "v$v"
           # Atomic: the release commit and its tag land together or not at all. A push that
           # lost a race with a newer commit on main fails here instead of overwriting it.

@@ -5080,6 +5080,15 @@ def test_release_workflow():
     check("the release job is skipped when the level is none",
           re.search(r"needs\.plan\.outputs\.level\s*!=\s*'none'", text) is not None)
     check("an existing tag fails the release cleanly", "already exists" in text)
+    # Before the bump is committed, semver next still counts the released commits and reads
+    # the new VERSION as current, so validate.py would judge against the release after this
+    # one (v6.0.0 failed this way). Validate the release commit itself, before tag and push.
+    step = text.split("name: Bump, tag and publish", 1)[-1]
+    commit_at, tag_at = step.find('git commit -m "chore(release)'), step.find('git tag -a')
+    check("the release job validates the committed release, before tagging",
+          commit_at != -1 and tag_at != -1
+          and "python3 validate.py" not in step[:commit_at]
+          and "python3 validate.py" in step[commit_at:tag_at])
     refs = []
     for base, dirs, files in os.walk(ROOT):
         dirs[:] = [x for x in dirs if x not in (".git", ".claude", "node_modules", "worklog", "plans",
