@@ -9,7 +9,7 @@ tier's list below sends you there.
 **If this file conflicts with another document, this file wins**, except a hard safety
 rule (evidence, security, data loss) in `handbook/process/`.
 
-<!-- Nuhut kit v5.0.0. Section 9 is project-owned. -->
+<!-- Nuhut kit v6.0.0. Section 9 is project-owned. -->
 
 ---
 

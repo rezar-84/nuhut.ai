@@ -4,6 +4,8 @@ This project follows semantic versioning. User-visible changes are recorded here
 
 ## Unreleased
 
+## 6.0.0 — 2026-11-27
+
 ### Highlights
 
 6.0 is about trust and speed: what the kit checks is bound to the item and the default

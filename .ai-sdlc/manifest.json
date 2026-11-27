@@ -114,9 +114,9 @@
     "handbook/templates/user-stories.md": "4ac3a79ef4e05c317a44b8dcf4648ed988e10a36c93948546f1e5655b0bb8876",
     "handbook/templates/worklog-entry.md": "33bfc2c55534371968f43b847bf7f1d86834749ff23e45c84500685426252ce6"
   },
-  "kit_version": "5.0.0",
+  "kit_version": "6.0.0",
   "regions": {
-    "AGENTS.md": "4dafe5f726ffbc8eecbf7030e163086fd2677fabab6d1991cbb8f01aded8b802"
+    "AGENTS.md": "33920cfd6347960607250a3f88b76a2288ed84b454f072b3c975a6b4af8d4a80"
   },
   "schema": 1
 }
