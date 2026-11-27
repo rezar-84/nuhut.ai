@@ -1,0 +1,23 @@
+{
+  "id": "NUHT-066",
+  "title": "Release job validates the release commit, not the uncommitted bump",
+  "type": "fix",
+  "tier": "1",
+  "effort": "",
+  "owner": "software-engineer",
+  "status": "In progress",
+  "depends": [],
+  "touch": [
+    ".github/workflows/version.yml"
+  ],
+  "created": "2026-11-27",
+  "updated": "2026-11-27",
+  "completed": "",
+  "summary": "v6.0.0 never released: validate.py ran between semver bump and commit, so semver next read 6.0.0 as current and computed 7.0.0, failing the extension-range check. Run validate after the release commit, before tag and push.",
+  "approvers": [],
+  "waiting_on": "",
+  "park_reason": "",
+  "unblock_by": "",
+  "later_when": "",
+  "dropped_reason": ""
+}
